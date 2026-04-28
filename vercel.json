@@ -5,6 +5,10 @@
   "framework": "vite",
   "rewrites": [
     {
+      "source": "/ping",
+      "destination": "/ping.json"
+    },
+    {
       "source": "/(.*)",
       "destination": "/index.html"
     }

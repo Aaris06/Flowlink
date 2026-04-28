@@ -59,14 +59,19 @@ setInterval(() => {
 
 // Create HTTP server for health checks
 const server = createServer((req, res) => {
-  if (req.url === '/health') {
+  // CORS headers for all routes
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET');
+
+  if (req.url === '/health' || req.url === '/ping') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ 
-      status: 'healthy', 
+      status: 'ok',
+      service: 'flowlink-backend',
       sessions: sessions.size,
       connections: deviceConnections.size,
-      globalDevices: globalDevices.size,
-      uptime: process.uptime()
+      uptime: Math.floor(process.uptime()),
+      timestamp: new Date().toISOString()
     }));
   } else if (req.url === '/debug') {
     // Debug endpoint to see device registry state

@@ -8,7 +8,7 @@
  */
 function getSignalingWsUrl(): string {
   const envUrl = (import.meta as any)?.env?.VITE_SIGNALING_URL as string | undefined;
-  return envUrl || 'ws://localhost:8080';
+  return envUrl || 'wss://flowlink-1.onrender.com';
 }
 
 export const SIGNALING_WS_URL = getSignalingWsUrl();
