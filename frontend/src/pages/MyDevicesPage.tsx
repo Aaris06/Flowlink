@@ -266,7 +266,7 @@ export default function MyDevicesPage({ ctx }: Props) {
                 key={device.id}
                 device={device}
                 draggedItem={draggedItem}
-                onDragStart={(e, item) => setDraggedItem(item)}
+                onDragStart={(_e, item) => setDraggedItem(item)}
                 onDragEnd={() => setDraggedItem(null)}
                 transferStatus={transfers[device.id]}
                 onDrop={(intent) => handleDeviceDrop(intent, device.id)}

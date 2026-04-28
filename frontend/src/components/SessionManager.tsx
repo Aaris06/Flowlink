@@ -41,14 +41,14 @@ export default function SessionManager({
   };
 
   useEffect(() => {
-    const handleJoinFromInvitation = (event: CustomEvent) => joinSessionWithCode(event.detail.sessionCode);
-    const handleSessionMessage = (event: CustomEvent) => handleWebSocketMessage(event.detail.message);
-    window.addEventListener('joinSessionFromInvitation', handleJoinFromInvitation as EventListener);
-    window.addEventListener('sessionMessage', handleSessionMessage as EventListener);
+    const handleJoinFromInvitation = (event: Event) => joinSessionWithCode((event as CustomEvent).detail.sessionCode);
+    const handleSessionMessage = (event: Event) => handleWebSocketMessage((event as CustomEvent).detail.message);
+    window.addEventListener('joinSessionFromInvitation', handleJoinFromInvitation);
+    window.addEventListener('sessionMessage', handleSessionMessage);
     return () => {
       wsRef.current?.close();
-      window.removeEventListener('joinSessionFromInvitation', handleJoinFromInvitation as EventListener);
-      window.removeEventListener('sessionMessage', handleSessionMessage as EventListener);
+      window.removeEventListener('joinSessionFromInvitation', handleJoinFromInvitation);
+      window.removeEventListener('sessionMessage', handleSessionMessage);
     };
   }, [sessionCode]);
 

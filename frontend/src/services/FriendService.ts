@@ -112,7 +112,7 @@ class FriendService {
     }));
 
     // Update inbox
-    const inbox = this.getInbox().map(r => r.id === req.id ? { ...r, status: accepted ? 'accepted' : 'rejected' as const } : r);
+    const inbox = this.getInbox().map(r => r.id === req.id ? { ...r, status: (accepted ? 'accepted' : 'rejected') as 'accepted' | 'rejected' } : r);
     this.saveInbox(inbox);
 
     // Add to friends if accepted
@@ -172,7 +172,7 @@ class FriendService {
   }
 
   // ── Incoming message handler (call from App.tsx WS handler) ──────────────
-  handleIncoming(message: any, myUsername: string, myDeviceId: string) {
+  handleIncoming(message: any, myUsername: string, _myDeviceId: string) {
     if (message.type === 'friend_request') {
       const p = message.payload;
       // Don't add if already in inbox or already friends
