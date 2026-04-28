@@ -8,19 +8,97 @@ import { PermissionType, PermissionSet } from '@shared/types';
  * - Visual indicators
  * - Auto-revoke on session expiry
  * - Read-only defaults
+ * 
+ * CRITICAL: Real permission enforcement for notifications, camera, storage, microphone
  */
 export default class PermissionEngine {
   private devicePermissions: Map<string, PermissionSet> = new Map();
   private permissionCallbacks: Map<string, (granted: boolean) => void> = new Map();
+  
+  // System permissions state (notifications, camera, storage, microphone)
+  private systemPermissions: {
+    notifications: boolean;
+    camera: boolean;
+    storage: boolean;
+    microphone: boolean;
+  } = {
+    notifications: true,
+    camera: true,
+    storage: true,
+    microphone: true,
+  };
+
+  constructor() {
+    // Load system permissions from localStorage
+    this.loadSystemPermissions();
+  }
 
   /**
-   * Request permission from a device
+   * Load system permissions from localStorage
+   */
+  private loadSystemPermissions(): void {
+    try {
+      const stored = localStorage.getItem('flowlink_system_permissions');
+      if (stored) {
+        this.systemPermissions = JSON.parse(stored);
+      }
+    } catch (e) {
+      console.error('Failed to load system permissions:', e);
+    }
+  }
+
+  /**
+   * Save system permissions to localStorage
+   */
+  private saveSystemPermissions(): void {
+    try {
+      localStorage.setItem('flowlink_system_permissions', JSON.stringify(this.systemPermissions));
+    } catch (e) {
+      console.error('Failed to save system permissions:', e);
+    }
+  }
+
+  /**
+   * Check if a system permission is granted
+   */
+  hasSystemPermission(permission: 'notifications' | 'camera' | 'storage' | 'microphone'): boolean {
+    return this.systemPermissions[permission];
+  }
+
+  /**
+   * Set a system permission
+   */
+  setSystemPermission(permission: 'notifications' | 'camera' | 'storage' | 'microphone', granted: boolean): void {
+    this.systemPermissions[permission] = granted;
+    this.saveSystemPermissions();
+    
+    // Dispatch event for UI updates
+    window.dispatchEvent(new CustomEvent('system_permission_changed', {
+      detail: { permission, granted },
+    }));
+  }
+
+  /**
+   * Get all system permissions
+   */
+  getSystemPermissions() {
+    return { ...this.systemPermissions };
+  }
+
+  /**
+   * CRITICAL FIX #2: Enhanced permission request with persistent storage
+   * Matches mobile app permission structure
    */
   async requestPermission(
     deviceId: string,
     permissionType: PermissionType,
     reason?: string
   ): Promise<boolean> {
+    // Check if already granted
+    if (this.hasPermission(deviceId, permissionType)) {
+      return true;
+    }
+
     return new Promise((resolve) => {
       const requestId = `${deviceId}-${permissionType}-${Date.now()}`;
       
@@ -69,7 +147,7 @@ export default class PermissionEngine {
   }
 
   /**
-   * Grant permission
+   * Grant permission and persist to localStorage
    */
   grantPermission(deviceId: string, permissionType: PermissionType): void {
     const permissions = this.devicePermissions.get(deviceId) || {
@@ -82,6 +160,15 @@ export default class PermissionEngine {
 
     permissions[permissionType] = true;
     this.devicePermissions.set(deviceId, permissions);
+
+    // CRITICAL FIX #2: Persist to localStorage like mobile app
+    try {
+      const stored = JSON.parse(localStorage.getItem('flowlink_permissions') || '{}');
+      stored[deviceId] = permissions;
+      localStorage.setItem('flowlink_permissions', JSON.stringify(stored));
+    } catch (e) {
+      console.error('Failed to persist permissions:', e);
+    }
 
     // Dispatch event for UI updates
     window.dispatchEvent(new CustomEvent('permission_changed', {
@@ -122,10 +209,26 @@ export default class PermissionEngine {
   }
 
   /**
-   * Get all permissions for a device
+   * Get all permissions for a device (load from localStorage if not in memory)
    */
   getPermissions(deviceId: string): PermissionSet {
-    return this.devicePermissions.get(deviceId) || {
+    // Try memory first
+    let permissions = this.devicePermissions.get(deviceId);
+    
+    // CRITICAL FIX #2: Load from localStorage if not in memory
+    if (!permissions) {
+      try {
+        const stored = JSON.parse(localStorage.getItem('flowlink_permissions') || '{}');
+        permissions = stored[deviceId];
+        if (permissions) {
+          this.devicePermissions.set(deviceId, permissions);
+        }
+      } catch (e) {
+        console.error('Failed to load permissions:', e);
+      }
+    }
+    
+    return permissions || {
       files: false,
       media: false,
       prompts: false,

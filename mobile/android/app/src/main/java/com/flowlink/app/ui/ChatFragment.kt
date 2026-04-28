@@ -47,8 +47,10 @@ class ChatFragment : Fragment() {
         if (granted) startVoiceRecording() else Toast.makeText(requireContext(), "Microphone permission needed", Toast.LENGTH_SHORT).show()
     }
 
-    // Access persistent list from MainActivity
-    private val chatMessages: MutableList<ChatMessage> get() = (activity as? MainActivity)?.chatMessages ?: mutableListOf()
+    // Access persistent list from MainActivity — cached to avoid null during recreation
+    private val chatMessages: MutableList<ChatMessage>
+        get() = (activity as? MainActivity)?.chatMessages ?: _localChatMessages
+    private val _localChatMessages = mutableListOf<ChatMessage>()
 
     private val pickFileLauncher = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
         uri ?: return@registerForActivityResult
@@ -70,7 +72,7 @@ class ChatFragment : Fragment() {
             val selfId = sessionManager?.getDeviceId() ?: return@registerForActivityResult
             val messageId = "mob-file-${System.currentTimeMillis()}"
             val msg = ChatMessage(
-                messageId = messageId, text = "📎 $name",
+                messageId = messageId, text = "",  // empty text - file card shows instead
                 username = sessionManager?.getUsername().orEmpty(),
                 sourceDevice = selfId, targetDevice = "",
                 sentAt = System.currentTimeMillis(), delivered = false, seen = false,
@@ -81,6 +83,7 @@ class ChatFragment : Fragment() {
                 replyToUsername = replyToMessage?.username
             )
             chatMessages.add(msg)
+            (activity as? MainActivity)?.saveChatMessages()
             chatAdapter?.notifyItemInserted(chatMessages.size - 1)
             binding.rvChatMessages.scrollToPosition(chatMessages.size - 1)
             clearReply()
@@ -141,7 +144,9 @@ class ChatFragment : Fragment() {
         )
         binding.rvChatMessages.adapter = chatAdapter
         chatAdapter?.attachSwipeToReply(binding.rvChatMessages)
+        // Show all existing messages immediately (persisted from MainActivity)
         if (chatMessages.isNotEmpty()) {
+            chatAdapter?.notifyDataSetChanged()
             binding.rvChatMessages.scrollToPosition(chatMessages.size - 1)
         }
 
@@ -184,23 +189,12 @@ class ChatFragment : Fragment() {
             mainActivity.webSocketManager.chatEvents.collect { event ->
                 when (event) {
                     is WebSocketManager.ChatEvent.Message -> {
-                        val msg = ChatMessage(
-                            messageId = event.messageId, text = event.text,
-                            username = event.username, sourceDevice = event.sourceDevice,
-                            targetDevice = event.targetDevice, sentAt = event.sentAt,
-                            delivered = true, seen = true,
-                            fileId = event.fileId, fileName = event.fileName,
-                            fileType = event.fileType, fileSize = event.fileSize,
-                            fileData = event.fileData,
-                            replyToId = event.replyToId, replyToText = event.replyToText,
-                            replyToUsername = event.replyToUsername
-                        )
-                        // Avoid duplicates
-                        if (chatMessages.none { it.messageId == event.messageId }) {
-                            chatMessages.add(msg)
-                            chatAdapter?.notifyItemInserted(chatMessages.size - 1)
-                            binding.rvChatMessages.scrollToPosition(chatMessages.size - 1)
+                        // MainActivity already added it to chatMessages — just notify adapter
+                        val idx = chatMessages.indexOfFirst { it.messageId == event.messageId }
+                        if (idx >= 0) {
+                            chatAdapter?.notifyItemChanged(idx)
                         }
+                        binding.rvChatMessages.scrollToPosition(chatMessages.size - 1)
                         val readReceipts = prefs.getBoolean("read_receipts", true)
                         if (readReceipts) {
                             mainActivity.webSocketManager.sendChatReceipt("chat_seen", event.messageId, event.sourceDevice)
@@ -219,6 +213,14 @@ class ChatFragment : Fragment() {
                         }
                     }
                 }
+            }
+        }
+
+        // Also observe newMessageEvent from MainActivity for messages added while fragment was away
+        viewLifecycleOwner.lifecycleScope.launch {
+            mainActivity.newMessageEvent.collect { insertedIndex ->
+                chatAdapter?.notifyItemInserted(insertedIndex)
+                binding.rvChatMessages.scrollToPosition(chatMessages.size - 1)
             }
         }
     }
@@ -273,24 +275,133 @@ class ChatFragment : Fragment() {
             Toast.makeText(ctx, "No file data available", Toast.LENGTH_SHORT).show()
             return
         }
-        try {
-            val bytes = android.util.Base64.decode(data, android.util.Base64.DEFAULT)
-            val downloadsDir = android.os.Environment.getExternalStoragePublicDirectory(
-                android.os.Environment.DIRECTORY_DOWNLOADS)
-            val dir = File(downloadsDir, "FlowLink")
-            dir.mkdirs()
-            val file = File(dir, msg.fileName ?: "flowlink-file")
-            file.writeBytes(bytes)
-            val uri = FileProvider.getUriForFile(ctx, "${BuildConfig.APPLICATION_ID}.fileprovider", file)
-            val intent = Intent(Intent.ACTION_VIEW).apply {
-                setDataAndType(uri, msg.fileType ?: "*/*")
-                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+        val fileName = msg.fileName ?: "flowlink-file"
+        val isImage = msg.fileType?.startsWith("image") == true ||
+            fileName.substringAfterLast('.').lowercase() in listOf("jpg","jpeg","png","gif","webp","bmp")
+
+        viewLifecycleOwner.lifecycleScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            try {
+                val bytes = android.util.Base64.decode(data, android.util.Base64.DEFAULT)
+
+                // Save to app cache dir - always accessible via FileProvider
+                val cacheDir = File(ctx.cacheDir, "chat_files").also { it.mkdirs() }
+                val file = File(cacheDir, fileName)
+                file.writeBytes(bytes)
+
+                // Also save to Downloads via MediaStore (Android 10+) or direct write
+                try {
+                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                        val values = android.content.ContentValues().apply {
+                            put(android.provider.MediaStore.Downloads.DISPLAY_NAME, fileName)
+                            put(android.provider.MediaStore.Downloads.MIME_TYPE, msg.fileType ?: "*/*")
+                            put(android.provider.MediaStore.Downloads.IS_PENDING, 1)
+                        }
+                        val resolver = ctx.contentResolver
+                        val uri = resolver.insert(android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+                        if (uri != null) {
+                            resolver.openOutputStream(uri)?.use { it.write(bytes) }
+                            values.clear()
+                            values.put(android.provider.MediaStore.Downloads.IS_PENDING, 0)
+                            resolver.update(uri, values, null, null)
+                        }
+                    } else {
+                        val dlDir = android.os.Environment.getExternalStoragePublicDirectory(
+                            android.os.Environment.DIRECTORY_DOWNLOADS)
+                        val dlFile = File(File(dlDir, "FlowLink").also { it.mkdirs() }, fileName)
+                        dlFile.writeBytes(bytes)
+                    }
+                } catch (_: Exception) { /* Downloads save failed, still open from cache */ }
+
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                    if (isImage) {
+                        // Show image in full screen dialog
+                        showImageFullScreen(bytes, fileName)
+                    } else {
+                        // Open file with appropriate app
+                        val uri = androidx.core.content.FileProvider.getUriForFile(
+                            ctx, "${ctx.packageName}.fileprovider", file)
+                        val intent = android.content.Intent(android.content.Intent.ACTION_VIEW).apply {
+                            setDataAndType(uri, msg.fileType ?: "*/*")
+                            addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                                     android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                        }
+                        try {
+                            startActivity(android.content.Intent.createChooser(intent, "Open $fileName"))
+                        } catch (_: Exception) {
+                            Toast.makeText(ctx, "No app to open this file type", Toast.LENGTH_SHORT).show()
+                        }
+                        Toast.makeText(ctx, "Saved to Downloads/FlowLink", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            } catch (e: Exception) {
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                    Toast.makeText(ctx, "Download failed: ${e.message}", Toast.LENGTH_LONG).show()
+                }
             }
-            startActivity(Intent.createChooser(intent, "Open ${msg.fileName}"))
-            Toast.makeText(ctx, "Saved to Downloads/FlowLink", Toast.LENGTH_SHORT).show()
-        } catch (e: Exception) {
-            Toast.makeText(ctx, "Download failed: ${e.message}", Toast.LENGTH_SHORT).show()
         }
+    }
+
+    private fun showImageFullScreen(bytes: ByteArray, fileName: String) {
+        val ctx = requireContext()
+        val bitmap = android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: run {
+            Toast.makeText(ctx, "Cannot display image", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val dialog = android.app.Dialog(ctx, android.R.style.Theme_Black_NoTitleBar_Fullscreen)
+        val imageView = android.widget.ImageView(ctx).apply {
+            setImageBitmap(bitmap)
+            scaleType = android.widget.ImageView.ScaleType.FIT_CENTER
+            setBackgroundColor(android.graphics.Color.BLACK)
+        }
+        // Download button overlay
+        val layout = android.widget.FrameLayout(ctx)
+        layout.addView(imageView, android.widget.FrameLayout.LayoutParams(
+            android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
+            android.widget.FrameLayout.LayoutParams.MATCH_PARENT))
+        val dlBtn = android.widget.Button(ctx).apply {
+            text = "⬇ Save to Downloads"
+            setBackgroundColor(android.graphics.Color.parseColor("#1D4ED8"))
+            setTextColor(android.graphics.Color.WHITE)
+            setPadding(32, 16, 32, 16)
+        }
+        val dlParams = android.widget.FrameLayout.LayoutParams(
+            android.widget.FrameLayout.LayoutParams.WRAP_CONTENT,
+            android.widget.FrameLayout.LayoutParams.WRAP_CONTENT).apply {
+            gravity = android.view.Gravity.BOTTOM or android.view.Gravity.CENTER_HORIZONTAL
+            bottomMargin = 80
+        }
+        layout.addView(dlBtn, dlParams)
+        dlBtn.setOnClickListener {
+            try {
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                    val values = android.content.ContentValues().apply {
+                        put(android.provider.MediaStore.Images.Media.DISPLAY_NAME, fileName)
+                        put(android.provider.MediaStore.Images.Media.MIME_TYPE, "image/*")
+                        put(android.provider.MediaStore.Images.Media.IS_PENDING, 1)
+                    }
+                    val resolver = ctx.contentResolver
+                    val uri = resolver.insert(android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
+                    if (uri != null) {
+                        resolver.openOutputStream(uri)?.use { it.write(bytes) }
+                        values.clear()
+                        values.put(android.provider.MediaStore.Images.Media.IS_PENDING, 0)
+                        resolver.update(uri, values, null, null)
+                        Toast.makeText(ctx, "Saved to Gallery", Toast.LENGTH_SHORT).show()
+                    }
+                } else {
+                    val dlDir = android.os.Environment.getExternalStoragePublicDirectory(
+                        android.os.Environment.DIRECTORY_PICTURES)
+                    File(File(dlDir, "FlowLink").also { it.mkdirs() }, fileName).writeBytes(bytes)
+                    Toast.makeText(ctx, "Saved to Pictures/FlowLink", Toast.LENGTH_SHORT).show()
+                }
+            } catch (e: Exception) {
+                Toast.makeText(ctx, "Save failed: ${e.message}", Toast.LENGTH_SHORT).show()
+            }
+        }
+        // Tap anywhere to close
+        imageView.setOnClickListener { dialog.dismiss() }
+        dialog.setContentView(layout)
+        dialog.show()
     }
 
     private fun sendTypingState(isTyping: Boolean) {
@@ -379,7 +490,7 @@ class ChatFragment : Fragment() {
 
                     kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
                         val msg = ChatMessage(
-                            messageId = messageId, text = "🎙 Voice message",
+                            messageId = messageId, text = "",  // empty - voice card shows
                             username = sessionManager?.getUsername().orEmpty(),
                             sourceDevice = selfId, targetDevice = "",
                             sentAt = System.currentTimeMillis(), delivered = false, seen = false,
@@ -387,6 +498,7 @@ class ChatFragment : Fragment() {
                             fileSize = fileSize, fileData = base64
                         )
                         chatMessages.add(msg)
+                        (activity as? MainActivity)?.saveChatMessages()
                         chatAdapter?.notifyItemInserted(chatMessages.size - 1)
                         binding.rvChatMessages.scrollToPosition(chatMessages.size - 1)
                         Toast.makeText(requireContext(), "Voice message sent", Toast.LENGTH_SHORT).show()

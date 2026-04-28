@@ -57,8 +57,81 @@ class MainActivity : AppCompatActivity(), UsernameDialogFragment.UsernameDialogL
     private var clipboardSyncEnabled = false
     private var pendingScreenShareViewerDeviceId: String? = null
     
-    // Persistent chat messages (survives fragment recreation)
+    // Persistent chat messages (survives fragment recreation and app restart)
     val chatMessages = mutableListOf<ChatMessage>()
+    // Notify ChatFragment when a new message arrives while it's open
+    val newMessageEvent = kotlinx.coroutines.flow.MutableSharedFlow<Int>(extraBufferCapacity = 32)
+    
+    // Load chat messages from SharedPreferences
+    private fun loadChatMessages() {
+        try {
+            val prefs = getSharedPreferences("flowlink_chat", Context.MODE_PRIVATE)
+            val sessionId = sessionManager.getCurrentSessionId() ?: return
+            val json = prefs.getString("chat_$sessionId", null) ?: return
+            
+            val jsonArray = JSONArray(json)
+            chatMessages.clear()
+            for (i in 0 until jsonArray.length()) {
+                val obj = jsonArray.getJSONObject(i)
+                chatMessages.add(ChatMessage(
+                    messageId = obj.getString("messageId"),
+                    text = obj.optString("text", ""),
+                    username = obj.getString("username"),
+                    sourceDevice = obj.getString("sourceDevice"),
+                    targetDevice = obj.getString("targetDevice"),
+                    sentAt = obj.getLong("sentAt"),
+                    delivered = obj.optBoolean("delivered", false),
+                    seen = obj.optBoolean("seen", false),
+                    fileId = if (obj.has("fileId")) obj.getString("fileId") else null,
+                    fileName = if (obj.has("fileName")) obj.getString("fileName") else null,
+                    fileType = if (obj.has("fileType")) obj.getString("fileType") else null,
+                    fileSize = obj.optLong("fileSize", 0L),
+                    fileData = if (obj.has("fileData")) obj.getString("fileData") else null,
+                    replyToId = if (obj.has("replyToId")) obj.getString("replyToId") else null,
+                    replyToText = if (obj.has("replyToText")) obj.getString("replyToText") else null,
+                    replyToUsername = if (obj.has("replyToUsername")) obj.getString("replyToUsername") else null
+                ))
+            }
+            android.util.Log.d("FlowLink", "Loaded ${chatMessages.size} chat messages from storage")
+        } catch (e: Exception) {
+            android.util.Log.e("FlowLink", "Failed to load chat messages", e)
+        }
+    }
+    
+    // Save chat messages to SharedPreferences
+    fun saveChatMessages() {
+        try {
+            val prefs = getSharedPreferences("flowlink_chat", Context.MODE_PRIVATE)
+            val sessionId = sessionManager.getCurrentSessionId() ?: return
+            
+            val jsonArray = JSONArray()
+            chatMessages.takeLast(200).forEach { msg ->
+                jsonArray.put(JSONObject().apply {
+                    put("messageId", msg.messageId)
+                    put("text", msg.text)
+                    put("username", msg.username)
+                    put("sourceDevice", msg.sourceDevice)
+                    put("targetDevice", msg.targetDevice)
+                    put("sentAt", msg.sentAt)
+                    put("delivered", msg.delivered)
+                    put("seen", msg.seen)
+                    msg.fileId?.let { put("fileId", it) }
+                    msg.fileName?.let { put("fileName", it) }
+                    msg.fileType?.let { put("fileType", it) }
+                    put("fileSize", msg.fileSize)
+                    msg.fileData?.let { put("fileData", it) }
+                    msg.replyToId?.let { put("replyToId", it) }
+                    msg.replyToText?.let { put("replyToText", it) }
+                    msg.replyToUsername?.let { put("replyToUsername", it) }
+                })
+            }
+            
+            prefs.edit().putString("chat_$sessionId", jsonArray.toString()).apply()
+            android.util.Log.d("FlowLink", "Saved ${chatMessages.size} chat messages to storage")
+        } catch (e: Exception) {
+            android.util.Log.e("FlowLink", "Failed to save chat messages", e)
+        }
+    }
     
     private val clipboardReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -224,15 +297,23 @@ class MainActivity : AppCompatActivity(), UsernameDialogFragment.UsernameDialogL
                                 replyToUsername = event.replyToUsername
                             )
                         )
+                        newMessageEvent.tryEmit(chatMessages.size - 1)
+                        saveChatMessages() // Save after adding new message
                     }
                 }
                 if (event is WebSocketManager.ChatEvent.Delivered) {
                     val idx = chatMessages.indexOfFirst { it.messageId == event.messageId }
-                    if (idx >= 0) chatMessages[idx] = chatMessages[idx].copy(delivered = true)
+                    if (idx >= 0) {
+                        chatMessages[idx] = chatMessages[idx].copy(delivered = true)
+                        saveChatMessages() // Save after status update
+                    }
                 }
                 if (event is WebSocketManager.ChatEvent.Seen) {
                     val idx = chatMessages.indexOfFirst { it.messageId == event.messageId }
-                    if (idx >= 0) chatMessages[idx] = chatMessages[idx].copy(delivered = true, seen = true)
+                    if (idx >= 0) {
+                        chatMessages[idx] = chatMessages[idx].copy(delivered = true, seen = true)
+                        saveChatMessages() // Save after status update
+                    }
                 }
             }
         }
@@ -321,19 +402,47 @@ class MainActivity : AppCompatActivity(), UsernameDialogFragment.UsernameDialogL
         
         android.util.Log.d("FlowLink", "onResume: code=$currentCode, sessionId=$currentSessionId, active=$hasActiveSession, connectionState=$connectionState")
         
+        // Load chat messages from storage when app resumes
+        if (hasActiveSession && currentSessionId != null) {
+            loadChatMessages()
+        }
+        
+        // CRITICAL FIX #1: Always reconnect WebSocket when app comes to foreground
+        // This ensures device stays connected even after backgrounding
+        if (hasActiveSession && currentCode != null) {
+            if (connectionState is WebSocketManager.ConnectionState.Disconnected || 
+                connectionState is WebSocketManager.ConnectionState.Error) {
+                android.util.Log.d("FlowLink", "Reconnecting WebSocket on resume with code: $currentCode")
+                webSocketManager.connect(currentCode)
+            } else if (connectionState is WebSocketManager.ConnectionState.Connected) {
+                // Even if connected, re-register device to ensure backend knows we're active
+                android.util.Log.d("FlowLink", "Re-registering device on resume")
+                webSocketManager.sendMessage(org.json.JSONObject().apply {
+                    put("type", "device_register")
+                    put("payload", org.json.JSONObject().apply {
+                        put("deviceId", sessionManager.getDeviceId())
+                        put("deviceName", sessionManager.getDeviceName())
+                        put("deviceType", sessionManager.getDeviceType())
+                        put("username", sessionManager.getUsername())
+                    })
+                    put("timestamp", System.currentTimeMillis())
+                }.toString())
+            }
+        }
+        
         // If we have a session but are showing SessionManagerFragment, navigate to DeviceTiles
         val currentFragment = supportFragmentManager.findFragmentById(R.id.fragment_container)
         if (hasActiveSession && currentCode != null && currentSessionId != null && currentFragment is SessionManagerFragment) {
             android.util.Log.d("FlowLink", "Restoring DeviceTiles view for existing session")
             showDeviceTiles(currentSessionId)
         }
-        // If we have a session but WebSocket is disconnected, reconnect
-        if (hasActiveSession && currentCode != null && 
-            (connectionState is WebSocketManager.ConnectionState.Disconnected || 
-             connectionState is WebSocketManager.ConnectionState.Error)) {
-            android.util.Log.d("FlowLink", "Reconnecting WebSocket on resume with code: $currentCode")
-            webSocketManager.connect(currentCode)
-        }
+    }
+    
+    override fun onPause() {
+        super.onPause()
+        // Don't disconnect WebSocket when app goes to background
+        // Let it maintain connection for receiving invitations and messages
+        android.util.Log.d("FlowLink", "onPause: Keeping WebSocket connected in background")
     }
 
     override fun onNewIntent(intent: Intent?) {

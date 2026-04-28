@@ -1,11 +1,16 @@
 package com.flowlink.app.ui
 
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.Color
+import android.graphics.drawable.GradientDrawable
+import android.util.Base64
 import android.view.Gravity
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.recyclerview.widget.ItemTouchHelper
@@ -33,6 +38,9 @@ class ChatMessageAdapter(
         val tvReplyPreview: TextView = itemView.findViewById(R.id.tv_reply_preview)
         // File card
         val fileCard: LinearLayout = itemView.findViewById(R.id.file_card)
+        val ivImagePreview: ImageView = itemView.findViewById(R.id.iv_image_preview)
+        val fileRow: LinearLayout = itemView.findViewById(R.id.file_row)
+        val fileIconBg: View = itemView.findViewById(R.id.file_icon_bg)
         val tvFileTypeBadge: TextView = itemView.findViewById(R.id.tv_file_type_badge)
         val tvFileNameBubble: TextView = itemView.findViewById(R.id.tv_file_name_bubble)
         val tvFileMetaBubble: TextView = itemView.findViewById(R.id.tv_file_meta_bubble)
@@ -66,26 +74,53 @@ class ChatMessageAdapter(
         if (msg.fileId != null && msg.fileName != null) {
             holder.fileCard.visibility = View.VISIBLE
             holder.tvMessageText.visibility = View.GONE
-            val isVoice = msg.fileType?.startsWith("audio") == true || msg.fileName.endsWith(".m4a") || msg.fileName.startsWith("voice_")
-            val ext = msg.fileName.substringAfterLast('.', "").uppercase().take(4)
-            if (isVoice) {
-                holder.tvFileTypeBadge.text = "🎙"
-                holder.tvFileNameBubble.text = "Voice message"
-                val sizeStr = if (msg.fileSize > 0) formatBytes(msg.fileSize) else ""
-                holder.tvFileMetaBubble.text = "Audio · $sizeStr · Tap ▶ to play"
-            } else {
-                holder.tvFileTypeBadge.text = ext.ifEmpty { "FILE" }
-                holder.tvFileNameBubble.text = msg.fileName
-                val sizeStr = if (msg.fileSize > 0) " · ${formatBytes(msg.fileSize)}" else ""
-                val typeLabel = when {
-                    msg.fileType?.startsWith("image") == true -> "Image"
-                    msg.fileType?.startsWith("video") == true -> "Video"
-                    msg.fileType?.startsWith("audio") == true -> "Audio"
-                    else -> ext.ifEmpty { "File" }
+
+            val ext = msg.fileName.substringAfterLast('.', "").lowercase()
+            val isImage = msg.fileType?.startsWith("image") == true ||
+                          ext in listOf("jpg", "jpeg", "png", "gif", "webp", "bmp")
+            val isVoice = msg.fileType?.startsWith("audio") == true ||
+                          ext in listOf("m4a", "mp3", "ogg", "wav") ||
+                          msg.fileName.startsWith("voice_")
+
+            if (isImage && msg.fileData != null) {
+                // Show image preview inline (WhatsApp style)
+                holder.ivImagePreview.visibility = View.VISIBLE
+                holder.fileRow.visibility = View.VISIBLE
+                try {
+                    val bytes = Base64.decode(msg.fileData, Base64.DEFAULT)
+                    val bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                    holder.ivImagePreview.setImageBitmap(bmp)
+                } catch (e: Exception) {
+                    holder.ivImagePreview.visibility = View.GONE
                 }
-                holder.tvFileMetaBubble.text = "$typeLabel$sizeStr"
+                holder.tvFileTypeBadge.text = "🖼"
+                setIconColor(holder.fileIconBg, "#00BCD4")
+                holder.tvFileNameBubble.text = msg.fileName
+                val sizeStr = if (msg.fileSize > 0) formatBytes(msg.fileSize) else ""
+                holder.tvFileMetaBubble.text = "${ext.uppercase()} · $sizeStr"
+            } else {
+                holder.ivImagePreview.visibility = View.GONE
+                holder.fileRow.visibility = View.VISIBLE
+
+                if (isVoice) {
+                    holder.tvFileTypeBadge.text = "🎙"
+                    setIconColor(holder.fileIconBg, "#9C27B0")
+                    holder.tvFileNameBubble.text = "Voice message"
+                    val sizeStr = if (msg.fileSize > 0) formatBytes(msg.fileSize) else ""
+                    holder.tvFileMetaBubble.text = "Audio · $sizeStr"
+                } else {
+                    val (letter, color) = getFileIconInfo(ext)
+                    holder.tvFileTypeBadge.text = letter
+                    setIconColor(holder.fileIconBg, color)
+                    holder.tvFileNameBubble.text = msg.fileName
+                    val sizeStr = if (msg.fileSize > 0) " · ${formatBytes(msg.fileSize)}" else ""
+                    holder.tvFileMetaBubble.text = "${ext.uppercase()}$sizeStr"
+                }
             }
+
             holder.btnFileDownload.setOnClickListener { onFileDownload(msg) }
+            // Tap image to view full screen
+            holder.ivImagePreview.setOnClickListener { onFileDownload(msg) }
         } else {
             holder.fileCard.visibility = View.GONE
             holder.tvMessageText.visibility = View.VISIBLE
@@ -100,15 +135,14 @@ class ChatMessageAdapter(
             holder.bubble.setBackgroundResource(R.drawable.chat_bubble_self)
             holder.tvMessageText.setTextColor(Color.WHITE)
             holder.tvTicks.visibility = View.VISIBLE
-            // ✓ = sent, ✓✓ grey = delivered, ✓✓ blue = seen
             holder.tvTicks.text = when {
                 msg.seen -> "✓✓"
                 msg.delivered -> "✓✓"
                 else -> "✓"
             }
             holder.tvTicks.setTextColor(
-                if (msg.seen) Color.parseColor("#60A5FA")   // blue ticks
-                else Color.parseColor("#AAFFFFFF")           // grey ticks
+                if (msg.seen) Color.parseColor("#60A5FA")
+                else Color.parseColor("#AAFFFFFF")
             )
         } else {
             holder.rootLayout.gravity = Gravity.START
@@ -119,11 +153,31 @@ class ChatMessageAdapter(
             holder.tvTicks.visibility = View.GONE
         }
 
-        // Long press to reply
-        holder.bubble.setOnLongClickListener {
-            onReply(msg)
-            true
+        holder.bubble.setOnLongClickListener { onReply(msg); true }
+    }
+
+    // Returns (letter, hex color) for file type icon - matches WhatsApp style
+    private fun getFileIconInfo(ext: String): Pair<String, String> = when (ext) {
+        "pdf"                       -> Pair("P", "#F44336") // red
+        "doc", "docx"               -> Pair("W", "#2196F3") // blue (Word)
+        "xls", "xlsx"               -> Pair("X", "#4CAF50") // green (Excel)
+        "ppt", "pptx"               -> Pair("P", "#FF5722") // deep orange (PowerPoint)
+        "txt"                       -> Pair("T", "#607D8B") // grey
+        "zip", "rar", "7z", "tar"   -> Pair("Z", "#795548") // brown
+        "mp4", "mkv", "avi", "mov"  -> Pair("▶", "#9C27B0") // purple (video)
+        "mp3", "wav", "ogg", "m4a"  -> Pair("♪", "#009688") // teal (audio)
+        "apk"                       -> Pair("A", "#4CAF50") // green
+        else                        -> Pair("F", "#607D8B") // grey default
+    }
+
+    // Set rounded background color on the icon view
+    private fun setIconColor(view: View, hexColor: String) {
+        val drawable = GradientDrawable().apply {
+            shape = GradientDrawable.RECTANGLE
+            cornerRadius = 10f
+            setColor(Color.parseColor(hexColor))
         }
+        view.background = drawable
     }
 
     override fun getItemCount(): Int = messages.size
@@ -136,16 +190,13 @@ class ChatMessageAdapter(
         }
     }
 
-    /** Attach swipe-to-reply gesture to the RecyclerView */
     fun attachSwipeToReply(recyclerView: RecyclerView) {
         val callback = object : ItemTouchHelper.SimpleCallback(0, ItemTouchHelper.RIGHT) {
             override fun onMove(rv: RecyclerView, vh: RecyclerView.ViewHolder, t: RecyclerView.ViewHolder) = false
             override fun onSwiped(viewHolder: RecyclerView.ViewHolder, direction: Int) {
                 val pos = viewHolder.adapterPosition
-                if (pos != RecyclerView.NO_ID.toInt() && pos < messages.size) {
-                    onReply(messages[pos])
-                }
-                notifyItemChanged(pos) // reset swipe
+                if (pos != RecyclerView.NO_ID.toInt() && pos < messages.size) onReply(messages[pos])
+                notifyItemChanged(pos)
             }
             override fun getSwipeThreshold(viewHolder: RecyclerView.ViewHolder) = 0.3f
         }

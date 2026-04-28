@@ -469,9 +469,19 @@ class NotificationService(private val context: Context) {
         } catch (_: Exception) {}
 
         // Show notification with alarm sound
-        val mapIntent = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(mapsUrl))
+        val safeUrl = if (mapsUrl.isNotBlank() && !mapsUrl.contains("?q=0.0,0.0")) mapsUrl
+                      else "https://www.google.com/maps"
+        val mapIntent = android.content.Intent(android.content.Intent.ACTION_VIEW,
+            android.net.Uri.parse(safeUrl)).apply {
+            addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+            setPackage("com.google.android.apps.maps")  // prefer Google Maps
+        }
+        // Fallback if Google Maps not installed
+        val chooserIntent = android.content.Intent.createChooser(mapIntent, "Open location").apply {
+            addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
         val pendingIntent = PendingIntent.getActivity(
-            context, 9999, mapIntent,
+            context, 9999, chooserIntent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
         val notification = NotificationCompat.Builder(context, CHANNEL_ID_SOS)

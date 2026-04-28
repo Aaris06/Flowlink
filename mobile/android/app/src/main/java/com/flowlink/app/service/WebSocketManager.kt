@@ -763,9 +763,27 @@ class WebSocketManager(private val mainActivity: MainActivity) {
                     val chat = payload.optJSONObject("chat") ?: return
                     val messageId = chat.optString("messageId", "")
                     val title = chat.optString("username", "Chat")
-                    val text = chat.optString("text", "")
                     val sourceDevice = payload.optString("sourceDevice", "")
                     val sentAt = chat.optLong("sentAt", System.currentTimeMillis())
+
+                    // Normalize: laptop sends attachment:{name,type,size,data}
+                    // Mobile sends flat: fileId,fileName,fileType,fileSize,fileData
+                    val attachment = chat.optJSONObject("attachment")
+                    val fileId   = chat.optString("fileId").ifEmpty { null }
+                        ?: attachment?.let { messageId }
+                    val fileName = chat.optString("fileName").ifEmpty { null }
+                        ?: attachment?.optString("name")?.ifEmpty { null }
+                    val fileType = chat.optString("fileType").ifEmpty { null }
+                        ?: attachment?.optString("type")?.ifEmpty { null }
+                    val fileSize = if (chat.has("fileSize")) chat.optLong("fileSize", 0L)
+                        else attachment?.optLong("size", 0L) ?: 0L
+                    val fileData = chat.optString("fileData").ifEmpty { null }
+                        ?: attachment?.optString("data")?.ifEmpty { null }
+
+                    // Clean up text: remove "📎 filename" prefix if it's a file message
+                    val rawText = chat.optString("text", "")
+                    val text = if (fileName != null && rawText == "📎 $fileName") "" else rawText
+
                     _chatEvents.tryEmit(
                         ChatEvent.Message(
                             messageId = messageId,
@@ -774,17 +792,17 @@ class WebSocketManager(private val mainActivity: MainActivity) {
                             sourceDevice = sourceDevice,
                             targetDevice = sessionManager.getDeviceId(),
                             sentAt = sentAt,
-                            fileId = chat.optString("fileId").ifEmpty { null },
-                            fileName = chat.optString("fileName").ifEmpty { null },
-                            fileType = chat.optString("fileType").ifEmpty { null },
-                            fileSize = chat.optLong("fileSize", 0L),
-                            fileData = chat.optString("fileData").ifEmpty { null },
+                            fileId = fileId,
+                            fileName = fileName,
+                            fileType = fileType,
+                            fileSize = fileSize,
+                            fileData = fileData,
                             replyToId = chat.optString("replyToId").ifEmpty { null },
                             replyToText = chat.optString("replyToText").ifEmpty { null },
                             replyToUsername = chat.optString("replyToUsername").ifEmpty { null }
                         )
                     )
-                    val notifText = if (chat.has("fileName")) "📎 ${chat.optString("fileName")}" else text
+                    val notifText = if (fileName != null) "📎 $fileName" else text
                     mainActivity.notificationService.showNotification(title, notifText)
                 }
                 "chat_read" -> {
@@ -869,9 +887,14 @@ class WebSocketManager(private val mainActivity: MainActivity) {
                         etaSeconds = etaSeconds,
                         startedAt = startedAt,
                     )
+                    mainActivity.notificationService.showFileTransferProgress(fileName, progress, direction, transferredBytes, totalBytes)
                     if (progress >= 100) {
                         mainActivity.notificationService.clearTransferProgress()
-                        _fileTransferProgress.value = null
+                        // Delay null so UI can show 100% briefly
+                        scope.launch {
+                            kotlinx.coroutines.delay(1500)
+                            _fileTransferProgress.value = null
+                        }
                     }
                 }
                 "file_transfer_start" -> {
@@ -985,7 +1008,10 @@ class WebSocketManager(private val mainActivity: MainActivity) {
                     )
                     // Transfer complete — clear progress after brief delay so tile shows 100%
                     mainActivity.notificationService.clearTransferProgress()
-                    _fileTransferProgress.value = null
+                    scope.launch {
+                        kotlinx.coroutines.delay(1500)
+                        _fileTransferProgress.value = null
+                    }
                     sendMessage(JSONObject().apply {
                         put("type", "file_transfer_ack")
                         put("sessionId", sessionManager.getCurrentSessionId())

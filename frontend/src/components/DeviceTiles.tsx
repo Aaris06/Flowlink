@@ -123,6 +123,7 @@ export default function DeviceTiles({
   const [isCollaboratedView, setIsCollaboratedView] = useState(false);
   const [isCollabQrOpen, setIsCollabQrOpen] = useState(false);
   const [isStudyFullscreen, setIsStudyFullscreen] = useState(false);
+  const [showPermissionsPanel, setShowPermissionsPanel] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
   const webrtcManagerRef = useRef<WebRTCManager | null>(null);
   const intentRouterRef = useRef<IntentRouter | null>(null);
@@ -1801,6 +1802,8 @@ export default function DeviceTiles({
     const container = pdfScrollRef.current;
     if (!container) return;
     let cancelled = false;
+    // Save scroll position before re-render
+    const savedScroll = container.scrollTop;
     const render = async () => {
       container.innerHTML = '';
       pdfPageRefs.current.clear();
@@ -1841,20 +1844,14 @@ export default function DeviceTiles({
           sendStudyAnchor(anchor);
         });
         wrapper.appendChild(canvas);
-        studyHighlights
-          .filter((anchor) => anchor.page === pageNum)
-          .forEach((anchor) => {
-            const marker = document.createElement('div');
-            marker.className = 'study-highlight-anchor';
-            marker.style.left = `${anchor.xPercent ?? 50}%`;
-            marker.style.top = `${anchor.yPercent}%`;
-            marker.style.width = `${anchor.widthPercent ?? 10}%`;
-            marker.style.height = `${anchor.heightPercent ?? 2.4}%`;
-            marker.title = anchor.text;
-            wrapper.appendChild(marker);
-          });
         container.appendChild(wrapper);
         pdfPageRefs.current.set(pageNum, wrapper);
+      }
+      // Restore scroll position after re-render
+      if (savedScroll > 0) {
+        suppressStudyScrollSyncRef.current = true;
+        container.scrollTop = savedScroll;
+        window.setTimeout(() => { suppressStudyScrollSyncRef.current = false; }, 200);
       }
     };
     void render();
@@ -1863,7 +1860,32 @@ export default function DeviceTiles({
       if (container) container.innerHTML = '';
       pdfPageRefs.current.clear();
     };
-  }, [studyPdfDataUrl, activeStudyTab, studyHighlight, deviceId, studyZoom, studyHighlights]);
+    // Only re-render when URL, tab, or zoom changes — NOT on highlight/note/anchor changes
+  }, [studyPdfDataUrl, activeStudyTab, studyZoom, deviceId]);
+
+  // Separate effect: update highlight anchors on top of existing canvases without re-rendering
+  useEffect(() => {
+    if (!studyPdfDataUrl || activeStudyTab !== 'room') return;
+    // Remove old anchor markers and re-add without clearing canvases
+    pdfPageRefs.current.forEach((wrapper, pageNum) => {
+      // Remove existing anchor markers
+      const existing = wrapper.querySelectorAll('.study-highlight-anchor');
+      existing.forEach((el) => el.remove());
+      // Add current anchors
+      studyHighlights
+        .filter((anchor) => anchor.page === pageNum)
+        .forEach((anchor) => {
+          const marker = document.createElement('div');
+          marker.className = 'study-highlight-anchor';
+          marker.style.left = `${anchor.xPercent ?? 50}%`;
+          marker.style.top = `${anchor.yPercent}%`;
+          marker.style.width = `${anchor.widthPercent ?? 10}%`;
+          marker.style.height = `${anchor.heightPercent ?? 2.4}%`;
+          marker.title = anchor.text;
+          wrapper.appendChild(marker);
+        });
+    });
+  }, [studyHighlights, studyPdfDataUrl, activeStudyTab]);
 
   const handleDragStart = (e: React.DragEvent, item: any) => {
     setDraggedItem(item);
@@ -2453,6 +2475,9 @@ export default function DeviceTiles({
             Chat {chatUnreadCount > 0 ? `(${chatUnreadCount})` : ''}
           </button>
         )}
+        <button className="floating-collab-button" onClick={() => setShowPermissionsPanel(true)}>
+          🔒 Permissions
+        </button>
         <button className="floating-collab-button" onClick={() => setIsCollaboratedView((prev) => !prev)}>
           Collaborated View
         </button>
@@ -2608,6 +2633,66 @@ export default function DeviceTiles({
         isOpen={showInvitationPanel}
         onClose={() => setShowInvitationPanel(false)}
       />
+
+      {/* Permissions Panel */}
+      {showPermissionsPanel && (
+        <div className="invitation-panel-overlay" onClick={() => setShowPermissionsPanel(false)}>
+          <div
+            style={{
+              background: 'rgba(255,255,255,0.97)',
+              border: '1px solid rgba(148,163,184,0.35)',
+              borderRadius: '20px',
+              padding: '1.75rem',
+              width: 'min(420px, 92vw)',
+              backdropFilter: 'blur(16px)',
+              boxShadow: '0 20px 50px rgba(30,41,59,0.18)',
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
+              <h3 style={{ margin: 0, fontSize: '1.1rem', color: '#0f172a', fontWeight: 700 }}>🔒 Browser Permissions</h3>
+              <button
+                onClick={() => setShowPermissionsPanel(false)}
+                style={{ border: 'none', background: 'rgba(148,163,184,0.15)', borderRadius: '8px', width: '28px', height: '28px', cursor: 'pointer', fontSize: '1rem', color: '#475569' }}
+              >×</button>
+            </div>
+            <p style={{ fontSize: '0.82rem', color: '#64748b', marginBottom: '1rem', marginTop: 0 }}>
+              Grant browser permissions for FlowLink features
+            </p>
+            {[
+              { key: 'notifications', label: '🔔 Notifications', desc: 'Receive alerts for invitations and messages', api: () => Notification.requestPermission() },
+              { key: 'camera', label: '📷 Camera', desc: 'For QR code scanning', api: () => navigator.mediaDevices.getUserMedia({ video: true }) },
+              { key: 'microphone', label: '🎤 Microphone', desc: 'For voice messages and calls', api: () => navigator.mediaDevices.getUserMedia({ audio: true }) },
+              { key: 'storage', label: '📁 Storage', desc: 'For saving received files', api: null },
+              { key: 'location', label: '📍 Location', desc: 'For SOS alerts', api: () => new Promise((res, rej) => navigator.geolocation.getCurrentPosition(res, rej)) },
+            ].map(({ key, label, desc, api }) => (
+              <div key={key} style={{ display: 'flex', alignItems: 'center', gap: '0.85rem', padding: '0.85rem', background: 'rgba(248,250,252,0.9)', border: '1px solid rgba(148,163,184,0.22)', borderRadius: '12px', marginBottom: '0.6rem' }}>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontWeight: 700, fontSize: '0.9rem', color: '#0f172a' }}>{label}</div>
+                  <div style={{ fontSize: '0.75rem', color: '#64748b', marginTop: '2px' }}>{desc}</div>
+                </div>
+                {key === 'storage' ? (
+                  <span style={{ fontSize: '0.75rem', color: '#16a34a', fontWeight: 600 }}>✅ Auto</span>
+                ) : (
+                  <button
+                    onClick={async () => {
+                      try {
+                        await api?.();
+                        alert(`${label} permission granted!`);
+                      } catch {
+                        alert(`${label} permission denied or not available.`);
+                      }
+                    }}
+                    style={{ background: 'linear-gradient(135deg, #6C63FF, #4A42CC)', color: '#fff', border: 'none', borderRadius: '9px', padding: '0.4rem 0.85rem', fontWeight: 700, fontSize: '0.78rem', cursor: 'pointer' }}
+                  >
+                    Request
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

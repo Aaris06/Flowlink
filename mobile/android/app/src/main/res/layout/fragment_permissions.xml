@@ -90,6 +90,13 @@
                         android:textSize="12sp" />
                 </LinearLayout>
 
+                <androidx.appcompat.widget.SwitchCompat
+                    android:id="@+id/switch_notif_permission"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:checked="false"
+                    android:enabled="false" />
+
                 <Button
                     android:id="@+id/btn_notif_permission"
                     android:layout_width="wrap_content"
@@ -99,7 +106,8 @@
                     android:textColor="#FFFFFF"
                     android:textAllCaps="false"
                     android:background="@drawable/btn_primary_bg"
-                    android:paddingHorizontal="12dp" />
+                    android:paddingHorizontal="12dp"
+                    android:visibility="gone" />
             </LinearLayout>
 
             <!-- Camera -->
@@ -135,6 +143,13 @@
                         android:textSize="12sp" />
                 </LinearLayout>
 
+                <androidx.appcompat.widget.SwitchCompat
+                    android:id="@+id/switch_camera_permission"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:checked="false"
+                    android:enabled="false" />
+
                 <Button
                     android:id="@+id/btn_camera_permission"
                     android:layout_width="wrap_content"
@@ -144,7 +159,8 @@
                     android:textColor="#FFFFFF"
                     android:textAllCaps="false"
                     android:background="@drawable/btn_primary_bg"
-                    android:paddingHorizontal="12dp" />
+                    android:paddingHorizontal="12dp"
+                    android:visibility="gone" />
             </LinearLayout>
 
             <!-- Storage -->
@@ -180,6 +196,13 @@
                         android:textSize="12sp" />
                 </LinearLayout>
 
+                <androidx.appcompat.widget.SwitchCompat
+                    android:id="@+id/switch_storage_permission"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:checked="false"
+                    android:enabled="false" />
+
                 <Button
                     android:id="@+id/btn_storage_permission"
                     android:layout_width="wrap_content"
@@ -189,7 +212,8 @@
                     android:textColor="#FFFFFF"
                     android:textAllCaps="false"
                     android:background="@drawable/btn_primary_bg"
-                    android:paddingHorizontal="12dp" />
+                    android:paddingHorizontal="12dp"
+                    android:visibility="gone" />
             </LinearLayout>
 
             <!-- Microphone -->
@@ -224,6 +248,13 @@
                         android:textSize="12sp" />
                 </LinearLayout>
 
+                <androidx.appcompat.widget.SwitchCompat
+                    android:id="@+id/switch_mic_permission"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:checked="false"
+                    android:enabled="false" />
+
                 <Button
                     android:id="@+id/btn_mic_permission"
                     android:layout_width="wrap_content"
@@ -233,7 +264,8 @@
                     android:textColor="#FFFFFF"
                     android:textAllCaps="false"
                     android:background="@drawable/btn_primary_bg"
-                    android:paddingHorizontal="12dp" />
+                    android:paddingHorizontal="12dp"
+                    android:visibility="gone" />
             </LinearLayout>
         </LinearLayout>
 

@@ -225,6 +225,7 @@ class DeviceTilesFragment : Fragment() {
                         completed = progress.progress >= 100
                     )
                     updateDeviceList()
+                    // CRITICAL FIX #7: Increased delay from 1200ms to 3000ms so user can see completion
                     if (progress.progress >= 100 || progress.transferredBytes >= progress.totalBytes) {
                         val clearRunnable = Runnable {
                             transferStatuses.remove(targetId)
@@ -233,7 +234,7 @@ class DeviceTilesFragment : Fragment() {
                         }
                         transferClearRunnables[targetId]?.let { binding.root.removeCallbacks(it) }
                         transferClearRunnables[targetId] = clearRunnable
-                        binding.root.postDelayed(clearRunnable, 1200)
+                        binding.root.postDelayed(clearRunnable, 3000)
                     }
                 }
             }

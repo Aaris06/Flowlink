@@ -36,7 +36,17 @@ function Shell() {
   const [username, setUsername] = useState<string | null>(() => localStorage.getItem('flowlink_username'));
   const [invitationService, setInvitationService] = useState<InvitationService | null>(null);
   const [chatUnread, setChatUnread] = useState(0);
-  const [inboxUnread, setInboxUnread] = useState(() => friendService.getInbox().filter(r => r.status === 'pending').length);
+  // CRITICAL FIX #6: Persist inbox unread count to localStorage
+  const [inboxUnread, setInboxUnread] = useState(() => {
+    const stored = localStorage.getItem('flowlink_inbox_unread');
+    return stored ? parseInt(stored, 10) : friendService.getInbox().filter(r => r.status === 'pending').length;
+  });
+
+  // Persist inbox unread count
+  useEffect(() => {
+    localStorage.setItem('flowlink_inbox_unread', inboxUnread.toString());
+  }, [inboxUnread]);
+  const [isConnected, setIsConnected] = useState(false);
   const invitationServiceRef = useRef<InvitationService | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const location = useLocation();
@@ -49,11 +59,17 @@ function Shell() {
       ws.send(JSON.stringify({ type: 'device_register', payload: { deviceId, deviceName, deviceType: 'laptop', username }, timestamp: Date.now() }));
       wsRef.current = ws;
       (window as any).appWebSocket = ws;
+      setIsConnected(true);
       if (invitationServiceRef.current) invitationServiceRef.current.setWebSocket(ws);
     };
     ws.onmessage = (e) => handleWebSocketMessage(JSON.parse(e.data));
-    ws.onclose = () => { wsRef.current = null; (window as any).appWebSocket = null; setTimeout(connectWebSocket, 2000); };
-    ws.onerror = () => {};
+    ws.onclose = () => { 
+      wsRef.current = null; 
+      (window as any).appWebSocket = null; 
+      setIsConnected(false);
+      setTimeout(connectWebSocket, 2000); 
+    };
+    ws.onerror = () => { setIsConnected(false); };
     wsRef.current = ws;
     return ws;
   };
@@ -129,7 +145,13 @@ function Shell() {
       case 'friend_request_response':
       case 'sos_alert':
         friendService.handleIncoming(message, username || '', deviceId);
-        if (message.type === 'friend_request') setInboxUnread(p => p + 1);
+        if (message.type === 'friend_request') {
+          setInboxUnread(p => {
+            const newCount = p + 1;
+            localStorage.setItem('flowlink_inbox_unread', newCount.toString());
+            return newCount;
+          });
+        }
         break;
     }
   };
@@ -158,8 +180,42 @@ function Shell() {
 
   useEffect(() => {
     if (location.pathname === '/messages') setChatUnread(0);
-    if (location.pathname === '/settings') setInboxUnread(0);
+    if (location.pathname === '/settings') {
+      // CRITICAL FIX #6: Clear inbox unread when viewing settings
+      setInboxUnread(0);
+      localStorage.setItem('flowlink_inbox_unread', '0');
+    }
   }, [location.pathname]);
+
+  // CRITICAL FIX #8: Handle tab visibility to persist data
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        // Tab hidden - persist critical data to sessionStorage
+        if (session) {
+          sessionStorage.setItem('flowlink_session', JSON.stringify(session));
+        }
+      } else {
+        // Tab visible - restore session if needed and reconnect WebSocket
+        const storedSession = sessionStorage.getItem('flowlink_session');
+        if (storedSession && !session) {
+          try {
+            const restored = JSON.parse(storedSession);
+            setSession(restored);
+          } catch (e) {
+            console.error('Failed to restore session:', e);
+          }
+        }
+        // Reconnect WebSocket if disconnected
+        if (wsRef.current?.readyState !== WebSocket.OPEN) {
+          connectWebSocket();
+        }
+      }
+    };
+    
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, [session]);
 
   const ctx: AppContext = {
     session, deviceId, deviceName, username: username || '',
@@ -242,6 +298,19 @@ function Shell() {
             <p>{pt.sub}</p>
           </div>
           <div className="top-header-right">
+            {/* CRITICAL FIX #5: Reconnect button in top-right header */}
+            {!isConnected && (
+              <button 
+                className="header-reconnect-btn" 
+                onClick={() => {
+                  if (wsRef.current) wsRef.current.close();
+                  connectWebSocket();
+                }}
+                title="Reconnect to server"
+              >
+                🔄 Reconnect
+              </button>
+            )}
             <button className="header-notif-btn" title="Notifications">
               🔔<span className="notif-dot" />
             </button>

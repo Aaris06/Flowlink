@@ -100,8 +100,6 @@ class FriendsFragment : Fragment() {
 
         binding.btnBack.setOnClickListener { parentFragmentManager.popBackStack() }
 
-        loadAndDisplay()
-
         binding.rvFriends.layoutManager = LinearLayoutManager(requireContext())
         friendsAdapter = FriendsAdapter(
             friends = friends,
@@ -118,6 +116,9 @@ class FriendsFragment : Fragment() {
             }
         )
         binding.rvFriends.adapter = friendsAdapter
+
+        // Load after adapter is set
+        loadAndDisplay()
         updateEmptyState()
 
         // SOS button

@@ -15,4 +15,3 @@ export const SIGNALING_WS_URL = getSignalingWsUrl();
 
 export const SIGNALING_HTTP_URL = SIGNALING_WS_URL.replace(/^ws:\/\//, 'http://')
   .replace(/^wss:\/\//, 'https://');
-

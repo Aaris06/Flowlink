@@ -44,8 +44,16 @@ export default class NotificationService {
 
   /**
    * Show a toast notification
+   * CRITICAL: Check if notifications permission is enabled before showing
    */
   showToast(notification: Omit<ToastNotification, 'id'>): string {
+    // Check if notifications are enabled
+    const permEngine = (window as any).permissionEngine;
+    if (permEngine && !permEngine.hasSystemPermission('notifications')) {
+      console.log('Notifications disabled - toast blocked:', notification.title);
+      return ''; // Don't show notification if permission is disabled
+    }
+
     const id = `toast-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
     const toast: ToastNotification = {
       id,

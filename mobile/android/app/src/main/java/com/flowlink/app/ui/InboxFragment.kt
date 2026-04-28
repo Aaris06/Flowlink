@@ -78,6 +78,8 @@ class InboxFragment : Fragment() {
 
         items.clear()
         items.addAll(loadItems(requireContext()))
+        // Mark all as read when inbox is opened
+        markAllRead()
 
         binding.rvInbox.layoutManager = LinearLayoutManager(requireContext())
         adapter = InboxAdapter(
@@ -136,6 +138,12 @@ class InboxFragment : Fragment() {
         prefs.edit().putString("items", Gson().toJson(items)).apply()
         adapter?.notifyDataSetChanged()
         updateEmptyState()
+    }
+
+    private fun markAllRead() {
+        items.forEach { it.handled = true }
+        val prefs = requireContext().getSharedPreferences(PREFS_KEY, Context.MODE_PRIVATE)
+        prefs.edit().putString("items", Gson().toJson(items)).apply()
     }
 
     private fun updateEmptyState() {

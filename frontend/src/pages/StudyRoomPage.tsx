@@ -36,7 +36,8 @@ export default function StudyRoomPage({ ctx }: Props) {
   const sendSync = useCallback((mode: string, value: any) => {
     if (!session) return;
     const ws = (window as any).appWebSocket as WebSocket | null;
-    ws?.send(JSON.stringify({ type: 'study_sync', sessionId: session.id, deviceId, payload: { mode, value }, timestamp: Date.now() }));
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    ws.send(JSON.stringify({ type: 'study_sync', sessionId: session.id, deviceId, payload: { mode, value }, timestamp: Date.now() }));
   }, [session, deviceId]);
 
   const applyState = useCallback((state: SyncState) => {
@@ -53,7 +54,7 @@ export default function StudyRoomPage({ ctx }: Props) {
     if (!el) return;
     suppressScrollRef.current = true;
     el.scrollTop = px;
-    setTimeout(() => { suppressScrollRef.current = false; }, 150);
+    setTimeout(() => { suppressScrollRef.current = false; }, 200);
   };
 
   // WebSocket setup
@@ -85,16 +86,22 @@ export default function StudyRoomPage({ ctx }: Props) {
         case 'study_sync': {
           const { mode, value, state } = msg.payload || {};
           if (state) { applyState(state); break; }
+          const now = Date.now();
+          const isRecentLocal = now - localInteractionRef.current < 500; // Ignore remote updates for 500ms after local action
+          
           if (mode === 'open_pdf' && typeof value === 'string') {
             setSelectedFileId(value);
             sessionStorage.setItem('studyFileId', value);
           }
-          if (mode === 'page' && typeof value === 'number') setPage(Math.max(1, value));
-          if (mode === 'scroll_px' && typeof value === 'number') {
-            const now = Date.now();
-            if (now - localInteractionRef.current > 200) setScrollPx(Math.max(0, value));
+          if (mode === 'page' && typeof value === 'number' && !isRecentLocal) {
+            setPage(Math.max(1, value));
           }
-          if (mode === 'zoom' && typeof value === 'number') setZoom(Math.max(0.5, Math.min(3, value)));
+          if (mode === 'scroll_px' && typeof value === 'number' && !isRecentLocal) {
+            setScrollPx(Math.max(0, value));
+          }
+          if (mode === 'zoom' && typeof value === 'number' && !isRecentLocal) {
+            setZoom(Math.max(0.5, Math.min(3, value)));
+          }
           if (mode === 'highlight' && typeof value === 'string') setHighlight(value);
           if (mode === 'highlight_anchor' && value?.id) {
             setAnchors(prev => { const next = prev.filter(a => a.id !== value.id); next.push(value); return next.slice(-200); });
@@ -195,32 +202,49 @@ export default function StudyRoomPage({ ctx }: Props) {
     return () => { cancelled = true; if (container) container.innerHTML = ''; pageRefs.current.clear(); };
   }, [pdfDataUrl, zoom, anchors, sendSync, highlight, deviceId]);
 
-  // Scroll sync
+  // CRITICAL FIX #3: Improved scroll sync with debounce to prevent rollback
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
+    let scrollTimer: number | null = null;
     const onScroll = () => {
       if (suppressScrollRef.current) return;
-      localInteractionRef.current = Date.now();
-      const px = Math.round(el.scrollTop);
-      sendSync('scroll_px', px);
-      // Detect current page
-      let closest = 1, minDist = Infinity;
-      pageRefs.current.forEach((node, pg) => {
-        const dist = Math.abs(node.offsetTop - el.scrollTop);
-        if (dist < minDist) { minDist = dist; closest = pg; }
-      });
-      if (closest !== page) { setPage(closest); sendSync('page', closest); }
+      
+      // Don't sync scroll if we just did a local interaction (zoom, highlight, etc.)
+      const timeSinceLocal = Date.now() - localInteractionRef.current;
+      if (timeSinceLocal < 800) return; // Ignore scroll events for 800ms after local actions
+      
+      // Debounce scroll sync
+      if (scrollTimer) clearTimeout(scrollTimer);
+      scrollTimer = window.setTimeout(() => {
+        const px = Math.round(el.scrollTop);
+        sendSync('scroll_px', px);
+        
+        // Detect current page based on scroll position
+        let closest = 1, minDist = Infinity;
+        pageRefs.current.forEach((node, pg) => {
+          const dist = Math.abs(node.offsetTop - el.scrollTop);
+          if (dist < minDist) { minDist = dist; closest = pg; }
+        });
+        if (closest !== page) { 
+          setPage(closest); 
+          sendSync('page', closest); 
+        }
+      }, 500); // 500ms debounce
     };
     el.addEventListener('scroll', onScroll, { passive: true });
-    return () => el.removeEventListener('scroll', onScroll);
+    return () => {
+      el.removeEventListener('scroll', onScroll);
+      if (scrollTimer) clearTimeout(scrollTimer);
+    };
   }, [page, sendSync]);
 
-  // Text selection sync
+  // Text selection sync - mark as local interaction
   useEffect(() => {
     const onSelectionChange = () => {
       const sel = window.getSelection()?.toString().trim();
       if (sel && sel !== highlight) {
+        localInteractionRef.current = Date.now(); // Mark as local interaction
         setHighlight(sel);
         sendSync('highlight', sel);
       }
@@ -240,10 +264,13 @@ export default function StudyRoomPage({ ctx }: Props) {
     sendSync('page', p);
   };
 
+  // CRITICAL FIX #3: Mark local interaction and prevent remote updates during zoom
   const changeZoom = (z: number) => {
     const clamped = Math.max(0.5, Math.min(3, z));
+    localInteractionRef.current = Date.now(); // Mark as local interaction
     setZoom(clamped);
-    sendSync('zoom', clamped);
+    // Delay sync to allow local render to complete first
+    setTimeout(() => sendSync('zoom', clamped), 100);
   };
 
   return (

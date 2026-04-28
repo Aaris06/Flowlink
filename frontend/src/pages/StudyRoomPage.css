@@ -134,17 +134,27 @@
   border-radius: 8px; overflow: hidden;
   box-shadow: 0 8px 32px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.06);
   display: block; width: fit-content;
+  /* CRITICAL FIX #4: Add text cursor for highlight selection */
+  cursor: text;
 }
-.srp-page-wrapper canvas { display: block; }
+.srp-page-wrapper canvas { 
+  display: block;
+  /* CRITICAL FIX #4: Smooth text selection cursor */
+  cursor: text;
+}
 .srp-text-layer {
   position: absolute; top: 0; left: 0;
   pointer-events: none; user-select: text;
+  /* CRITICAL FIX #4: Enable text selection with proper cursor */
+  cursor: text;
 }
 .srp-anchor {
   position: absolute; transform: translate(-50%, -50%);
   background: rgba(250,204,21,0.3); border: 1.5px solid rgba(250,204,21,0.8);
   border-radius: 3px; pointer-events: none;
   box-shadow: 0 0 8px rgba(250,204,21,0.3);
+  /* CRITICAL FIX #4: Smooth highlight appearance */
+  transition: opacity 0.2s ease;
 }
 
 @media (max-width: 768px) {

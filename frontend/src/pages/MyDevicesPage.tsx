@@ -16,9 +16,20 @@ interface Props { ctx: AppContext; }
 
 export default function MyDevicesPage({ ctx }: Props) {
   const { session, deviceId, deviceName, username, invitationService } = ctx;
+  // CRITICAL FIX #8: Persist transfers to sessionStorage to survive tab switches
   const [devices, setDevices] = useState<Map<string, Device>>(new Map());
   const [groups, setGroups] = useState<Group[]>([]);
-  const [transfers, setTransfers] = useState<Record<string, FileTransferStatus | null>>({});
+  const [transfers, setTransfers] = useState<Record<string, FileTransferStatus | null>>(() => {
+    const stored = sessionStorage.getItem(`flowlink_transfers_${session?.id || 'none'}`);
+    return stored ? JSON.parse(stored) : {};
+  });
+
+  // Persist transfers whenever they change
+  useEffect(() => {
+    if (session && Object.keys(transfers).length > 0) {
+      sessionStorage.setItem(`flowlink_transfers_${session.id}`, JSON.stringify(transfers));
+    }
+  }, [transfers, session]);
   const [draggedItem, setDraggedItem] = useState<any>(null);
   const [showInvite, setShowInvite] = useState(false);
   const webrtcRef = useRef<WebRTCManager | null>(null);

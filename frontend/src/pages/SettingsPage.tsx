@@ -365,26 +365,43 @@ export default function SettingsPage({ ctx }: Props) {
           {/* ── Permissions ── */}
           {tab === 'permissions' && (
             <div className="settings-section">
-              <div className="ss-title">Permissions</div>
-              <div className="ss-desc" style={{ marginBottom: '1rem' }}>Control what connected devices can do on your device.</div>
+              <div className="ss-title">App Permissions</div>
+              <div className="ss-desc" style={{ marginBottom: '1rem' }}>System permissions required for FlowLink features. Disabling a permission will block that feature.</div>
               {[
-                { label: 'File Transfer', desc: 'Allow devices to send files to you.', icon: '📁' },
-                { label: 'Media Handoff', desc: 'Allow devices to continue media on your device.', icon: '🎬' },
-                { label: 'Clipboard Sync', desc: 'Allow devices to sync clipboard content.', icon: '📋' },
-                { label: 'Remote Access', desc: 'Allow devices to view your screen.', icon: '🖥️' },
-                { label: 'Prompt Injection', desc: 'Allow devices to send prompts to your editor.', icon: '✏️' },
-              ].map(p => (
-                <div key={p.label} className="ss-toggle-row">
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
-                    <span style={{ fontSize: '1.2rem' }}>{p.icon}</span>
-                    <div><div className="ss-label">{p.label}</div><div className="ss-desc">{p.desc}</div></div>
+                { label: 'Notifications', desc: 'Receive alerts for invitations and messages.', icon: '🔔', key: 'notifications' as const },
+                { label: 'Camera', desc: 'For QR code scanning and video calls.', icon: '📷', key: 'camera' as const },
+                { label: 'Storage', desc: 'For file transfers and downloads.', icon: '📁', key: 'storage' as const },
+                { label: 'Microphone', desc: 'For voice chat and audio messages.', icon: '🎤', key: 'microphone' as const },
+              ].map(p => {
+                const permEngine = (window as any).permissionEngine;
+                const isGranted = permEngine?.hasSystemPermission(p.key) ?? true;
+                
+                return (
+                  <div key={p.label} className="ss-toggle-row">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
+                      <span style={{ fontSize: '1.2rem' }}>{p.icon}</span>
+                      <div><div className="ss-label">{p.label}</div><div className="ss-desc">{p.desc}</div></div>
+                    </div>
+                    <label className="toggle">
+                      <input 
+                        type="checkbox" 
+                        checked={isGranted}
+                        onChange={e => {
+                          const granted = e.target.checked;
+                          permEngine?.setSystemPermission(p.key, granted);
+                          logActivity({ 
+                            type: 'settings', 
+                            icon: '🛡️', 
+                            label: `Permission ${p.label}: ${granted ? 'enabled' : 'disabled'}`, 
+                            sub: granted ? 'Feature enabled' : 'Feature blocked' 
+                          });
+                        }} 
+                      />
+                      <span className="toggle-slider" />
+                    </label>
                   </div>
-                  <label className="toggle">
-                    <input type="checkbox" defaultChecked onChange={e => logActivity({ type: 'settings', icon: '🛡️', label: `Permission ${p.label}: ${e.target.checked ? 'enabled' : 'disabled'}`, sub: '' })} />
-                    <span className="toggle-slider" />
-                  </label>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
 

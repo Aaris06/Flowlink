@@ -14,7 +14,11 @@ interface Props { ctx: AppContext; }
 
 export default function MessagesPage({ ctx }: Props) {
   const { session, deviceId, username } = ctx;
-  const [messages, setMessages] = useState<ChatMsg[]>([]);
+  // CRITICAL FIX #8: Persist messages to sessionStorage to survive tab switches
+  const [messages, setMessages] = useState<ChatMsg[]>(() => {
+    const stored = sessionStorage.getItem(`flowlink_messages_${session?.id || 'none'}`);
+    return stored ? JSON.parse(stored) : [];
+  });
   const [input, setInput] = useState('');
   const [typing, setTyping] = useState<Record<string, boolean>>({});
   const [replyTo, setReplyTo] = useState<ChatMsg | null>(null);
@@ -24,6 +28,13 @@ export default function MessagesPage({ ctx }: Props) {
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const typingTimerRef = useRef<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Persist messages whenever they change
+  useEffect(() => {
+    if (session && messages.length > 0) {
+      sessionStorage.setItem(`flowlink_messages_${session.id}`, JSON.stringify(messages));
+    }
+  }, [messages, session]);
 
   const scrollToBottom = useCallback(() => {
     setTimeout(() => bodyRef.current?.scrollTo({ top: bodyRef.current.scrollHeight, behavior: 'smooth' }), 50);
@@ -40,12 +51,25 @@ export default function MessagesPage({ ctx }: Props) {
         if (!chat?.messageId) return;
         setMessages(p => {
           if (p.find(m => m.messageId === chat.messageId)) return p;
+          // Normalize attachment: website uses {attachment:{name,type,size,data}}
+          // Mobile uses flat {fileId,fileName,fileType,fileSize,fileData}
+          let attachment = chat.attachment;
+          if (!attachment && chat.fileId && chat.fileName) {
+            attachment = {
+              name: chat.fileName,
+              type: chat.fileType || 'application/octet-stream',
+              size: chat.fileSize || 0,
+              data: chat.fileData || '',
+            };
+          }
+          // Strip the "📎 " prefix from text if it's a file message
+          const text = attachment ? (chat.text?.replace(/^📎\s*/, '') === chat.fileName ? '' : (chat.text?.replace(/^📎\s*/, '') || '')) : (chat.text || '');
           return [...p, {
-            messageId: chat.messageId, text: chat.text || '', username: chat.username || 'Unknown',
+            messageId: chat.messageId, text, username: chat.username || 'Unknown',
             sourceDevice: msg.payload?.sourceDevice || '', sentAt: chat.sentAt || Date.now(),
             delivered: true, seen: true,
             replyTo: chat.replyTo, edited: chat.edited,
-            attachment: chat.attachment,
+            attachment,
           }];
         });
         if (ws.readyState === WebSocket.OPEN && session) {
@@ -57,12 +81,19 @@ export default function MessagesPage({ ctx }: Props) {
       if (msg.type === 'chat_seen') setMessages(p => p.map(m => m.messageId === msg.payload?.messageId ? { ...m, seen: true } : m));
       if (msg.type === 'chat_typing') setTyping(p => ({ ...p, [msg.payload?.sourceDevice || '']: Boolean(msg.payload?.isTyping) }));
       if (msg.type === 'session_joined' && msg.payload?.chatHistory) {
-        setMessages(msg.payload.chatHistory.map((item: any) => ({
-          messageId: item.messageId || `c-${item.sentAt}`, text: item.text || '',
-          username: item.username || 'Unknown', sourceDevice: item.sourceDevice || '',
-          sentAt: item.sentAt || Date.now(), delivered: true, seen: false,
-          attachment: item.attachment,
-        })));
+        setMessages(msg.payload.chatHistory.map((item: any) => {
+          let attachment = item.attachment;
+          if (!attachment && item.fileId && item.fileName) {
+            attachment = { name: item.fileName, type: item.fileType || 'application/octet-stream', size: item.fileSize || 0, data: item.fileData || '' };
+          }
+          const text = attachment ? (item.text?.replace(/^📎\s*/, '') === item.fileName ? '' : (item.text?.replace(/^📎\s*/, '') || '')) : (item.text || '');
+          return {
+            messageId: item.messageId || `c-${item.sentAt}`, text,
+            username: item.username || 'Unknown', sourceDevice: item.sourceDevice || '',
+            sentAt: item.sentAt || Date.now(), delivered: true, seen: false,
+            attachment,
+          };
+        }));
         scrollToBottom();
       }
     };
@@ -155,26 +186,72 @@ export default function MessagesPage({ ctx }: Props) {
     return <>{parts.map((p, i) => /^https?:\/\//.test(p) ? <a key={i} href={p} target="_blank" rel="noreferrer" className="msg-link">{p}</a> : <span key={i}>{p}</span>)}</>;
   };
 
-  const renderAttachment = (att: Attachment, own: boolean) => {
-    if (att.type.startsWith('image/')) {
-      const src = `data:${att.type};base64,${att.data}`;
-      return <img src={src} alt={att.name} className="msg-img" onClick={() => window.open(src, '_blank')} />;
+  const getFileIconInfo = (ext: string): { letter: string; color: string } => {
+    switch (ext) {
+      case 'pdf':                             return { letter: 'P', color: '#F44336' };
+      case 'doc': case 'docx':               return { letter: 'W', color: '#2196F3' };
+      case 'xls': case 'xlsx':               return { letter: 'X', color: '#4CAF50' };
+      case 'ppt': case 'pptx':               return { letter: 'P', color: '#FF5722' };
+      case 'txt':                             return { letter: 'T', color: '#607D8B' };
+      case 'zip': case 'rar': case '7z':     return { letter: 'Z', color: '#795548' };
+      case 'mp4': case 'mkv': case 'avi':    return { letter: '▶', color: '#9C27B0' };
+      case 'mp3': case 'wav': case 'm4a':    return { letter: '♪', color: '#009688' };
+      default:                               return { letter: 'F', color: '#607D8B' };
     }
+  };
+
+  const renderAttachment = (att: Attachment, own: boolean) => {
+    const ext = att.name.split('.').pop()?.toLowerCase() || '';
+    const isImage = att.type.startsWith('image/') || ['jpg','jpeg','png','gif','webp','bmp'].includes(ext);
+
+    if (isImage) {
+      const src = `data:${att.type};base64,${att.data}`;
+      return (
+        <div className="msg-img-wrap">
+          <img
+            src={src}
+            alt={att.name}
+            className="msg-img"
+            onClick={() => {
+              const w = window.open('', '_blank');
+              if (w) {
+                w.document.write(`<!DOCTYPE html><html><head><title>${att.name}</title>
+                  <style>body{margin:0;background:#000;display:flex;align-items:center;justify-content:center;min-height:100vh}
+                  img{max-width:100%;max-height:100vh;object-fit:contain}
+                  .dl{position:fixed;top:16px;right:16px;background:#1d4ed8;color:#fff;border:none;padding:8px 18px;border-radius:8px;cursor:pointer;font-size:14px}
+                  </style></head><body>
+                  <img src="${src}" /><button class="dl" onclick="const a=document.createElement('a');a.href='${src}';a.download='${att.name}';a.click()">⬇ Download</button>
+                  </body></html>`);
+              }
+            }}
+          />
+          <div className="msg-img-name">{att.name}</div>
+        </div>
+      );
+    }
+
+    // WhatsApp-style file card with colored icon
+    const { letter, color } = getFileIconInfo(ext);
     const downloadAtt = () => {
-      const bin = atob(att.data); const bytes = new Uint8Array(bin.length);
+      const bin = atob(att.data);
+      const bytes = new Uint8Array(bin.length);
       for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
       const blob = new Blob([bytes.buffer], { type: att.type });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a'); a.href = url; a.download = att.name; a.click();
       setTimeout(() => URL.revokeObjectURL(url), 1200);
     };
+
     return (
-      <div className={`msg-file-att${own ? ' own' : ''}`} onClick={downloadAtt}>
-        <span className="msg-file-icon">📎</span>
+      <div className={`msg-file-card${own ? ' own' : ''}`} onClick={downloadAtt}>
+        <div className="msg-file-icon-box" style={{ background: color }}>
+          <span className="msg-file-icon-letter">{letter}</span>
+        </div>
         <div className="msg-file-info">
           <div className="msg-file-name">{att.name}</div>
-          <div className="msg-file-size">{Math.max(1, Math.round(att.size / 1024))} KB · tap to download</div>
+          <div className="msg-file-meta">{ext.toUpperCase()} · {Math.max(1, Math.round(att.size / 1024))} KB</div>
         </div>
+        <div className="msg-file-dl-btn">↓</div>
       </div>
     );
   };
@@ -212,7 +289,8 @@ export default function MessagesPage({ ctx }: Props) {
                     </div>
                   )}
                   {m.attachment && renderAttachment(m.attachment, own)}
-                  {m.text && <div className="msg-text">{renderText(m.text)}{m.edited && <span className="msg-edited"> (edited)</span>}</div>}
+                  {m.text && !m.attachment && <div className="msg-text">{renderText(m.text)}{m.edited && <span className="msg-edited"> (edited)</span>}</div>}
+                  {m.text && m.attachment && <div className="msg-text msg-caption">{renderText(m.text)}</div>}
                   <div className="msg-footer">
                     <span className="msg-time">{new Date(m.sentAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                     {own && <span className={`msg-tick${m.seen ? ' seen' : m.delivered ? ' delivered' : ''}`}>{m.seen ? '✓✓' : m.delivered ? '✓✓' : '✓'}</span>}

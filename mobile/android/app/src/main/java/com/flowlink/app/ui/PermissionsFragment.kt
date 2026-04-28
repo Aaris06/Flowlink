@@ -68,20 +68,28 @@ class PermissionsFragment : Fragment() {
         val notifGranted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU)
             granted(Manifest.permission.POST_NOTIFICATIONS) else true
         binding.tvNotifStatus.text = if (notifGranted) "✅ Granted" else "❌ Not granted"
+        binding.switchNotifPermission.isChecked = notifGranted
+        binding.switchNotifPermission.isEnabled = !notifGranted
         binding.btnNotifPermission.visibility = if (notifGranted) View.GONE else View.VISIBLE
 
         val cameraGranted = granted(Manifest.permission.CAMERA)
         binding.tvCameraStatus.text = if (cameraGranted) "✅ Granted" else "❌ Not granted"
+        binding.switchCameraPermission.isChecked = cameraGranted
+        binding.switchCameraPermission.isEnabled = !cameraGranted
         binding.btnCameraPermission.visibility = if (cameraGranted) View.GONE else View.VISIBLE
 
         val storageGranted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU)
             granted(Manifest.permission.READ_MEDIA_IMAGES)
         else granted(Manifest.permission.READ_EXTERNAL_STORAGE)
         binding.tvStorageStatus.text = if (storageGranted) "✅ Granted" else "❌ Not granted"
+        binding.switchStoragePermission.isChecked = storageGranted
+        binding.switchStoragePermission.isEnabled = !storageGranted
         binding.btnStoragePermission.visibility = if (storageGranted) View.GONE else View.VISIBLE
 
         val micGranted = granted(Manifest.permission.RECORD_AUDIO)
         binding.tvMicStatus.text = if (micGranted) "✅ Granted" else "❌ Not granted"
+        binding.switchMicPermission.isChecked = micGranted
+        binding.switchMicPermission.isEnabled = !micGranted
         binding.btnMicPermission.visibility = if (micGranted) View.GONE else View.VISIBLE
     }
 
