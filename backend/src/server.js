@@ -121,7 +121,7 @@ function sendError(ws, errorMessage) {
   }));
 }
 
-server.listen(PORT, () => {
+server.listen(PORT, '0.0.0.0', () => {
   console.log(`FlowLink backend server running on port ${PORT}`);
   console.log(`Environment: ${NODE_ENV}`);
   console.log(`Server ready for WebSocket connections`);
