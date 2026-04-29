@@ -171,7 +171,14 @@ class HomeFragment : Fragment() {
         // Observe file transfer progress
         viewLifecycleOwner.lifecycleScope.launch {
             mainActivity.webSocketManager.fileTransferProgress.collect { progress ->
-                val targetId = progress?.deviceId ?: return@collect
+                android.util.Log.d("FlowLink_Progress", "Progress event: deviceId=${progress?.deviceId}, progress=${progress?.progress}, direction=${progress?.direction}, fileName=${progress?.fileName}")
+                android.util.Log.d("FlowLink_Progress", "Connected devices: ${connectedDevices.keys}")
+                val targetId = progress?.deviceId ?: run {
+                    // null means clear all
+                    transferStatuses.clear()
+                    updateDeviceList()
+                    return@collect
+                }
                 transferStatuses[targetId] = TransferStatus(
                     fileName = progress.fileName, direction = progress.direction,
                     progress = progress.progress, totalBytes = progress.totalBytes,
@@ -179,12 +186,19 @@ class HomeFragment : Fragment() {
                     etaSeconds = progress.etaSeconds, startedAt = progress.startedAt,
                     completed = progress.progress >= 100
                 )
+                // Also try matching by any connected device if exact ID not found
+                if (!connectedDevices.containsKey(targetId) && connectedDevices.isNotEmpty()) {
+                    val fallbackId = connectedDevices.keys.first()
+                    android.util.Log.d("FlowLink_Progress", "DeviceId $targetId not in connectedDevices, using fallback $fallbackId")
+                    transferStatuses[fallbackId] = transferStatuses[targetId]!!
+                    transferStatuses.remove(targetId)
+                }
                 updateDeviceList()
                 if (progress.progress >= 100) {
                     val r = Runnable { transferStatuses.remove(targetId); updateDeviceList(); transferClearRunnables.remove(targetId) }
                     transferClearRunnables[targetId]?.let { binding.root.removeCallbacks(it) }
                     transferClearRunnables[targetId] = r
-                    binding.root.postDelayed(r, 1500)
+                    binding.root.postDelayed(r, 3000)
                 }
             }
         }
@@ -266,22 +280,49 @@ class HomeFragment : Fragment() {
             val clipboard = ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
             val text = clipboard.primaryClip?.getItemAt(0)?.coerceToText(ctx)?.toString()?.trim() ?: ""
             if (text.isNotEmpty()) {
+                val normalized = normalizeUrl(text) ?: text
+                val intentType = when {
+                    isHttpUrl(normalized) -> "link_open"
+                    else -> "clipboard_sync"
+                }
+                val payload = when (intentType) {
+                    "link_open" -> mapOf("link" to org.json.JSONObject().apply { put("url", normalized) }.toString())
+                    else -> mapOf("clipboard" to org.json.JSONObject().apply { put("text", text) }.toString())
+                }
                 val intent = com.flowlink.app.model.Intent(
-                    intentType = "clipboard_sync",
-                    payload = mapOf("clipboard" to org.json.JSONObject().apply { put("text", text) }.toString()),
+                    intentType = intentType,
+                    payload = payload,
                     targetDevice = device.id,
                     sourceDevice = sessionManager?.getDeviceId() ?: "",
                     autoOpen = true,
                     timestamp = System.currentTimeMillis()
                 )
                 mainActivity.webSocketManager.sendIntent(intent, device.id)
-                Toast.makeText(ctx, "Sent clipboard to ${device.name}", Toast.LENGTH_SHORT).show()
+                val preview = if (text.length > 40) text.take(40) + "…" else text
+                Toast.makeText(ctx, "Sent to ${device.name}: $preview", Toast.LENGTH_SHORT).show()
             } else {
                 Toast.makeText(ctx, "Clipboard empty. Use Select Files to send files.", Toast.LENGTH_SHORT).show()
             }
         } catch (e: Exception) {
             Toast.makeText(ctx, "Failed: ${e.message}", Toast.LENGTH_SHORT).show()
         }
+    }
+
+    private fun isHttpUrl(text: String): Boolean {
+        return try {
+            val uri = android.net.Uri.parse(text)
+            val scheme = uri.scheme?.lowercase()
+            scheme == "http" || scheme == "https"
+        } catch (e: Exception) { false }
+    }
+
+    private fun normalizeUrl(text: String): String? {
+        if (text.isBlank()) return null
+        val trimmed = text.trim()
+        val hasScheme = Regex("^[a-zA-Z][a-zA-Z\\d+\\-.]*://").containsMatchIn(trimmed)
+        if (hasScheme) return trimmed
+        val domainLike = Regex("^(www\\.)?[a-z0-9.-]+\\.[a-z]{2,}([/?].*)?$", RegexOption.IGNORE_CASE)
+        return if (domainLike.matches(trimmed)) "https://$trimmed" else null
     }
 
     override fun onDestroyView() {

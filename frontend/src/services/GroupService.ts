@@ -9,30 +9,56 @@ export class GroupService {
 
   constructor() {}
 
+  private storageKey(): string {
+    return `flowlink_groups_${this.sessionId || 'none'}`;
+  }
+
+  private persist(): void {
+    try {
+      sessionStorage.setItem(this.storageKey(), JSON.stringify(this.getGroups()));
+    } catch { /* ignore */ }
+  }
+
+  private loadFromStorage(): void {
+    try {
+      const stored = sessionStorage.getItem(this.storageKey());
+      if (stored) {
+        const groups: Group[] = JSON.parse(stored);
+        groups.forEach(g => this.groups.set(g.id, g));
+      }
+    } catch { /* ignore */ }
+  }
+
   initialize(ws: WebSocket, sessionId: string, deviceId: string) {
     this.ws = ws;
     this.sessionId = sessionId;
     this.deviceId = deviceId;
+    // Restore groups from sessionStorage on re-init (tab switch)
+    this.loadFromStorage();
   }
 
   setGroups(groups: Group[]) {
     this.groups.clear();
     groups.forEach(group => this.groups.set(group.id, group));
+    this.persist();
     this.notifyListeners();
   }
 
   addGroup(group: Group) {
     this.groups.set(group.id, group);
+    this.persist();
     this.notifyListeners();
   }
 
   updateGroup(group: Group) {
     this.groups.set(group.id, group);
+    this.persist();
     this.notifyListeners();
   }
 
   removeGroup(groupId: string) {
     this.groups.delete(groupId);
+    this.persist();
     this.notifyListeners();
   }
 
@@ -121,11 +147,10 @@ export class GroupService {
   }
 
   cleanup() {
-    this.groups.clear();
+    // Don't clear groups - persist them for when component remounts
     this.listeners.clear();
     this.ws = null;
-    this.sessionId = null;
-    this.deviceId = null;
+    // Keep sessionId and deviceId so storageKey() still works
   }
 }
 

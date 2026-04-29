@@ -597,10 +597,10 @@ export default function DeviceTiles({
         const speedBytesPerSec = transferredBytes / elapsed;
         const etaSeconds = Math.max(0, Math.ceil((bufferState.totalBytes - transferredBytes) / Math.max(1, speedBytesPerSec)));
         const progress = bufferState.totalBytes > 0 ? Math.min(99, Math.round((transferredBytes / bufferState.totalBytes) * 100)) : 0;
-        const deviceId = bufferState.sourceDevice;
+        const sourceDeviceId = bufferState.sourceDevice;
 
-        if (deviceId) {
-          applyTransferStats(deviceId, {
+        if (sourceDeviceId) {
+          applyTransferStats(sourceDeviceId, {
             fileName: bufferState.fileName,
             direction: 'receiving',
             progress,
@@ -624,7 +624,8 @@ export default function DeviceTiles({
             deviceId,
             payload: {
               transferId,
-              targetDevice: bufferState.sourceDevice,
+              targetDevice: sourceDeviceId,
+              fileName: bufferState.fileName,
               transferredBytes,
               totalBytes: bufferState.totalBytes,
               progress,
@@ -641,11 +642,11 @@ export default function DeviceTiles({
         if (!bufferState) break;
         incomingTransferBuffersRef.current.delete(transferId);
 
-        const deviceId = bufferState.sourceDevice;
+        const sourceDeviceId = bufferState.sourceDevice;
         downloadReceivedFile(bufferState.fileName, bufferState.fileType, bufferState.chunks);
 
-        if (deviceId) {
-          applyTransferStats(deviceId, {
+        if (sourceDeviceId) {
+          applyTransferStats(sourceDeviceId, {
             fileName: bufferState.fileName,
             direction: 'receiving',
             progress: 100,
@@ -664,7 +665,8 @@ export default function DeviceTiles({
             deviceId,
             payload: {
               transferId,
-              targetDevice: bufferState.sourceDevice,
+              targetDevice: sourceDeviceId,
+              fileName: bufferState.fileName,
               transferredBytes: bufferState.totalBytes,
               totalBytes: bufferState.totalBytes,
               progress: 100,

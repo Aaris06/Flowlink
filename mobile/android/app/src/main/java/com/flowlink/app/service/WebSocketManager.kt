@@ -41,8 +41,11 @@ class WebSocketManager(private val mainActivity: MainActivity) {
     private val _receivedIntents = MutableStateFlow<Intent?>(null)
     val receivedIntents: StateFlow<Intent?> = _receivedIntents
 
-    private val _fileTransferProgress = MutableStateFlow<FileTransferProgressEvent?>(null)
-    val fileTransferProgress: StateFlow<FileTransferProgressEvent?> = _fileTransferProgress
+    private val _fileTransferProgress = MutableSharedFlow<FileTransferProgressEvent?>(
+        replay = 1, extraBufferCapacity = 64,
+        onBufferOverflow = kotlinx.coroutines.channels.BufferOverflow.DROP_OLDEST
+    )
+    val fileTransferProgress: SharedFlow<FileTransferProgressEvent?> = _fileTransferProgress
 
     private val fileTransferWriters = mutableMapOf<String, FileOutputStream>()
     private val fileTransferFiles = mutableMapOf<String, File>()
@@ -632,7 +635,7 @@ class WebSocketManager(private val mainActivity: MainActivity) {
                         val speed = (sentBytes / elapsed).toLong()
                         val progress = if (fileSize > 0) ((sentBytes * 100) / fileSize).toInt().coerceIn(0, 99) else 0
                         val eta = if (speed > 0 && fileSize > sentBytes) (((fileSize - sentBytes).toDouble() / speed.toDouble()).toInt()).coerceAtLeast(0) else 0
-                        _fileTransferProgress.value = FileTransferProgressEvent(
+                        _fileTransferProgress.tryEmit(FileTransferProgressEvent(
                             deviceId = targetDeviceId,
                             fileName = fileName,
                             direction = "sending",
@@ -642,8 +645,7 @@ class WebSocketManager(private val mainActivity: MainActivity) {
                             speedBytesPerSec = speed,
                             etaSeconds = eta,
                             startedAt = startAt
-                        )
-                        mainActivity.runOnUiThread { /* progress shown in device tile */ }
+                        ))
                         read = stream.read(buffer)
                     }
                 }
@@ -659,7 +661,7 @@ class WebSocketManager(private val mainActivity: MainActivity) {
                     })
                     put("timestamp", System.currentTimeMillis())
                 }.toString())
-                _fileTransferProgress.value = FileTransferProgressEvent(
+                _fileTransferProgress.tryEmit(FileTransferProgressEvent(
                     deviceId = targetDeviceId,
                     fileName = fileName,
                     direction = "sending",
@@ -669,8 +671,7 @@ class WebSocketManager(private val mainActivity: MainActivity) {
                     speedBytesPerSec = 0,
                     etaSeconds = 0,
                     startedAt = startAt
-                )
-                mainActivity.notificationService.clearTransferProgress()
+                ))
             } catch (e: Exception) {
                 Log.e("FlowLink", "Failed to stream file", e)
                 sendMessage(JSONObject().apply {
@@ -876,7 +877,7 @@ class WebSocketManager(private val mainActivity: MainActivity) {
                     val deviceId = payload.optString("deviceId", "")
                     val startedAt = payload.optLong("startedAt", System.currentTimeMillis())
 
-                    _fileTransferProgress.value = FileTransferProgressEvent(
+                    _fileTransferProgress.tryEmit(FileTransferProgressEvent(
                         deviceId = deviceId.ifBlank { null },
                         fileName = fileName,
                         direction = direction,
@@ -886,14 +887,13 @@ class WebSocketManager(private val mainActivity: MainActivity) {
                         speedBytesPerSec = speedBytesPerSec,
                         etaSeconds = etaSeconds,
                         startedAt = startedAt,
-                    )
-                    mainActivity.notificationService.showFileTransferProgress(fileName, progress, direction, transferredBytes, totalBytes)
+                    ))
                     if (progress >= 100) {
                         mainActivity.notificationService.clearTransferProgress()
                         // Delay null so UI can show 100% briefly
                         scope.launch {
                             kotlinx.coroutines.delay(1500)
-                            _fileTransferProgress.value = null
+                            _fileTransferProgress.tryEmit(null)
                         }
                     }
                 }
@@ -915,7 +915,7 @@ class WebSocketManager(private val mainActivity: MainActivity) {
                     transferStartedAt[transferId] = SystemClock.elapsedRealtime()
                     fileTransferLastUiUpdateAt[transferId] = 0L
                     fileTransferLastAckBytes[transferId] = 0L
-                    _fileTransferProgress.value = FileTransferProgressEvent(
+                    _fileTransferProgress.tryEmit(FileTransferProgressEvent(
                         deviceId = sourceDevice.ifBlank { null },
                         fileName = fileName,
                         direction = "receiving",
@@ -925,8 +925,7 @@ class WebSocketManager(private val mainActivity: MainActivity) {
                         speedBytesPerSec = 0,
                         etaSeconds = 0,
                         startedAt = transferStartedAt[transferId] ?: SystemClock.elapsedRealtime(),
-                    )
-                    // Transfer progress shown in device tile via _fileTransferProgress flow
+                    ))
                 }
                 "file_transfer_chunk" -> {
                     val payload = json.getJSONObject("payload")
@@ -951,7 +950,7 @@ class WebSocketManager(private val mainActivity: MainActivity) {
                         val lastUiAt = fileTransferLastUiUpdateAt[transferId] ?: 0L
                         if ((now - lastUiAt) >= PROGRESS_UPDATE_INTERVAL_MS || progress >= 99) {
                             fileTransferLastUiUpdateAt[transferId] = now
-                            _fileTransferProgress.value = FileTransferProgressEvent(
+                            _fileTransferProgress.tryEmit(FileTransferProgressEvent(
                                 deviceId = sourceDevice.ifBlank { meta.sourceDevice.ifBlank { null } },
                                 fileName = meta.fileName,
                                 direction = "receiving",
@@ -961,8 +960,7 @@ class WebSocketManager(private val mainActivity: MainActivity) {
                                 speedBytesPerSec = speed,
                                 etaSeconds = eta,
                                 startedAt = startedAt,
-                            )
-                            // Progress shown in device tile via _fileTransferProgress flow
+                            ))
                         }
 
                         val lastAckBytes = fileTransferLastAckBytes[transferId] ?: 0L
@@ -995,7 +993,7 @@ class WebSocketManager(private val mainActivity: MainActivity) {
                     fileTransferLastUiUpdateAt.remove(transferId)
                     fileTransferLastAckBytes.remove(transferId)
 
-                    _fileTransferProgress.value = FileTransferProgressEvent(
+                    _fileTransferProgress.tryEmit(FileTransferProgressEvent(
                         deviceId = meta.sourceDevice.ifBlank { null },
                         fileName = meta.fileName,
                         direction = "receiving",
@@ -1005,12 +1003,11 @@ class WebSocketManager(private val mainActivity: MainActivity) {
                         speedBytesPerSec = 0,
                         etaSeconds = 0,
                         startedAt = startedAt,
-                    )
-                    // Transfer complete — clear progress after brief delay so tile shows 100%
+                    ))
                     mainActivity.notificationService.clearTransferProgress()
                     scope.launch {
                         kotlinx.coroutines.delay(1500)
-                        _fileTransferProgress.value = null
+                        _fileTransferProgress.tryEmit(null)
                     }
                     sendMessage(JSONObject().apply {
                         put("type", "file_transfer_ack")
@@ -1039,7 +1036,7 @@ class WebSocketManager(private val mainActivity: MainActivity) {
                     transferStartedAt.remove(transferId)
                     fileTransferLastUiUpdateAt.remove(transferId)
                     fileTransferLastAckBytes.remove(transferId)
-                    _fileTransferProgress.value = null
+                    _fileTransferProgress.tryEmit(null)
                     mainActivity.notificationService.clearTransferProgress()
                 }
                 "device_connected" -> {

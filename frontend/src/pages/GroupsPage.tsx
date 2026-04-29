@@ -13,6 +13,21 @@ export default function GroupsPage({ ctx }: Props) {
   const [newGroupName, setNewGroupName] = useState('');
   const [selectedDevices, setSelectedDevices] = useState<string[]>([]);
 
+  const normalizeDevice = (payload: any): Device | null => {
+    const raw = payload?.device || payload;
+    if (!raw?.id) return null;
+    return {
+      id: raw.id,
+      name: raw.name || raw.deviceName || 'Unknown Device',
+      username: raw.username || '',
+      type: raw.type || raw.deviceType || 'laptop',
+      online: typeof raw.online === 'boolean' ? raw.online : true,
+      permissions: raw.permissions || {},
+      joinedAt: raw.joinedAt || Date.now(),
+      lastSeen: raw.lastSeen || Date.now(),
+    };
+  };
+
   useEffect(() => {
     if (!session) return;
     const ws = (window as any).appWebSocket as WebSocket | null;
@@ -20,9 +35,14 @@ export default function GroupsPage({ ctx }: Props) {
     groupService.subscribe(setGroups);
     const handler = (e: MessageEvent) => {
       const msg = JSON.parse(e.data);
-      if (msg.type === 'device_connected') setDevices(p => [...p.filter(d => d.id !== msg.payload.device.id), msg.payload.device]);
+      if (msg.type === 'device_connected') {
+        const device = normalizeDevice(msg.payload);
+        if (device && device.id !== deviceId) setDevices(p => [...p.filter(d => d.id !== device.id), device]);
+      }
       if (msg.type === 'device_disconnected') setDevices(p => p.filter(d => d.id !== msg.payload.deviceId));
-      if (msg.type === 'session_joined' && msg.payload?.devices) setDevices(msg.payload.devices.filter((d: Device) => d.id !== deviceId));
+      if (msg.type === 'session_joined' && msg.payload?.devices) {
+        setDevices(msg.payload.devices.map(normalizeDevice).filter((d: Device | null): d is Device => Boolean(d && d.id !== deviceId)));
+      }
     };
     ws?.addEventListener('message', handler);
     return () => { ws?.removeEventListener('message', handler); groupService.cleanup(); };

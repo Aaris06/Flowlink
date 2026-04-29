@@ -212,7 +212,13 @@ class DeviceTilesFragment : Fragment() {
 
             viewLifecycleOwner.lifecycleScope.launch {
                 mainActivity.webSocketManager.fileTransferProgress.collect { progress ->
-                    val targetId = progress?.deviceId ?: return@collect
+                    if (progress == null) {
+                        transferStatuses.clear()
+                        updateDeviceList()
+                        return@collect
+                    }
+
+                    val targetId = resolveTransferTileDeviceId(progress.deviceId) ?: return@collect
                     transferStatuses[targetId] = TransferStatus(
                         fileName = progress.fileName,
                         direction = progress.direction,
@@ -337,6 +343,18 @@ class DeviceTilesFragment : Fragment() {
             "Session Code: $code | ${connectedDevices.size} device(s) connected"
         }
         binding.tvStatus.text = statusText
+    }
+
+    private fun resolveTransferTileDeviceId(progressDeviceId: String?): String? {
+        if (progressDeviceId.isNullOrBlank()) return null
+        if (connectedDevices.containsKey(progressDeviceId)) return progressDeviceId
+
+        // Incoming transfer progress should be shown on the sender's tile. If
+        // older/bridged messages carry the local receiver id instead, keep the
+        // progress visible by attaching it to the only connected peer.
+        if (connectedDevices.size == 1) return connectedDevices.keys.first()
+
+        return null
     }
 
     private fun updateDeviceList() {

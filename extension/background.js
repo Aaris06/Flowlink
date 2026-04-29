@@ -4,7 +4,7 @@
  */
 
 // Configuration
-const BACKEND_URL = 'ws://localhost:8080';
+const BACKEND_URL = 'wss://flowlink-1.onrender.com';
 let ws = null;
 let deviceId = null;
 let username = null;

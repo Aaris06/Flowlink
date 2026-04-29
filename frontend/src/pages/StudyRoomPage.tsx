@@ -79,7 +79,11 @@ export default function StudyRoomPage({ ctx }: Props) {
           if (msg.payload?.devices) setParticipants(msg.payload.devices.map((d: any) => d.username || d.name));
           break;
         case 'device_connected':
-          setParticipants(p => [...new Set([...p, msg.payload.device.username || msg.payload.device.name])]);
+          {
+            const device = msg.payload?.device || msg.payload;
+            const name = device?.username || device?.name || device?.deviceName;
+            if (name) setParticipants(p => [...new Set([...p, name])]);
+          }
           break;
         case 'device_disconnected':
           break;

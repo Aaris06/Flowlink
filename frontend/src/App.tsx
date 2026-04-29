@@ -1,4 +1,4 @@
-﻿import { useState, useEffect, useRef } from 'react';
+import { Component, ReactNode, useState, useEffect, useRef } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, NavLink, useNavigate, useLocation } from 'react-router-dom';
 import { Session } from '@shared/types';
 import { generateDeviceId } from '@shared/utils';
@@ -28,6 +28,36 @@ export interface AppContext {
   onSessionCreated: (s: Session) => void;
   onSessionJoined: (s: Session) => void;
   onLeaveSession: () => void;
+}
+
+class AppErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean }> {
+  state = { hasError: false };
+
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+
+  componentDidCatch(error: unknown) {
+    console.error('FlowLink UI error:', error);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="app-shell">
+          <main className="page-content" style={{ minHeight: '100vh', display: 'grid', placeItems: 'center' }}>
+            <div className="card" style={{ maxWidth: 420, padding: 24, textAlign: 'center' }}>
+              <h2>FlowLink needs a quick refresh</h2>
+              <p style={{ color: '#64748b' }}>A temporary UI error occurred, but your session can usually reconnect.</p>
+              <button className="btn-primary" onClick={() => window.location.reload()}>Refresh</button>
+            </div>
+          </main>
+        </div>
+      );
+    }
+
+    return this.props.children;
+  }
 }
 function Shell() {
   const [session, setSession] = useState<Session | null>(null);
@@ -85,7 +115,41 @@ function Shell() {
       case 'chat_seen':
       case 'chat_typing':
         window.dispatchEvent(new CustomEvent('chatMessage', { detail: { message } }));
-        if (message.type === 'chat_message') setChatUnread(p => p + 1);
+        if (message.type === 'chat_message') {
+          setChatUnread(p => p + 1);
+          // Buffer message in sessionStorage so MessagesPage gets it even if not mounted
+          try {
+            const chat = message.payload?.chat;
+            if (chat?.messageId) {
+              const sessionId = message.sessionId || message.payload?.sessionId;
+              const key = `flowlink_messages_${sessionId || 'none'}`;
+              const stored = sessionStorage.getItem(key);
+              const msgs: any[] = stored ? JSON.parse(stored) : [];
+              if (!msgs.find((m: any) => m.messageId === chat.messageId)) {
+                // Normalize attachment format (mobile sends flat fields)
+                let attachment = chat.attachment;
+                if (!attachment && chat.fileId && chat.fileName) {
+                  attachment = { name: chat.fileName, type: chat.fileType || 'application/octet-stream', size: chat.fileSize || 0, data: chat.fileData || '' };
+                }
+                const text = attachment
+                  ? (chat.text?.replace(/^📎\s*/, '') === chat.fileName ? '' : (chat.text?.replace(/^📎\s*/, '') || ''))
+                  : (chat.text || '');
+                msgs.push({
+                  messageId: chat.messageId,
+                  text,
+                  username: chat.username || 'Unknown',
+                  sourceDevice: message.payload?.sourceDevice || '',
+                  sentAt: chat.sentAt || Date.now(),
+                  delivered: true,
+                  seen: false,
+                  replyTo: chat.replyTo,
+                  attachment,
+                });
+                sessionStorage.setItem(key, JSON.stringify(msgs.slice(-200)));
+              }
+            }
+          } catch { /* ignore storage errors */ }
+        }
         break;
       case 'session_invitation':
         if (invitationServiceRef.current) {
@@ -139,6 +203,16 @@ function Shell() {
       case 'clipboard_sync': {
         const txt = message.payload?.clipboard?.text || message.payload?.clipboard?.url;
         if (txt) navigator.clipboard.writeText(txt).catch(() => {});
+        break;
+      }
+      case 'link_open': {
+        const linkJson = message.payload?.link;
+        if (linkJson) {
+          try {
+            const url = typeof linkJson === 'string' ? JSON.parse(linkJson).url : linkJson.url;
+            if (url) window.open(url, '_blank', 'noopener,noreferrer');
+          } catch { /* ignore parse errors */ }
+        }
         break;
       }
       case 'friend_request':
@@ -228,7 +302,6 @@ function Shell() {
   const navItems: { to: string; icon: string; label: string; badge?: number }[] = [
     { to: '/', icon: '🏠', label: 'Overview' },
     { to: '/devices', icon: '📱', label: 'My Devices' },
-    { to: '/groups', icon: '👥', label: 'Groups' },
     { to: '/messages', icon: '💬', label: 'Messages', badge: chatUnread },
     { to: '/files', icon: '📁', label: 'Files' },
     { to: '/activity', icon: '⚡', label: 'Activity' },
@@ -351,8 +424,10 @@ function Shell() {
 
 export default function App() {
   return (
-    <BrowserRouter>
-      <Shell />
-    </BrowserRouter>
+    <AppErrorBoundary>
+      <BrowserRouter>
+        <Shell />
+      </BrowserRouter>
+    </AppErrorBoundary>
   );
 }

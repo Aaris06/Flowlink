@@ -37,6 +37,22 @@ export default function MyDevicesPage({ ctx }: Props) {
   const intentRouterRef = useRef<IntentRouter | null>(null);
   const incomingBuffersRef = useRef<Map<string, any>>(new Map());
 
+  const normalizeDevice = (payload: any): Device | null => {
+    const raw = payload?.device || payload;
+    if (!raw?.id) return null;
+
+    return {
+      id: raw.id,
+      name: raw.name || raw.deviceName || 'Unknown Device',
+      username: raw.username || '',
+      type: raw.type || raw.deviceType || 'laptop',
+      online: typeof raw.online === 'boolean' ? raw.online : true,
+      permissions: raw.permissions || {},
+      joinedAt: raw.joinedAt || Date.now(),
+      lastSeen: raw.lastSeen || Date.now(),
+    };
+  };
+
   useEffect(() => {
     if (!session) return;
     const ws = (window as any).appWebSocket as WebSocket | null;
@@ -61,20 +77,29 @@ export default function MyDevicesPage({ ctx }: Props) {
     const handler = (e: MessageEvent) => {
       const msg = JSON.parse(e.data);
       switch (msg.type) {
-        case 'device_connected':
-          setDevices(p => { const m = new Map(p); m.set(msg.payload.device.id, msg.payload.device); return m; });
+        case 'device_connected': {
+          const device = normalizeDevice(msg.payload);
+          if (!device || device.id === deviceId) break;
+          setDevices(p => { const m = new Map(p); m.set(device.id, device); return m; });
           break;
+        }
         case 'device_disconnected':
           setDevices(p => { const m = new Map(p); m.delete(msg.payload.deviceId); return m; });
           setTransfers(p => { const n = { ...p }; delete n[msg.payload.deviceId]; return n; });
           break;
-        case 'device_status_update':
-          setDevices(p => { const m = new Map(p); m.set(msg.payload.device.id, msg.payload.device); return m; });
+        case 'device_status_update': {
+          const device = normalizeDevice(msg.payload);
+          if (!device || device.id === deviceId) break;
+          setDevices(p => { const m = new Map(p); m.set(device.id, device); return m; });
           break;
+        }
         case 'session_joined':
           if (msg.payload?.devices) {
             const dm = new Map<string, Device>();
-            msg.payload.devices.forEach((d: any) => { if (d.id !== deviceId) dm.set(d.id, d); });
+            msg.payload.devices.forEach((d: any) => {
+              const device = normalizeDevice(d);
+              if (device && device.id !== deviceId) dm.set(device.id, device);
+            });
             setDevices(dm);
           }
           if (msg.payload?.groups) groupService.setGroups(msg.payload.groups);
@@ -145,7 +170,23 @@ export default function MyDevicesPage({ ctx }: Props) {
     const a = document.createElement('a'); a.href = url; a.download = buf.fileName; a.click();
     setTimeout(() => URL.revokeObjectURL(url), 1200);
     if (buf.sourceDevice) {
-      setTransfers(p => ({ ...p, [buf.sourceDevice]: { ...p[buf.sourceDevice]!, progress: 100, completed: true } }));
+      setTransfers(p => {
+        const current = p[buf.sourceDevice];
+        return {
+          ...p,
+          [buf.sourceDevice]: {
+            fileName: current?.fileName || buf.fileName,
+            direction: 'receiving',
+            progress: 100,
+            totalBytes: current?.totalBytes || buf.totalBytes,
+            transferredBytes: current?.transferredBytes || buf.totalBytes,
+            speedBytesPerSec: current?.speedBytesPerSec || 0,
+            etaSeconds: 0,
+            startedAt: current?.startedAt || buf.startedAt,
+            completed: true,
+          },
+        };
+      });
       setTimeout(() => setTransfers(p => { const n = { ...p }; delete n[buf.sourceDevice]; return n; }), 2000);
     }
   };
@@ -204,7 +245,11 @@ export default function MyDevicesPage({ ctx }: Props) {
         await fileBridgeRef.current.sendFile(file, targetId, (stats) => setTransfers(p => ({ ...p, [targetId]: { ...stats, fileName: `${files.length} files`, totalBytes: total, transferredBytes: sent + stats.transferredBytes, progress: Math.round(((sent + stats.transferredBytes) / total) * 100) } })));
         sent += file.size;
       }
-      setTransfers(p => ({ ...p, [targetId]: { ...(p[targetId] as FileTransferStatus), progress: 100, completed: true } }));
+      setTransfers(p => {
+        const current = p[targetId];
+        if (!current) return p;
+        return { ...p, [targetId]: { ...current, progress: 100, transferredBytes: current.totalBytes, etaSeconds: 0, completed: true } };
+      });
       setTimeout(() => setTransfers(p => { const n = { ...p }; delete n[targetId]; return n; }), 2000);
     }
   };

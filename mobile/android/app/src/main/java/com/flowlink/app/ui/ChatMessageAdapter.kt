@@ -1,9 +1,9 @@
 package com.flowlink.app.ui
 
-import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Color
 import android.graphics.drawable.GradientDrawable
+import android.media.MediaPlayer
 import android.util.Base64
 import android.view.Gravity
 import android.view.LayoutInflater
@@ -29,6 +29,7 @@ class ChatMessageAdapter(
 ) : RecyclerView.Adapter<ChatMessageAdapter.MessageViewHolder>() {
 
     private val timeFormatter = SimpleDateFormat("HH:mm", Locale.getDefault())
+    private val activePlayers = mutableMapOf<String, MediaPlayer>()
 
     class MessageViewHolder(itemView: View) : RecyclerView.ViewHolder(itemView) {
         val tvSenderName: TextView = itemView.findViewById(R.id.tv_sender_name)
@@ -36,16 +37,20 @@ class ChatMessageAdapter(
         val bubble: LinearLayout = itemView.findViewById(R.id.bubble)
         val replyStrip: LinearLayout = itemView.findViewById(R.id.reply_strip)
         val tvReplyPreview: TextView = itemView.findViewById(R.id.tv_reply_preview)
-        // File card
         val fileCard: LinearLayout = itemView.findViewById(R.id.file_card)
         val ivImagePreview: ImageView = itemView.findViewById(R.id.iv_image_preview)
+        val voiceRow: LinearLayout = itemView.findViewById(R.id.voice_row)
+        val btnVoicePlay: FrameLayout = itemView.findViewById(R.id.btn_voice_play)
+        val tvVoicePlayIcon: TextView = itemView.findViewById(R.id.tv_voice_play_icon)
+        val tvVoiceDuration: TextView = itemView.findViewById(R.id.tv_voice_duration)
+        val tvVoiceSize: TextView = itemView.findViewById(R.id.tv_voice_size)
+        val voiceProgressBar: View = itemView.findViewById(R.id.voice_progress_bar)
         val fileRow: LinearLayout = itemView.findViewById(R.id.file_row)
         val fileIconBg: View = itemView.findViewById(R.id.file_icon_bg)
         val tvFileTypeBadge: TextView = itemView.findViewById(R.id.tv_file_type_badge)
         val tvFileNameBubble: TextView = itemView.findViewById(R.id.tv_file_name_bubble)
         val tvFileMetaBubble: TextView = itemView.findViewById(R.id.tv_file_meta_bubble)
         val btnFileDownload: FrameLayout = itemView.findViewById(R.id.btn_file_download)
-        // Text
         val tvMessageText: TextView = itemView.findViewById(R.id.tv_message_text)
         val tvMessageTime: TextView = itemView.findViewById(R.id.tv_message_time)
         val tvTicks: TextView = itemView.findViewById(R.id.tv_ticks)
@@ -62,7 +67,6 @@ class ChatMessageAdapter(
         val msg = messages[position]
         val isSelf = msg.sourceDevice == selfDeviceId
 
-        // Reply strip
         if (msg.replyToId != null && msg.replyToText != null) {
             holder.replyStrip.visibility = View.VISIBLE
             holder.tvReplyPreview.text = "${msg.replyToUsername ?: "User"}: ${msg.replyToText.take(60)}"
@@ -70,7 +74,6 @@ class ChatMessageAdapter(
             holder.replyStrip.visibility = View.GONE
         }
 
-        // File or text
         if (msg.fileId != null && msg.fileName != null) {
             holder.fileCard.visibility = View.VISIBLE
             holder.tvMessageText.visibility = View.GONE
@@ -79,48 +82,48 @@ class ChatMessageAdapter(
             val isImage = msg.fileType?.startsWith("image") == true ||
                           ext in listOf("jpg", "jpeg", "png", "gif", "webp", "bmp")
             val isVoice = msg.fileType?.startsWith("audio") == true ||
-                          ext in listOf("m4a", "mp3", "ogg", "wav") ||
+                          ext in listOf("m4a", "mp3", "ogg", "wav", "webm") ||
                           msg.fileName.startsWith("voice_")
 
-            if (isImage && msg.fileData != null) {
-                // Show image preview inline (WhatsApp style)
-                holder.ivImagePreview.visibility = View.VISIBLE
-                holder.fileRow.visibility = View.VISIBLE
-                try {
-                    val bytes = Base64.decode(msg.fileData, Base64.DEFAULT)
-                    val bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
-                    holder.ivImagePreview.setImageBitmap(bmp)
-                } catch (e: Exception) {
+            when {
+                isVoice && msg.fileData != null -> {
                     holder.ivImagePreview.visibility = View.GONE
+                    holder.voiceRow.visibility = View.VISIBLE
+                    holder.fileRow.visibility = View.GONE
+                    holder.tvVoiceSize.text = if (msg.fileSize > 0) formatBytes(msg.fileSize) else ""
+                    // Reset play icon
+                    val isPlaying = activePlayers[msg.messageId]?.isPlaying == true
+                    holder.tvVoicePlayIcon.text = if (isPlaying) "⏸" else "▶"
+                    holder.btnVoicePlay.setOnClickListener { playOrPauseVoice(msg, holder) }
                 }
-                holder.tvFileTypeBadge.text = "🖼"
-                setIconColor(holder.fileIconBg, "#00BCD4")
-                holder.tvFileNameBubble.text = msg.fileName
-                val sizeStr = if (msg.fileSize > 0) formatBytes(msg.fileSize) else ""
-                holder.tvFileMetaBubble.text = "${ext.uppercase()} · $sizeStr"
-            } else {
-                holder.ivImagePreview.visibility = View.GONE
-                holder.fileRow.visibility = View.VISIBLE
-
-                if (isVoice) {
-                    holder.tvFileTypeBadge.text = "🎙"
-                    setIconColor(holder.fileIconBg, "#9C27B0")
-                    holder.tvFileNameBubble.text = "Voice message"
-                    val sizeStr = if (msg.fileSize > 0) formatBytes(msg.fileSize) else ""
-                    holder.tvFileMetaBubble.text = "Audio · $sizeStr"
-                } else {
+                isImage && msg.fileData != null -> {
+                    holder.ivImagePreview.visibility = View.VISIBLE
+                    holder.voiceRow.visibility = View.GONE
+                    holder.fileRow.visibility = View.VISIBLE
+                    try {
+                        val bytes = Base64.decode(msg.fileData, Base64.DEFAULT)
+                        holder.ivImagePreview.setImageBitmap(BitmapFactory.decodeByteArray(bytes, 0, bytes.size))
+                    } catch (_: Exception) { holder.ivImagePreview.visibility = View.GONE }
+                    holder.tvFileTypeBadge.text = "🖼"
+                    setIconColor(holder.fileIconBg, "#00BCD4")
+                    holder.tvFileNameBubble.text = msg.fileName
+                    holder.tvFileMetaBubble.text = "${ext.uppercase()} · ${formatBytes(msg.fileSize)}"
+                    holder.btnFileDownload.setOnClickListener { onFileDownload(msg) }
+                    holder.ivImagePreview.setOnClickListener { onFileDownload(msg) }
+                }
+                else -> {
+                    holder.ivImagePreview.visibility = View.GONE
+                    holder.voiceRow.visibility = View.GONE
+                    holder.fileRow.visibility = View.VISIBLE
                     val (letter, color) = getFileIconInfo(ext)
                     holder.tvFileTypeBadge.text = letter
                     setIconColor(holder.fileIconBg, color)
                     holder.tvFileNameBubble.text = msg.fileName
                     val sizeStr = if (msg.fileSize > 0) " · ${formatBytes(msg.fileSize)}" else ""
                     holder.tvFileMetaBubble.text = "${ext.uppercase()}$sizeStr"
+                    holder.btnFileDownload.setOnClickListener { onFileDownload(msg) }
                 }
             }
-
-            holder.btnFileDownload.setOnClickListener { onFileDownload(msg) }
-            // Tap image to view full screen
-            holder.ivImagePreview.setOnClickListener { onFileDownload(msg) }
         } else {
             holder.fileCard.visibility = View.GONE
             holder.tvMessageText.visibility = View.VISIBLE
@@ -135,15 +138,8 @@ class ChatMessageAdapter(
             holder.bubble.setBackgroundResource(R.drawable.chat_bubble_self)
             holder.tvMessageText.setTextColor(Color.WHITE)
             holder.tvTicks.visibility = View.VISIBLE
-            holder.tvTicks.text = when {
-                msg.seen -> "✓✓"
-                msg.delivered -> "✓✓"
-                else -> "✓"
-            }
-            holder.tvTicks.setTextColor(
-                if (msg.seen) Color.parseColor("#60A5FA")
-                else Color.parseColor("#AAFFFFFF")
-            )
+            holder.tvTicks.text = when { msg.seen -> "✓✓"; msg.delivered -> "✓✓"; else -> "✓" }
+            holder.tvTicks.setTextColor(if (msg.seen) Color.parseColor("#60A5FA") else Color.parseColor("#AAFFFFFF"))
         } else {
             holder.rootLayout.gravity = Gravity.START
             holder.tvSenderName.visibility = View.VISIBLE
@@ -156,58 +152,107 @@ class ChatMessageAdapter(
         holder.bubble.setOnLongClickListener { onReply(msg); true }
     }
 
-    // Returns (letter, hex color) for file type icon - matches WhatsApp style
-    private fun getFileIconInfo(ext: String): Pair<String, String> = when (ext) {
-        "pdf"                       -> Pair("P", "#F44336") // red
-        "doc", "docx"               -> Pair("W", "#2196F3") // blue (Word)
-        "xls", "xlsx"               -> Pair("X", "#4CAF50") // green (Excel)
-        "ppt", "pptx"               -> Pair("P", "#FF5722") // deep orange (PowerPoint)
-        "txt"                       -> Pair("T", "#607D8B") // grey
-        "zip", "rar", "7z", "tar"   -> Pair("Z", "#795548") // brown
-        "mp4", "mkv", "avi", "mov"  -> Pair("▶", "#9C27B0") // purple (video)
-        "mp3", "wav", "ogg", "m4a"  -> Pair("♪", "#009688") // teal (audio)
-        "apk"                       -> Pair("A", "#4CAF50") // green
-        else                        -> Pair("F", "#607D8B") // grey default
+    private fun playOrPauseVoice(msg: ChatMessage, holder: MessageViewHolder) {
+        val id = msg.messageId
+        val existing = activePlayers[id]
+
+        if (existing != null && existing.isPlaying) {
+            existing.pause()
+            holder.tvVoicePlayIcon.text = "▶"
+            return
+        }
+        if (existing != null) {
+            existing.start()
+            holder.tvVoicePlayIcon.text = "⏸"
+            updateVoiceProgress(existing, holder, id)
+            return
+        }
+
+        // Stop any other playing
+        activePlayers.values.forEach { try { it.stop(); it.release() } catch (_: Exception) {} }
+        activePlayers.clear()
+
+        try {
+            val bytes = Base64.decode(msg.fileData!!, Base64.DEFAULT)
+            val tmp = java.io.File.createTempFile("voice_", ".tmp", holder.itemView.context.cacheDir)
+            tmp.writeBytes(bytes)
+            val player = MediaPlayer().apply { setDataSource(tmp.absolutePath); prepare() }
+            activePlayers[id] = player
+            holder.tvVoicePlayIcon.text = "⏸"
+            holder.tvVoiceDuration.text = formatDuration(player.duration / 1000)
+            player.start()
+            updateVoiceProgress(player, holder, id)
+            player.setOnCompletionListener {
+                holder.tvVoicePlayIcon.text = "▶"
+                holder.tvVoiceDuration.text = formatDuration(player.duration / 1000)
+                activePlayers.remove(id)
+                tmp.delete()
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("ChatAdapter", "Voice play failed", e)
+        }
     }
 
-    // Set rounded background color on the icon view
+    private fun updateVoiceProgress(player: MediaPlayer, holder: MessageViewHolder, id: String) {
+        val handler = android.os.Handler(android.os.Looper.getMainLooper())
+        val r = object : Runnable {
+            override fun run() {
+                if (!activePlayers.containsKey(id)) return
+                try {
+                    if (player.isPlaying) {
+                        val pos = player.currentPosition / 1000
+                        val dur = player.duration / 1000
+                        holder.tvVoiceDuration.text = "${formatDuration(pos)} / ${formatDuration(dur)}"
+                        holder.voiceProgressBar.scaleX = if (dur > 0) player.currentPosition.toFloat() / player.duration else 0f
+                        holder.voiceProgressBar.pivotX = 0f
+                        handler.postDelayed(this, 200)
+                    }
+                } catch (_: Exception) {}
+            }
+        }
+        handler.post(r)
+    }
+
+    private fun formatDuration(s: Int) = "${s.coerceAtLeast(0) / 60}:${(s.coerceAtLeast(0) % 60).toString().padStart(2, '0')}"
+
+    private fun getFileIconInfo(ext: String): Pair<String, String> = when (ext) {
+        "pdf" -> Pair("P", "#F44336"); "doc", "docx" -> Pair("W", "#2196F3")
+        "xls", "xlsx" -> Pair("X", "#4CAF50"); "ppt", "pptx" -> Pair("P", "#FF5722")
+        "txt" -> Pair("T", "#607D8B"); "zip", "rar", "7z" -> Pair("Z", "#795548")
+        "mp4", "mkv", "avi" -> Pair("▶", "#9C27B0"); else -> Pair("F", "#607D8B")
+    }
+
     private fun setIconColor(view: View, hexColor: String) {
-        val drawable = GradientDrawable().apply {
-            shape = GradientDrawable.RECTANGLE
-            cornerRadius = 10f
+        view.background = GradientDrawable().apply {
+            shape = GradientDrawable.RECTANGLE; cornerRadius = 10f
             setColor(Color.parseColor(hexColor))
         }
-        view.background = drawable
     }
 
-    override fun getItemCount(): Int = messages.size
+    override fun getItemCount() = messages.size
 
     fun updateMessage(messageId: String, delivered: Boolean, seen: Boolean) {
-        val index = messages.indexOfFirst { it.messageId == messageId }
-        if (index >= 0) {
-            messages[index] = messages[index].copy(delivered = delivered, seen = seen)
-            notifyItemChanged(index)
-        }
+        val i = messages.indexOfFirst { it.messageId == messageId }
+        if (i >= 0) { messages[i] = messages[i].copy(delivered = delivered, seen = seen); notifyItemChanged(i) }
     }
 
     fun attachSwipeToReply(recyclerView: RecyclerView) {
-        val callback = object : ItemTouchHelper.SimpleCallback(0, ItemTouchHelper.RIGHT) {
+        val cb = object : ItemTouchHelper.SimpleCallback(0, ItemTouchHelper.RIGHT) {
             override fun onMove(rv: RecyclerView, vh: RecyclerView.ViewHolder, t: RecyclerView.ViewHolder) = false
-            override fun onSwiped(viewHolder: RecyclerView.ViewHolder, direction: Int) {
-                val pos = viewHolder.adapterPosition
+            override fun onSwiped(vh: RecyclerView.ViewHolder, d: Int) {
+                val pos = vh.adapterPosition
                 if (pos != RecyclerView.NO_ID.toInt() && pos < messages.size) onReply(messages[pos])
                 notifyItemChanged(pos)
             }
-            override fun getSwipeThreshold(viewHolder: RecyclerView.ViewHolder) = 0.3f
+            override fun getSwipeThreshold(vh: RecyclerView.ViewHolder) = 0.3f
         }
-        ItemTouchHelper(callback).attachToRecyclerView(recyclerView)
+        ItemTouchHelper(cb).attachToRecyclerView(recyclerView)
     }
 
     private fun formatBytes(bytes: Long): String {
         if (bytes <= 0) return "0 B"
-        val units = arrayOf("B", "KB", "MB", "GB")
-        var size = bytes.toDouble(); var i = 0
-        while (size >= 1024 && i < units.lastIndex) { size /= 1024; i++ }
-        return "${if (size >= 10 || i == 0) size.toInt() else String.format("%.1f", size)} ${units[i]}"
+        val units = arrayOf("B", "KB", "MB", "GB"); var s = bytes.toDouble(); var i = 0
+        while (s >= 1024 && i < units.lastIndex) { s /= 1024; i++ }
+        return "${if (s >= 10 || i == 0) s.toInt() else String.format("%.1f", s)} ${units[i]}"
     }
 }

@@ -31,7 +31,10 @@ export default function ActivityPage({ ctx }: Props) {
     if (!ws) return;
     const handler = (e: MessageEvent) => {
       const msg = JSON.parse(e.data);
-      if (msg.type === 'device_connected') logActivity({ type: 'device', icon: '📱', label: `${msg.payload.device.username || msg.payload.device.name} joined the session`, sub: `Device: ${msg.payload.device.name}` });
+      if (msg.type === 'device_connected') {
+        const device = msg.payload?.device || msg.payload;
+        if (device?.id) logActivity({ type: 'device', icon: '📱', label: `${device.username || device.name || 'A device'} joined the session`, sub: `Device: ${device.name || device.deviceName || device.id}` });
+      }
       if (msg.type === 'device_disconnected') logActivity({ type: 'device', icon: '🔌', label: 'A device left the session', sub: '' });
       if (msg.type === 'chat_message' && msg.payload?.sourceDevice !== deviceId) logActivity({ type: 'chat', icon: '💬', label: `${msg.payload?.chat?.username || 'Someone'} sent a message`, sub: (msg.payload?.chat?.text || '').slice(0, 80) });
       if (msg.type === 'study_store_upload') logActivity({ type: 'file', icon: '📤', label: 'File uploaded to study store', sub: msg.payload?.file?.name || '' });

@@ -70,7 +70,37 @@
 }
 .msg-img:hover { opacity: 0.9; }
 .msg-img-name { font-size: 0.7rem; color: rgba(255,255,255,0.6); margin-top: 3px; padding: 0 2px; }
-.msg-caption { font-size: 0.82rem; margin-top: 4px; padding: 0 2px; }
+/* Voice message (WhatsApp style) */
+.msg-voice {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 4px; min-width: 200px;
+}
+.msg-voice-icon { font-size: 1.2rem; flex-shrink: 0; }
+.msg-voice-audio {
+  flex: 1; height: 32px; min-width: 140px;
+  accent-color: #a78bfa;
+}
+.msg-voice-audio::-webkit-media-controls-panel { background: transparent; }
+.msg-voice-size { font-size: 0.68rem; color: rgba(255,255,255,0.6); flex-shrink: 0; }
+
+/* Recording bar */
+.msg-recording-bar {
+  flex: 1; display: flex; align-items: center; gap: 8px;
+  background: rgba(239,68,68,0.1); border-radius: 10px;
+  padding: 0 12px; height: 38px;
+}
+.msg-recording-dot {
+  width: 10px; height: 10px; border-radius: 50%;
+  background: #ef4444; flex-shrink: 0;
+  animation: recPulse 1s infinite;
+}
+@keyframes recPulse {
+  0%, 100% { opacity: 1; } 50% { opacity: 0.3; }
+}
+.msg-recording-time { font-size: 0.9rem; font-weight: 700; color: #ef4444; font-variant-numeric: tabular-nums; }
+.msg-recording-label { font-size: 0.78rem; color: var(--text-3); }
+.recording-cancel { color: #ef4444 !important; border-color: rgba(239,68,68,0.3) !important; }
+.msg-mic-btn { font-size: 1.1rem; }
 
 /* WhatsApp-style file card */
 .msg-file-card {

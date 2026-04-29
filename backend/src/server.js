@@ -1109,17 +1109,19 @@ function handleFileTransferMessage(ws, message) {
     timestamp: Date.now(),
   }));
 
-  ws.send(JSON.stringify({
-    type: 'file_transfer_forwarded',
-    sessionId,
-    deviceId,
-    payload: {
-      targetDevice,
-      transferId: message.payload?.transferId,
-      type: message.type,
-    },
-    timestamp: Date.now(),
-  }));
+  if (message.type !== 'file_transfer_chunk') {
+    ws.send(JSON.stringify({
+      type: 'file_transfer_forwarded',
+      sessionId,
+      deviceId,
+      payload: {
+        targetDevice,
+        transferId: message.payload?.transferId,
+        type: message.type,
+      },
+      timestamp: Date.now(),
+    }));
+  }
 }
 
 /**

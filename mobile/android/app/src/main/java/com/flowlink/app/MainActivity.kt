@@ -993,27 +993,58 @@ class MainActivity : AppCompatActivity(), UsernameDialogFragment.UsernameDialogL
 
     fun openReceivedTransferFile(file: File, fileName: String, fileType: String, sourceDevice: String) {
         try {
-            val downloadsDir = android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS)
-            val flowlinkDir = File(downloadsDir, "FlowLink")
-            if (!flowlinkDir.exists()) {
-                flowlinkDir.mkdirs()
-            }
-            val persistedFile = File(flowlinkDir, fileName)
-            file.copyTo(persistedFile, overwrite = true)
             val inferredType = if (fileType.isBlank()) "*/*" else fileType
-            val uri = FileProvider.getUriForFile(this, "${BuildConfig.APPLICATION_ID}.fileprovider", persistedFile)
-            val openIntent = Intent(Intent.ACTION_VIEW).apply {
-                setDataAndType(uri, inferredType)
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            val isImage = inferredType.startsWith("image/")
+
+            // Save to Downloads via MediaStore (no FileProvider needed)
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                val collection = if (isImage)
+                    android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI
+                else
+                    android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI
+                val values = android.content.ContentValues().apply {
+                    put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME, fileName)
+                    put(android.provider.MediaStore.MediaColumns.MIME_TYPE, inferredType)
+                    put(android.provider.MediaStore.MediaColumns.IS_PENDING, 1)
+                }
+                val uri = contentResolver.insert(collection, values)
+                if (uri != null) {
+                    contentResolver.openOutputStream(uri)?.use { out -> file.inputStream().use { it.copyTo(out) } }
+                    values.clear()
+                    values.put(android.provider.MediaStore.MediaColumns.IS_PENDING, 0)
+                    contentResolver.update(uri, values, null, null)
+                    // Open the file
+                    val openIntent = android.content.Intent(android.content.Intent.ACTION_VIEW).apply {
+                        setDataAndType(uri, inferredType)
+                        addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                        addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    }
+                    val chooser = android.content.Intent.createChooser(openIntent, "Open $fileName").apply {
+                        addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                    }
+                    startActivity(chooser)
+                    notificationService.showFileReceived(fileName, sourceDevice.ifBlank { "Device" }, uri.toString())
+                    return
+                }
             }
-            val chooser = Intent.createChooser(openIntent, "Open $fileName with")
-            chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+
+            // Fallback: save to cache and open via FileProvider
+            val cacheFile = File(cacheDir, "flowlink_recv_${System.currentTimeMillis()}_$fileName")
+            file.copyTo(cacheFile, overwrite = true)
+            val uri = androidx.core.content.FileProvider.getUriForFile(this, "${BuildConfig.APPLICATION_ID}.fileprovider", cacheFile)
+            val openIntent = android.content.Intent(android.content.Intent.ACTION_VIEW).apply {
+                setDataAndType(uri, inferredType)
+                addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            val chooser = android.content.Intent.createChooser(openIntent, "Open $fileName").apply {
+                addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
             startActivity(chooser)
-            notificationService.showFileReceived(fileName, sourceDevice.ifBlank { "Device" }, persistedFile.absolutePath)
+            notificationService.showFileReceived(fileName, sourceDevice.ifBlank { "Device" }, cacheFile.absolutePath)
         } catch (e: Exception) {
             android.util.Log.e("FlowLink", "Failed to open received transfer file", e)
-            Toast.makeText(this, "Received $fileName in Downloads/FlowLink", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "Received $fileName - saved to Downloads", Toast.LENGTH_LONG).show()
         }
     }
 

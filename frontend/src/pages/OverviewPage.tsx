@@ -23,6 +23,21 @@ export default function OverviewPage({ ctx }: Props) {
   const [groupCount, setGroupCount] = useState(0);
   const navigate = useNavigate();
 
+  const normalizeDevice = (payload: any): Device | null => {
+    const raw = payload?.device || payload;
+    if (!raw?.id) return null;
+    return {
+      id: raw.id,
+      name: raw.name || raw.deviceName || 'Unknown Device',
+      username: raw.username || '',
+      type: raw.type || raw.deviceType || 'laptop',
+      online: typeof raw.online === 'boolean' ? raw.online : true,
+      permissions: raw.permissions || { files: false, media: false, prompts: false, clipboard: false, remote_browse: false },
+      joinedAt: raw.joinedAt || Date.now(),
+      lastSeen: raw.lastSeen || Date.now(),
+    };
+  };
+
   useEffect(() => {
     const handleSessionMsg = (e: Event) => {
       const msg = (e as CustomEvent).detail?.message;
@@ -70,11 +85,17 @@ export default function OverviewPage({ ctx }: Props) {
     const ws = (window as any).appWebSocket as WebSocket | null;
     const handler = (e: MessageEvent) => {
       const msg = JSON.parse(e.data);
-      if (msg.type === 'device_connected') setDevices(p => { const m = new Map(p); m.set(msg.payload.device.id, msg.payload.device); return m; });
+      if (msg.type === 'device_connected') {
+        const device = normalizeDevice(msg.payload);
+        if (device && device.id !== deviceId) setDevices(p => { const m = new Map(p); m.set(device.id, device); return m; });
+      }
       if (msg.type === 'device_disconnected') setDevices(p => { const m = new Map(p); m.delete(msg.payload.deviceId); return m; });
       if (msg.type === 'session_joined' && msg.payload?.devices) {
         const dm = new Map<string, Device>();
-        msg.payload.devices.forEach((d: any) => { if (d.id !== deviceId) dm.set(d.id, d); });
+        msg.payload.devices.forEach((d: any) => {
+          const device = normalizeDevice(d);
+          if (device && device.id !== deviceId) dm.set(device.id, device);
+        });
         setDevices(dm);
         setStudyFileCount(msg.payload.studyStore?.length || 0);
         setGroupCount(msg.payload.groups?.length || 0);

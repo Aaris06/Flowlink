@@ -1,53 +1,47 @@
 .username-modal-overlay {
   position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: rgba(0, 0, 0, 0.7);
+  inset: 0;
+  background: rgba(0,0,0,0.7);
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 1000;
-  backdrop-filter: blur(4px);
+  z-index: 3000;
+  backdrop-filter: blur(8px);
+  animation: fadeIn 0.2s ease;
 }
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
 
 .username-modal {
-  background: white;
-  border-radius: 12px;
-  padding: 2rem;
+  background: linear-gradient(145deg, #1a1a2e 0%, #16213e 60%, #0f3460 100%);
+  border: 1px solid rgba(108,99,255,0.3);
+  border-radius: 20px;
+  padding: 2rem 2rem 1.5rem;
   max-width: 400px;
-  width: 90%;
-  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3);
-  animation: modalSlideIn 0.3s ease-out;
+  width: 92%;
+  box-shadow: 0 24px 64px rgba(0,0,0,0.6);
+  animation: modalPop 0.25s cubic-bezier(0.34,1.56,0.64,1);
 }
-
-@keyframes modalSlideIn {
-  from {
-    opacity: 0;
-    transform: translateY(-20px) scale(0.95);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
+@keyframes modalPop {
+  from { opacity: 0; transform: scale(0.9) translateY(16px); }
+  to   { opacity: 1; transform: scale(1) translateY(0); }
 }
 
 .username-modal-header {
   text-align: center;
-  margin-bottom: 1.5rem;
+  margin-bottom: 1.75rem;
 }
 
 .username-modal-header h2 {
-  color: #333;
-  margin: 0 0 0.5rem 0;
+  color: #fff;
+  margin: 0 0 0.5rem;
   font-size: 1.5rem;
+  font-weight: 800;
 }
 
 .username-modal-header p {
-  color: #666;
+  color: rgba(255,255,255,0.55);
   margin: 0;
-  font-size: 0.9rem;
+  font-size: 0.88rem;
 }
 
 .username-form {
@@ -59,77 +53,73 @@
 .form-group {
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
+  gap: 0.45rem;
 }
 
 .form-group label {
-  font-weight: 600;
-  color: #333;
-  font-size: 0.9rem;
+  font-weight: 700;
+  color: rgba(255,255,255,0.6);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
 }
 
+/* ── THE FIX: dark bg + white text ── */
 .form-group input {
-  padding: 0.75rem;
-  border: 2px solid #e1e5e9;
-  border-radius: 8px;
-  font-size: 1rem;
-  transition: border-color 0.2s ease;
+  padding: 0.75rem 1rem;
+  background: rgba(255,255,255,0.08);
+  border: 1.5px solid rgba(255,255,255,0.15);
+  border-radius: 10px;
+  font-size: 0.95rem;
+  color: #fff;
+  transition: border-color 0.2s, background 0.2s;
 }
-
+.form-group input::placeholder { color: rgba(255,255,255,0.3); }
 .form-group input:focus {
   outline: none;
-  border-color: #007bff;
-  box-shadow: 0 0 0 3px rgba(0, 123, 255, 0.1);
+  border-color: #6c63ff;
+  background: rgba(108,99,255,0.12);
+  box-shadow: 0 0 0 3px rgba(108,99,255,0.18);
 }
 
 .error-message {
-  color: #dc3545;
-  font-size: 0.8rem;
-  margin-top: 0.25rem;
+  color: #f87171;
+  font-size: 0.78rem;
 }
 
 .device-info {
-  background: #f8f9fa;
-  padding: 0.75rem;
-  border-radius: 6px;
+  background: rgba(255,255,255,0.05);
+  padding: 0.65rem 1rem;
+  border-radius: 8px;
   text-align: center;
+  border: 1px solid rgba(255,255,255,0.08);
 }
-
-.device-info p {
-  margin: 0;
-  font-size: 0.9rem;
-  color: #666;
-}
+.device-info p { margin: 0; font-size: 0.85rem; color: rgba(255,255,255,0.5); }
+.device-info strong { color: rgba(255,255,255,0.85); }
 
 .submit-button {
-  background: #007bff;
-  color: white;
+  background: linear-gradient(135deg, #6c63ff, #a855f7);
+  color: #fff;
   border: none;
-  padding: 0.75rem 1.5rem;
-  border-radius: 8px;
-  font-size: 1rem;
-  font-weight: 600;
+  padding: 0.8rem 1.5rem;
+  border-radius: 10px;
+  font-size: 0.95rem;
+  font-weight: 700;
   cursor: pointer;
-  transition: background-color 0.2s ease;
+  transition: opacity 0.18s, transform 0.18s;
+  box-shadow: 0 4px 14px rgba(108,99,255,0.35);
 }
-
-.submit-button:hover {
-  background: #0056b3;
-}
-
-.submit-button:active {
-  transform: translateY(1px);
-}
+.submit-button:hover { opacity: 0.88; transform: translateY(-1px); }
+.submit-button:active { transform: translateY(0); }
 
 .username-modal-footer {
   text-align: center;
-  margin-top: 1.5rem;
+  margin-top: 1.25rem;
   padding-top: 1rem;
-  border-top: 1px solid #e1e5e9;
+  border-top: 1px solid rgba(255,255,255,0.08);
 }
-
 .username-modal-footer p {
   margin: 0;
-  font-size: 0.8rem;
-  color: #666;
+  font-size: 0.75rem;
+  color: rgba(255,255,255,0.35);
 }

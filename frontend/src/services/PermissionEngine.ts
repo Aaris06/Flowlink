@@ -86,64 +86,17 @@ export default class PermissionEngine {
   }
 
   /**
-   * CRITICAL FIX #2: Enhanced permission request with persistent storage
-   * Matches mobile app permission structure
+   * Request permission - auto-grants without asking the user.
+   * Permissions are managed via the Settings page toggles, not per-action dialogs.
    */
   async requestPermission(
     deviceId: string,
     permissionType: PermissionType,
-    reason?: string
+    _reason?: string
   ): Promise<boolean> {
-    // Check if already granted
-    if (this.hasPermission(deviceId, permissionType)) {
-      return true;
-    }
-
-    return new Promise((resolve) => {
-      const requestId = `${deviceId}-${permissionType}-${Date.now()}`;
-      
-      // Store callback
-      this.permissionCallbacks.set(requestId, resolve);
-
-      // Show permission request UI
-      this.showPermissionRequest(deviceId, permissionType, reason, requestId);
-    });
-  }
-
-  /**
-   * Show permission request UI
-   */
-  private showPermissionRequest(
-    deviceId: string,
-    permissionType: PermissionType,
-    reason: string | undefined,
-    requestId: string
-  ): void {
-    const permissionLabels: Record<PermissionType, string> = {
-      files: 'File Access',
-      media: 'Media Access',
-      prompts: 'Prompt Injection',
-      clipboard: 'Clipboard Sync',
-      remote_browse: 'Remote File Browse',
-    };
-
-    const message = reason
-      ? `${reason}\n\nAllow ${permissionLabels[permissionType]}?`
-      : `Allow ${permissionLabels[permissionType]}?`;
-
-    const granted = window.confirm(message);
-
-    // Resolve callback
-    const callback = this.permissionCallbacks.get(requestId);
-    if (callback) {
-      callback(granted);
-      this.permissionCallbacks.delete(requestId);
-    }
-
-    // Update permissions if granted
-    if (granted) {
-      this.grantPermission(deviceId, permissionType);
-    }
+    // Auto-grant - no dialog needed
+    this.grantPermission(deviceId, permissionType);
+    return true;
   }
 
   /**

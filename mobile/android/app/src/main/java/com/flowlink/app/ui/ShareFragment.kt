@@ -116,8 +116,14 @@ class ShareFragment : Fragment() {
 
         viewLifecycleOwner.lifecycleScope.launch {
             mainActivity.webSocketManager.fileTransferProgress.collect { progress ->
-                val targetId = progress?.deviceId ?: return@collect
-                transferStatuses[targetId] = TransferStatus(
+                val targetId = progress?.deviceId ?: run {
+                    transferStatuses.clear()
+                    deviceAdapter?.updateData(connectedDevices.values.toList(), transferStatuses)
+                    return@collect
+                }
+                val resolvedId = if (connectedDevices.containsKey(targetId)) targetId
+                    else connectedDevices.keys.firstOrNull() ?: targetId
+                transferStatuses[resolvedId] = TransferStatus(
                     fileName = progress.fileName, direction = progress.direction,
                     progress = progress.progress, totalBytes = progress.totalBytes,
                     transferredBytes = progress.transferredBytes, speedBytesPerSec = progress.speedBytesPerSec,
@@ -127,13 +133,13 @@ class ShareFragment : Fragment() {
                 deviceAdapter?.updateData(connectedDevices.values.toList(), transferStatuses)
                 if (progress.progress >= 100) {
                     val r = Runnable {
-                        transferStatuses.remove(targetId)
+                        transferStatuses.remove(resolvedId)
                         deviceAdapter?.updateData(connectedDevices.values.toList(), transferStatuses)
-                        transferClearRunnables.remove(targetId)
+                        transferClearRunnables.remove(resolvedId)
                     }
-                    transferClearRunnables[targetId]?.let { binding.root.removeCallbacks(it) }
-                    transferClearRunnables[targetId] = r
-                    binding.root.postDelayed(r, 1500)
+                    transferClearRunnables[resolvedId]?.let { binding.root.removeCallbacks(it) }
+                    transferClearRunnables[resolvedId] = r
+                    binding.root.postDelayed(r, 3000)
                 }
             }
         }

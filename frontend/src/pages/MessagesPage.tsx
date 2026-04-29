@@ -11,14 +11,15 @@ interface ChatMsg {
 }
 interface CtxMenu { msgId: string; x: number; y: number; own: boolean; }
 interface Props { ctx: AppContext; }
-
 export default function MessagesPage({ ctx }: Props) {
   const { session, deviceId, username } = ctx;
-  // CRITICAL FIX #8: Persist messages to sessionStorage to survive tab switches
-  const [messages, setMessages] = useState<ChatMsg[]>(() => {
+
+  const loadFromStorage = () => {
     const stored = sessionStorage.getItem(`flowlink_messages_${session?.id || 'none'}`);
     return stored ? JSON.parse(stored) : [];
-  });
+  };
+
+  const [messages, setMessages] = useState<ChatMsg[]>(loadFromStorage);
   const [input, setInput] = useState('');
   const [typing, setTyping] = useState<Record<string, boolean>>({});
   const [replyTo, setReplyTo] = useState<ChatMsg | null>(null);
@@ -29,12 +30,28 @@ export default function MessagesPage({ ctx }: Props) {
   const typingTimerRef = useRef<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Voice recording state
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordingSeconds, setRecordingSeconds] = useState(0);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const recordingTimerRef = useRef<number | null>(null);
+
   // Persist messages whenever they change
   useEffect(() => {
     if (session && messages.length > 0) {
       sessionStorage.setItem(`flowlink_messages_${session.id}`, JSON.stringify(messages));
     }
   }, [messages, session]);
+
+  // On mount, sync from sessionStorage to catch messages buffered while on another tab
+  useEffect(() => {
+    const stored = loadFromStorage();
+    if (stored.length > 0) {
+      setMessages(stored);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const scrollToBottom = useCallback(() => {
     setTimeout(() => bodyRef.current?.scrollTo({ top: bodyRef.current.scrollHeight, behavior: 'smooth' }), 50);
@@ -186,8 +203,62 @@ export default function MessagesPage({ ctx }: Props) {
     return <>{parts.map((p, i) => /^https?:\/\//.test(p) ? <a key={i} href={p} target="_blank" rel="noreferrer" className="msg-link">{p}</a> : <span key={i}>{p}</span>)}</>;
   };
 
-  const getFileIconInfo = (ext: string): { letter: string; color: string } => {
-    switch (ext) {
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mimeType = MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : 'audio/ogg';
+      const recorder = new MediaRecorder(stream, { mimeType });
+      audioChunksRef.current = [];
+      recorder.ondataavailable = e => { if (e.data.size > 0) audioChunksRef.current.push(e.data); };
+      recorder.start(100);
+      mediaRecorderRef.current = recorder;
+      setIsRecording(true);
+      setRecordingSeconds(0);
+      recordingTimerRef.current = window.setInterval(() => setRecordingSeconds(s => s + 1), 1000);
+    } catch {
+      alert('Microphone permission denied');
+    }
+  };
+
+  const stopRecording = async () => {
+    const recorder = mediaRecorderRef.current;
+    if (!recorder) return;
+    if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
+    setIsRecording(false);
+    setRecordingSeconds(0);
+
+    await new Promise<void>(resolve => {
+      recorder.onstop = () => resolve();
+      recorder.stop();
+      recorder.stream.getTracks().forEach(t => t.stop());
+    });
+
+    const mimeType = recorder.mimeType || 'audio/webm';
+    const blob = new Blob(audioChunksRef.current, { type: mimeType });
+    if (blob.size < 500) return; // too short
+
+    const ext = mimeType.includes('ogg') ? 'ogg' : 'webm';
+    const fileName = `voice_${Date.now()}.${ext}`;
+    const buf = await blob.arrayBuffer();
+    let bin = ''; const bytes = new Uint8Array(buf);
+    for (let i = 0; i < bytes.byteLength; i++) bin += String.fromCharCode(bytes[i]);
+    const file = new File([blob], fileName, { type: mimeType });
+    sendMessage(file);
+  };
+
+  const cancelRecording = () => {
+    const recorder = mediaRecorderRef.current;
+    if (!recorder) return;
+    if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
+    recorder.stop();
+    recorder.stream.getTracks().forEach(t => t.stop());
+    mediaRecorderRef.current = null;
+    audioChunksRef.current = [];
+    setIsRecording(false);
+    setRecordingSeconds(0);
+  };
+
+  const getFileIconInfo = (ext: string): { letter: string; color: string } => {    switch (ext) {
       case 'pdf':                             return { letter: 'P', color: '#F44336' };
       case 'doc': case 'docx':               return { letter: 'W', color: '#2196F3' };
       case 'xls': case 'xlsx':               return { letter: 'X', color: '#4CAF50' };
@@ -203,6 +274,19 @@ export default function MessagesPage({ ctx }: Props) {
   const renderAttachment = (att: Attachment, own: boolean) => {
     const ext = att.name.split('.').pop()?.toLowerCase() || '';
     const isImage = att.type.startsWith('image/') || ['jpg','jpeg','png','gif','webp','bmp'].includes(ext);
+    const isVoice = att.type.startsWith('audio/') || att.name.startsWith('voice_') || ['m4a','mp3','ogg','webm','wav'].includes(ext);
+
+    // Inline audio player (WhatsApp style)
+    if (isVoice && att.data) {
+      const src = `data:${att.type};base64,${att.data}`;
+      return (
+        <div className={`msg-voice${own ? ' own' : ''}`}>
+          <span className="msg-voice-icon">🎙</span>
+          <audio controls src={src} className="msg-voice-audio" preload="metadata" />
+          <span className="msg-voice-size">{Math.max(1, Math.round(att.size / 1024))} KB</span>
+        </div>
+      );
+    }
 
     if (isImage) {
       const src = `data:${att.type};base64,${att.data}`;
@@ -329,21 +413,40 @@ export default function MessagesPage({ ctx }: Props) {
         )}
 
         <div className="msg-input-row">
-          <button className="msg-attach-btn" title="Attach file" onClick={() => fileInputRef.current?.click()}>📎</button>
-          <input ref={fileInputRef} type="file" hidden onChange={e => { const f = e.target.files?.[0]; if (f) sendMessage(f); e.currentTarget.value = ''; }} />
-          <textarea
-            ref={inputRef}
-            className="msg-input"
-            value={input}
-            onChange={e => handleInputChange(e.target.value)}
-            onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); } }}
-            placeholder={session ? 'Type a message… (Enter to send, Shift+Enter for newline)' : 'Join a session to chat'}
-            disabled={!session}
-            rows={1}
-          />
-          <button className="btn-primary msg-send-btn" onClick={() => sendMessage()} disabled={!input.trim() || !session}>
-            🚀
-          </button>
+          {isRecording ? (
+            <>
+              <button className="msg-attach-btn recording-cancel" title="Cancel" onClick={cancelRecording}>✕</button>
+              <div className="msg-recording-bar">
+                <span className="msg-recording-dot" />
+                <span className="msg-recording-time">
+                  {String(Math.floor(recordingSeconds / 60)).padStart(2,'0')}:{String(recordingSeconds % 60).padStart(2,'0')}
+                </span>
+                <span className="msg-recording-label">Recording…</span>
+              </div>
+              <button className="btn-primary msg-send-btn" onClick={stopRecording}>🚀</button>
+            </>
+          ) : (
+            <>
+              <button className="msg-attach-btn" title="Attach file" onClick={() => fileInputRef.current?.click()}>📎</button>
+              <input ref={fileInputRef} type="file" hidden onChange={e => { const f = e.target.files?.[0]; if (f) sendMessage(f); e.currentTarget.value = ''; }} />
+              <textarea
+                ref={inputRef}
+                className="msg-input"
+                value={input}
+                onChange={e => handleInputChange(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); } }}
+                placeholder={session ? 'Type a message… (Enter to send, Shift+Enter for newline)' : 'Join a session to chat'}
+                disabled={!session}
+                rows={1}
+              />
+              {input.trim() ? (
+                <button className="btn-primary msg-send-btn" onClick={() => sendMessage()} disabled={!session}>🚀</button>
+              ) : (
+                <button className="msg-attach-btn msg-mic-btn" title="Hold to record voice" disabled={!session}
+                  onMouseDown={startRecording} onTouchStart={startRecording}>🎙</button>
+              )}
+            </>
+          )}
         </div>
       </div>
 
