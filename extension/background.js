@@ -3,7 +3,7 @@
  * Handles WebSocket connection, clipboard monitoring, and message routing
  */
 
-// Configuration
+// Configuration wss://flowlink-1.onrender.com
 const BACKEND_URL = 'wss://flowlink-1.onrender.com';
 let ws = null;
 let deviceId = null;
@@ -172,7 +172,7 @@ async function sendFileToTargets(fileName, fileType, arrayBuffer) {
       }
     });
   }
-
+   
   let offset = 0;
   let chunkIndex = 0;
   while (offset < arrayBuffer.byteLength) {

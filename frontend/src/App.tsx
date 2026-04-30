@@ -66,6 +66,7 @@ function Shell() {
   const [username, setUsername] = useState<string | null>(() => localStorage.getItem('flowlink_username'));
   const [invitationService, setInvitationService] = useState<InvitationService | null>(null);
   const [chatUnread, setChatUnread] = useState(0);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   // CRITICAL FIX #6: Persist inbox unread count to localStorage
   const [inboxUnread, setInboxUnread] = useState(() => {
     const stored = localStorage.getItem('flowlink_inbox_unread');
@@ -255,32 +256,17 @@ function Shell() {
   useEffect(() => {
     if (location.pathname === '/messages') setChatUnread(0);
     if (location.pathname === '/settings') {
-      // CRITICAL FIX #6: Clear inbox unread when viewing settings
       setInboxUnread(0);
       localStorage.setItem('flowlink_inbox_unread', '0');
     }
+    setSidebarOpen(false); // close sidebar on navigation
   }, [location.pathname]);
 
-  // CRITICAL FIX #8: Handle tab visibility to persist data
+  // Handle tab visibility - reconnect WebSocket when tab becomes visible
   useEffect(() => {
     const handleVisibilityChange = () => {
-      if (document.hidden) {
-        // Tab hidden - persist critical data to sessionStorage
-        if (session) {
-          sessionStorage.setItem('flowlink_session', JSON.stringify(session));
-        }
-      } else {
-        // Tab visible - restore session if needed and reconnect WebSocket
-        const storedSession = sessionStorage.getItem('flowlink_session');
-        if (storedSession && !session) {
-          try {
-            const restored = JSON.parse(storedSession);
-            setSession(restored);
-          } catch (e) {
-            console.error('Failed to restore session:', e);
-          }
-        }
-        // Reconnect WebSocket if disconnected
+      if (!document.hidden) {
+        // Tab visible - reconnect WebSocket if disconnected
         if (wsRef.current?.readyState !== WebSocket.OPEN) {
           connectWebSocket();
         }
@@ -289,7 +275,7 @@ function Shell() {
     
     document.addEventListener('visibilitychange', handleVisibilityChange);
     return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
-  }, [session]);
+  }, []);
 
   const ctx: AppContext = {
     session, deviceId, deviceName, username: username || '',
@@ -330,7 +316,12 @@ function Shell() {
         deviceName={deviceName}
       />
 
-      <aside className="sidebar">
+      {/* Mobile sidebar overlay */}
+      {sidebarOpen && (
+        <div className="sidebar-overlay" onClick={() => setSidebarOpen(false)} />
+      )}
+
+      <aside className={`sidebar${sidebarOpen ? ' open' : ''}`}>
         <div className="sidebar-brand">
           <div className="sidebar-logo">⚡</div>
           <div className="sidebar-brand-text">
@@ -366,9 +357,14 @@ function Shell() {
 
       <div className="main-content">
         <header className="top-header">
-          <div className="top-header-left">
-            <h2>{pt.title}</h2>
-            <p>{pt.sub}</p>
+          <div className="top-header-left" style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+            <button className="hamburger-btn" onClick={() => setSidebarOpen(o => !o)} aria-label="Menu">
+              ☰
+            </button>
+            <div>
+              <h2>{pt.title}</h2>
+              <p>{pt.sub}</p>
+            </div>
           </div>
           <div className="top-header-right">
             {/* CRITICAL FIX #5: Reconnect button in top-right header */}

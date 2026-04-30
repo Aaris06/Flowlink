@@ -989,61 +989,46 @@ export default function DeviceTiles({
   };
 
   const handleIncomingIntent = async (intent: Intent, sourceDevice: string) => {
-    console.log('📨 Incoming intent');
-    console.log('  Intent type:', intent.intent_type);
-    console.log('  Source device ID:', sourceDevice);
-    console.log('  Current devices map size:', devices.size);
-    console.log('  Devices in map:', Array.from(devices.entries()).map(([id, d]) => `${id.substring(0, 8)}...: ${d.name}`));
+    const device = devices.get(sourceDevice);
+    const deviceName = device?.name || 'Connected Device';
 
     const transferMeta = deriveTransferMeta(intent);
     if (transferMeta) {
       startTransferStatus(sourceDevice, transferMeta.fileName, 'receiving', transferMeta.totalBytes);
     }
-    
-    // Show permission request UI
-    const granted = await requestPermission(intent, sourceDevice);
-    
-    if (granted) {
-      // Grant permission based on intent type
-      grantPermissionForIntent(intent, sourceDevice);
-      
-      // Process intent
-      await processIntent(intent, sourceDevice);
 
-      if (transferMeta) {
-        completeTransferStatus(sourceDevice);
+    // Auto-grant - no confirm dialog
+    grantPermissionForIntent(intent, sourceDevice);
+    await processIntent(intent, sourceDevice);
+
+    if (transferMeta) {
+      completeTransferStatus(sourceDevice);
+    }
+
+    // Show a non-blocking toast so user knows something arrived
+    const toastMsg = (() => {
+      switch (intent.intent_type) {
+        case 'file_handoff': return `📎 File received from ${deviceName}: ${intent.payload.file?.name}`;
+        case 'batch_file_handoff': return `📦 ${intent.payload.files?.totalFiles} files received from ${deviceName}`;
+        case 'clipboard_sync': return `📋 Clipboard synced from ${deviceName}`;
+        case 'link_open': return `🔗 Link opened from ${deviceName}`;
+        case 'media_continuation': return `▶ Media continued from ${deviceName}`;
+        default: return null;
       }
-      
-      // Send acknowledgment
-      if (wsRef.current) {
-        wsRef.current.send(JSON.stringify({
-          type: 'intent_accepted',
-          sessionId: session.id,
-          deviceId,
-          payload: {
-            intentId: intent.timestamp.toString(),
-            sourceDevice,
-          },
-          timestamp: Date.now(),
-        }));
-      }
-    } else {
-      if (transferMeta) {
-        completeTransferStatus(sourceDevice);
-      }
-      // Send rejection
-      if (wsRef.current) {
-        wsRef.current.send(JSON.stringify({
-          type: 'intent_rejected',
-          sessionId: session.id,
-          deviceId,
-          payload: {
-            intentId: intent.timestamp.toString(),
-            sourceDevice,
-          },
-          timestamp: Date.now(),
-        }));
-      }
+    })();
+    if (toastMsg && invitationService) {
+      invitationService.notificationService.showToast({ type: 'success', title: toastMsg, message: '', duration: 3000 });
+    }
+
+    // Send acknowledgment
+    if (wsRef.current) {
+      wsRef.current.send(JSON.stringify({
+        type: 'intent_accepted',
+        sessionId: session.id,
+        deviceId,
+        payload: { intentId: intent.timestamp.toString(), sourceDevice },
+        timestamp: Date.now(),
+      }));
     }
   };
 
@@ -1147,28 +1132,9 @@ export default function DeviceTiles({
     });
   };
 
-  const requestPermission = (intent: Intent, sourceDevice: string): Promise<boolean> => {
-    return new Promise((resolve) => {
-      console.log('🔐 Requesting permission');
-      console.log('  Source device ID:', sourceDevice);
-      console.log('  Looking up in devices map...');
-      
-      const device = devices.get(sourceDevice);
-      console.log('  Device found:', device ? `${device.name} (${device.type})` : 'NOT FOUND ❌');
-      
-      if (!device) {
-        console.log('  Available devices in map:');
-        devices.forEach((d, id) => {
-          console.log(`    ${id.substring(0, 8)}...: ${d.name} (${d.type})`);
-        });
-      }
-      
-      const deviceName = device?.name || 'Unknown Device';
-      
-      const message = getPermissionMessage(intent, deviceName);
-      const granted = window.confirm(message);
-      resolve(granted);
-    });
+  // Auto-grant all intents - no confirmation dialog needed
+  const requestPermission = (_intent: Intent, _sourceDevice: string): Promise<boolean> => {
+    return Promise.resolve(true);
   };
 
   const getPermissionMessage = (intent: Intent, deviceName: string): string => {
@@ -1305,16 +1271,7 @@ export default function DeviceTiles({
     
     console.log(`📦 Batch file transfer received: ${totalFiles} files, ${(totalSize / 1024 / 1024).toFixed(2)} MB`);
     
-    // Show batch download confirmation
-    const confirmed = window.confirm(
-      `Receive ${totalFiles} files (${(totalSize / 1024 / 1024).toFixed(2)} MB)?\n\n` +
-      `Files: ${files.slice(0, 3).map(f => f.name).join(', ')}${files.length > 3 ? ` and ${files.length - 3} more...` : ''}`
-    );
-    
-    if (!confirmed) {
-      console.log('Batch file transfer cancelled by user');
-      return;
-    }
+    // Auto-accept batch file transfers - no confirmation needed
     
     // Create a folder structure for batch downloads
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
