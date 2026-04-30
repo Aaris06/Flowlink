@@ -1132,60 +1132,6 @@ export default function DeviceTiles({
     });
   };
 
-  // Auto-grant all intents - no confirmation dialog needed
-  const requestPermission = (_intent: Intent, _sourceDevice: string): Promise<boolean> => {
-    return Promise.resolve(true);
-  };
-
-  const getPermissionMessage = (intent: Intent, deviceName: string): string => {
-    switch (intent.intent_type) {
-      case 'file_handoff':
-        return `${deviceName} wants to send you a file: ${intent.payload.file?.name}. Allow?`;
-      case 'batch_file_handoff': {
-        const files = intent.payload.files;
-        if (!files) return `${deviceName} wants to send files. Allow?`;
-        const totalSizeMB = (files.totalSize / 1024 / 1024).toFixed(2);
-        const fileList = files.files.slice(0, 3).map(f => f.name).join(', ');
-        const moreText = files.files.length > 3 ? ` and ${files.files.length - 3} more` : '';
-        return `${deviceName} wants to send ${files.totalFiles} files (${totalSizeMB} MB):\n${fileList}${moreText}. Allow?`;
-      }
-      case 'media_continuation': {
-        const rawMedia = intent.payload.media as any;
-        let url = '';
-        if (typeof rawMedia === 'string') {
-          try {
-            const mediaObj = JSON.parse(rawMedia);
-            url = mediaObj.url || '';
-          } catch {}
-        } else {
-          url = rawMedia?.url || '';
-        }
-        return `${deviceName} wants to continue playing media: ${url}. Allow?`;
-      }
-      case 'link_open': {
-        const rawLink = intent.payload.link as any;
-        let url = '';
-        if (typeof rawLink === 'string') {
-          try {
-            const linkObj = JSON.parse(rawLink);
-            url = linkObj.url || '';
-          } catch {}
-        } else {
-          url = rawLink?.url || '';
-        }
-        return `${deviceName} wants to open a link: ${url}. Allow?`;
-      }
-      case 'prompt_injection':
-        return `${deviceName} wants to send you a prompt: "${intent.payload.prompt?.text.substring(0, 50)}...". Allow?`;
-      case 'clipboard_sync':
-        return `${deviceName} wants to sync clipboard. Allow?`;
-      case 'remote_access_request':
-        return `${deviceName} wants to view your screen remotely. Allow screen sharing?`;
-      default:
-        return `${deviceName} wants to perform an action. Allow?`;
-    }
-  };
-
   const processIntent = async (intent: Intent, sourceDevice: string) => {
     switch (intent.intent_type) {
       case 'file_handoff':
