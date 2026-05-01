@@ -337,13 +337,12 @@ function DeviceTileComponent({
           };
         }
         
-        // Default: prompt injection (for code generation, etc.)
+        // Default: clipboard sync for plain text
         return {
-          intent_type: 'prompt_injection',
+          intent_type: 'clipboard_sync',
           payload: {
-            prompt: {
+            clipboard: {
               text: text,
-              target_app: 'editor', // Default to code editor
             },
           },
           target_device: device.id,

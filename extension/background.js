@@ -4,7 +4,7 @@
  */
 
 // Configuration wss://flowlink-1.onrender.com
-const BACKEND_URL = 'wss://flowlink-1.onrender.com';
+const BACKEND_URL = 'ws://192.168.0.107:8080';
 let ws = null;
 let deviceId = null;
 let username = null;
@@ -160,41 +160,33 @@ async function sendFileToTargets(fileName, fileType, arrayBuffer) {
   const transferId = `ext-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   extensionTransfers.set(transferId, { fileName, totalBytes: arrayBuffer.byteLength, transferredBytes: 0, ackedBytes: 0, startedAt: Date.now() });
 
+  // Send start
   for (const targetUsername of targetUsernames) {
     sendMessage({
       type: 'file_transfer_start',
-      payload: {
-        transferId,
-        fileName,
-        fileType,
-        totalBytes: arrayBuffer.byteLength,
-        targetUsername
-      }
+      payload: { transferId, fileName, fileType, totalBytes: arrayBuffer.byteLength, targetUsername }
     });
   }
-   
+
+  // Send chunks with small delay between each to avoid flooding the WebSocket
   let offset = 0;
   let chunkIndex = 0;
   while (offset < arrayBuffer.byteLength) {
     const nextOffset = Math.min(arrayBuffer.byteLength, offset + TRANSFER_CHUNK_SIZE);
     const chunk = arrayBuffer.slice(offset, nextOffset);
     const data = arrayBufferToBase64(chunk);
+
     for (const targetUsername of targetUsernames) {
       sendMessage({
         type: 'file_transfer_chunk',
-        payload: {
-          transferId,
-          chunkIndex,
-          data,
-          fileName,
-          fileType,
-          totalBytes: arrayBuffer.byteLength,
-          targetUsername
-        }
+        payload: { transferId, chunkIndex, data, fileName, fileType, totalBytes: arrayBuffer.byteLength, targetUsername }
       });
     }
+
     offset = nextOffset;
     chunkIndex += 1;
+
+    // Update progress
     const currentTransfer = extensionTransfers.get(transferId) || {};
     extensionTransfers.set(transferId, {
       ...currentTransfer,
@@ -204,16 +196,18 @@ async function sendFileToTargets(fileName, fileType, arrayBuffer) {
       ackedBytes: currentTransfer.ackedBytes || 0,
       startedAt: currentTransfer.startedAt || Date.now(),
     });
+
+    // Yield to event loop every 4 chunks to prevent WebSocket buffer overflow
+    if (chunkIndex % 4 === 0) {
+      await new Promise(resolve => setTimeout(resolve, 10));
+    }
   }
 
+  // Send complete
   for (const targetUsername of targetUsernames) {
     sendMessage({
       type: 'file_transfer_complete',
-      payload: {
-        transferId,
-        fileName,
-        targetUsername
-      }
+      payload: { transferId, fileName, targetUsername }
     });
   }
 

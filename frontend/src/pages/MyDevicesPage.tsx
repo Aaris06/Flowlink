@@ -69,6 +69,9 @@ export default function MyDevicesPage({ ctx }: Props) {
     groupService.initialize(ws, session.id, deviceId);
     groupService.subscribe(setGroups);
 
+    // Signal to App.tsx that MyDevicesPage is handling file transfers
+    (window as any)._myDevicesPageMounted = true;
+
     // Re-join to get fresh device list from server
     if (ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({ type: 'session_join', payload: { code: session.code, deviceId, deviceName, deviceType: 'laptop', username }, timestamp: Date.now() }));
@@ -123,13 +126,36 @@ export default function MyDevicesPage({ ctx }: Props) {
         case 'intent_received':
           handleIncomingIntent(msg.payload.intent, msg.payload.sourceDevice);
           break;
+        case 'tab_handoff_offer': {
+          // Extension sent tab(s) - open them
+          const tabs = msg.payload?.tabs || [];
+          tabs.forEach((tab: any) => { if (tab?.url) window.open(tab.url, '_blank', 'noopener,noreferrer'); });
+          break;
+        }
+        case 'clipboard_broadcast':
+        case 'clipboard_sync': {
+          // Extension sent clipboard content
+          const txt = msg.payload?.clipboard?.text || msg.payload?.clipboard?.url;
+          if (txt) navigator.clipboard.writeText(txt).catch(() => {});
+          break;
+        }
       }
     };
     ws.addEventListener('message', handler);
+
+    // Also handle intents arriving via WebRTC data channel
+    const webrtcIntentHandler = (e: Event) => {
+      const { intent, sourceDevice } = (e as CustomEvent).detail;
+      if (intent) handleIncomingIntent(intent, sourceDevice);
+    };
+    window.addEventListener('intent_received', webrtcIntentHandler);
+
     return () => {
       ws.removeEventListener('message', handler);
+      window.removeEventListener('intent_received', webrtcIntentHandler);
       webrtcRef.current?.cleanup();
       groupService.cleanup();
+      (window as any)._myDevicesPageMounted = false;
     };
   }, [session, deviceId, deviceName, username]);
 
@@ -223,10 +249,15 @@ export default function MyDevicesPage({ ctx }: Props) {
   };
 
   const getPermMsg = (intent: Intent, dName: string) => {
-    if (intent.intent_type === 'file_handoff') return `${dName} wants to send you a file. Allow?`;
-    if (intent.intent_type === 'clipboard_sync') return `${dName} wants to sync clipboard. Allow?`;
-    if (intent.intent_type === 'link_open') return `${dName} wants to open a link. Allow?`;
-    return `${dName} wants to perform an action. Allow?`;
+    const t = intent?.intent_type;
+    if (t === 'file_handoff') return `${dName} wants to send you a file: ${intent.payload?.file?.name || ''}. Allow?`;
+    if (t === 'batch_file_handoff') return `${dName} wants to send ${intent.payload?.files?.totalFiles || 'multiple'} files. Allow?`;
+    if (t === 'clipboard_sync') return `${dName} wants to sync clipboard. Allow?`;
+    if (t === 'link_open') return `${dName} wants to open a link. Allow?`;
+    if (t === 'media_continuation') return `${dName} wants to continue media playback. Allow?`;
+    if (t === 'prompt_injection') return `${dName} wants to send a prompt. Allow?`;
+    // Fallback: show the actual intent type so it's debuggable
+    return `${dName} wants to perform an action (${t || 'unknown'}). Allow?`;
   };
 
   const sendFileWithProgress = async (targetId: string, intent: Intent) => {

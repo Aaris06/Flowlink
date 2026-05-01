@@ -216,6 +216,80 @@ function Shell() {
         }
         break;
       }
+      case 'tab_handoff_offer': {
+        // Extension sent active tab or window tabs - open them
+        const tabs: any[] = message.payload?.tabs || [];
+        const source = message.payload?.sourceUsername || message.payload?.sourceDeviceName || 'Extension';
+        if (tabs.length === 1) {
+          const url = tabs[0]?.url;
+          if (url) window.open(url, '_blank', 'noopener,noreferrer');
+          if (invitationServiceRef.current) {
+            invitationServiceRef.current.notificationService.showToast({
+              type: 'success', title: `Tab received from ${source}`,
+              message: tabs[0]?.title || url, duration: 4000,
+            });
+          }
+        } else if (tabs.length > 1) {
+          // Open all tabs
+          tabs.forEach((tab: any) => {
+            if (tab?.url) window.open(tab.url, '_blank', 'noopener,noreferrer');
+          });
+          if (invitationServiceRef.current) {
+            invitationServiceRef.current.notificationService.showToast({
+              type: 'success', title: `${tabs.length} tabs received from ${source}`,
+              message: message.payload?.collectionTitle || '', duration: 4000,
+            });
+          }
+        }
+        break;
+      }
+      case 'file_transfer_start':
+        // Only buffer if MyDevicesPage is NOT mounted (it handles transfers itself)
+        if (!(window as any)._myDevicesPageMounted) {
+          (window as any)._ftBuffers = (window as any)._ftBuffers || {};
+          (window as any)._ftBuffers[message.payload?.transferId] = {
+            fileName: message.payload?.fileName || 'file',
+            fileType: message.payload?.fileType || 'application/octet-stream',
+            totalBytes: message.payload?.totalBytes || 0,
+            chunks: [] as Uint8Array[],
+          };
+        }
+        break;
+      case 'file_transfer_chunk': {
+        const buf = (window as any)._ftBuffers?.[message.payload?.transferId];
+        if (buf && message.payload?.data) {
+          try {
+            const b64 = message.payload.data as string;
+            const bin = atob(b64);
+            const bytes = new Uint8Array(bin.length);
+            for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+            buf.chunks.push(bytes);
+          } catch { /* ignore bad chunk */ }
+        }
+        break;
+      }
+      case 'file_transfer_complete': {
+        const buf = (window as any)._ftBuffers?.[message.payload?.transferId];
+        if (buf) {
+          try {
+            const totalLen = (buf.chunks as Uint8Array[]).reduce((s: number, c: Uint8Array) => s + c.length, 0);
+            const merged = new Uint8Array(totalLen);
+            let pos = 0;
+            for (const chunk of buf.chunks as Uint8Array[]) { merged.set(chunk, pos); pos += chunk.length; }
+            const blob = new Blob([merged], { type: buf.fileType });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a'); a.href = url; a.download = buf.fileName; a.click();
+            setTimeout(() => URL.revokeObjectURL(url), 2000);
+            if (invitationServiceRef.current) {
+              invitationServiceRef.current.notificationService.showToast({
+                type: 'success', title: `File received: ${buf.fileName}`, message: '', duration: 4000,
+              });
+            }
+          } catch { /* ignore */ }
+          delete (window as any)._ftBuffers[message.payload?.transferId];
+        }
+        break;
+      }
       case 'friend_request':
       case 'friend_request_response':
       case 'sos_alert':
