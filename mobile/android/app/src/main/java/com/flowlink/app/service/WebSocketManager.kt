@@ -1381,6 +1381,9 @@ class WebSocketManager(private val mainActivity: MainActivity) {
                     val fromUsername = payload.optString("fromUsername", "Someone")
                     val fromDeviceId = json.optString("deviceId", "")
                     val fromDeviceName = payload.optString("fromDeviceName", "")
+                    // Ignore if I sent this request (echoed back from session broadcast)
+                    val myUsername = sessionManager.getUsername()
+                    if (fromUsername.equals(myUsername, ignoreCase = true)) return
                     // Add to persistent inbox so it survives fragment recreation
                     com.flowlink.app.ui.InboxFragment.addItem(mainActivity, com.flowlink.app.ui.InboxItem(
                         id = "fr-${System.currentTimeMillis()}",

@@ -242,31 +242,43 @@ wss.on('connection', (ws, req) => {
           // Route directly to target device via global registry (works outside session)
           const targetUsername = message.payload?.toUsername;
           const targetDeviceId = message.payload?.toDeviceId;
-          let targetWs = null;
+          let routed = false;
 
+          // Try direct device ID first
           if (targetDeviceId) {
-            targetWs = deviceConnections.get(targetDeviceId);
-          } else if (targetUsername) {
-            // Search global registry by username (case-insensitive)
+            const targetWs = deviceConnections.get(targetDeviceId);
+            if (targetWs && targetWs.readyState === targetWs.OPEN) {
+              targetWs.send(JSON.stringify({ ...message, timestamp: Date.now() }));
+              routed = true;
+            }
+          }
+
+          // Try username lookup (case-insensitive) across ALL connected devices
+          if (!routed && targetUsername) {
+            const normalizedTarget = targetUsername.trim().toLowerCase();
             for (const [devId, entry] of globalDevices.entries()) {
-              const storedUsername = entry.device?.username || '';
-              if (storedUsername.toLowerCase() === targetUsername.toLowerCase()) {
-                targetWs = deviceConnections.get(devId);
-                console.log(`Found target device for ${targetUsername}: ${devId.substring(0,8)}`);
-                break;
+              if (devId === deviceId) continue; // skip sender
+              const storedUsername = (entry.device?.username || '').toLowerCase();
+              if (storedUsername === normalizedTarget) {
+                const targetWs = deviceConnections.get(devId);
+                if (targetWs && targetWs.readyState === targetWs.OPEN) {
+                  targetWs.send(JSON.stringify({ ...message, timestamp: Date.now() }));
+                  console.log(`Routed ${message.type} to ${targetUsername} (${devId.substring(0,8)})`);
+                  routed = true;
+                  break;
+                }
               }
             }
           }
 
-          if (targetWs && targetWs.readyState === targetWs.OPEN) {
-            targetWs.send(JSON.stringify({ ...message, timestamp: Date.now() }));
-            console.log(`Routed ${message.type} to ${targetUsername || targetDeviceId}`);
-          } else {
-            // Fallback: broadcast to all devices in current session
-            if (message.sessionId) {
-              broadcastToSession(message.sessionId, { ...message, timestamp: Date.now() }, message.deviceId);
-              console.log(`Fallback: broadcast ${message.type} to session ${message.sessionId}`);
-            }
+          // Fallback: broadcast to session
+          if (!routed && message.sessionId) {
+            broadcastToSession(message.sessionId, { ...message, timestamp: Date.now() }, message.deviceId);
+            console.log(`Fallback: broadcast ${message.type} to session ${message.sessionId}`);
+            routed = true;
+          }
+
+          if (!routed) {
             console.warn(`Could not route ${message.type} to ${targetUsername} - device not found or offline`);
           }
           break;

@@ -141,7 +141,9 @@ class InboxFragment : Fragment() {
     }
 
     private fun markAllRead() {
-        items.forEach { it.handled = true }
+        // Only mark non-friend-request items as read
+        // Friend requests need explicit Accept/Decline action
+        items.forEach { if (it.type != "friend_request") it.handled = true }
         val prefs = requireContext().getSharedPreferences(PREFS_KEY, Context.MODE_PRIVATE)
         prefs.edit().putString("items", Gson().toJson(items)).apply()
     }

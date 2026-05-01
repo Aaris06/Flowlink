@@ -175,15 +175,21 @@ class FriendService {
   handleIncoming(message: any, myUsername: string, _myDeviceId: string) {
     if (message.type === 'friend_request') {
       const p = message.payload;
-      // Don't add if already in inbox or already friends
+      if (!p?.fromUsername) return;
+      // Ignore if I sent this request (echoed back from session broadcast)
+      const me = myUsername || localStorage.getItem('flowlink_username') || '';
+      if (p.fromUsername.toLowerCase() === me.toLowerCase()) return;
       const inbox = this.getInbox();
-      if (inbox.some(r => r.fromUsername === p.fromUsername && r.status === 'pending')) return;
-      if (this.isFriend(p.fromUsername)) return;
+      // Case-insensitive duplicate check
+      if (inbox.some(r =>
+        r.fromUsername.toLowerCase() === p.fromUsername.toLowerCase() &&
+        r.status === 'pending'
+      )) return;
       const req: FriendRequest = {
         id: p.requestId || `fr-${Date.now()}`,
         fromUsername: p.fromUsername,
         fromDeviceId: p.fromDeviceId || message.deviceId || '',
-        toUsername: myUsername,
+        toUsername: me,
         status: 'pending',
         sentAt: message.timestamp || Date.now(),
       };

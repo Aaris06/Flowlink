@@ -293,7 +293,8 @@ function Shell() {
       case 'friend_request':
       case 'friend_request_response':
       case 'sos_alert':
-        friendService.handleIncoming(message, username || '', deviceId);
+        // Always read username from localStorage to avoid stale closure
+        friendService.handleIncoming(message, localStorage.getItem('flowlink_username') || username || '', deviceId);
         if (message.type === 'friend_request') {
           setInboxUnread(p => {
             const newCount = p + 1;
