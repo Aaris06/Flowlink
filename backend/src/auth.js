@@ -39,12 +39,12 @@ export async function handleAuthRoutes(req, res) {
     try {
       const hash = await bcrypt.hash(password, 10);
       const result = await pool.query(
-        'INSERT INTO users (username, password) VALUES ($1, $2) RETURNING id, username, created_at',
-        [username.trim(), hash]
+        'INSERT INTO users (username, password, role) VALUES ($1, $2, $3) RETURNING id, username, role, created_at',
+        [username.trim(), hash, 'user']
       );
       const user = result.rows[0];
-      const token = signToken({ id: user.id, username: user.username });
-      return json(res, 201, { token, username: user.username });
+      const token = signToken({ id: user.id, username: user.username, role: user.role });
+      return json(res, 201, { token, username: user.username, role: user.role });
     } catch (err) {
       if (err.code === '23505') {
         return json(res, 409, { error: 'Username already taken' });
@@ -65,7 +65,7 @@ export async function handleAuthRoutes(req, res) {
 
     try {
       const result = await pool.query(
-        'SELECT id, username, password, is_active FROM users WHERE LOWER(username) = LOWER($1)',
+        'SELECT id, username, password, role, is_active FROM users WHERE LOWER(username) = LOWER($1)',
         [username.trim()]
       );
       const user = result.rows[0];
@@ -76,11 +76,10 @@ export async function handleAuthRoutes(req, res) {
       const valid = await bcrypt.compare(password, user.password);
       if (!valid) return json(res, 401, { error: 'Invalid username or password' });
 
-      // Update last_active
       await pool.query('UPDATE users SET last_active = NOW() WHERE id = $1', [user.id]);
 
-      const token = signToken({ id: user.id, username: user.username });
-      return json(res, 200, { token, username: user.username });
+      const token = signToken({ id: user.id, username: user.username, role: user.role });
+      return json(res, 200, { token, username: user.username, role: user.role });
     } catch (err) {
       console.error('Login error:', err.message);
       return json(res, 500, { error: 'Server error' });
@@ -95,13 +94,13 @@ export async function handleAuthRoutes(req, res) {
 
     try {
       const result = await pool.query(
-        'SELECT id, username, created_at, last_active, is_active FROM users WHERE id = $1',
+        'SELECT id, username, role, created_at, last_active, is_active FROM users WHERE id = $1',
         [payload.id]
       );
       const user = result.rows[0];
       if (!user || !user.is_active) return json(res, 401, { error: 'Account not found or deactivated' });
       await pool.query('UPDATE users SET last_active = NOW() WHERE id = $1', [user.id]);
-      return json(res, 200, { username: user.username, createdAt: user.created_at });
+      return json(res, 200, { username: user.username, role: user.role, createdAt: user.created_at });
     } catch (err) {
       return json(res, 500, { error: 'Server error' });
     }

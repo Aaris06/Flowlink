@@ -411,7 +411,7 @@ function Shell() {
     setInboxUnread(0);
   };
 
-  const isAdmin = (username || '').toLowerCase() === 'Aaris';
+  const isAdmin = authService.isAdmin();
 
   const ctx: AppContext = {
     session, deviceId, deviceName, username: username || '',

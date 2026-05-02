@@ -2,10 +2,12 @@ import { SIGNALING_HTTP_URL } from '../config/signaling';
 
 const TOKEN_KEY = 'flowlink_token';
 const USERNAME_KEY = 'flowlink_username';
+const ROLE_KEY = 'flowlink_role';
 
 export interface AuthUser {
   username: string;
   token: string;
+  role: string;
 }
 
 class AuthService {
@@ -15,6 +17,14 @@ class AuthService {
 
   getUsername(): string | null {
     return localStorage.getItem(USERNAME_KEY);
+  }
+
+  getRole(): string {
+    return localStorage.getItem(ROLE_KEY) || 'user';
+  }
+
+  isAdmin(): boolean {
+    return this.getRole() === 'admin';
   }
 
   isLoggedIn(): boolean {
@@ -29,7 +39,7 @@ class AuthService {
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Signup failed');
-    this.saveAuth(data.token, data.username);
+    this.saveAuth(data.token, data.username, data.role || 'user');
     return data;
   }
 
@@ -41,7 +51,7 @@ class AuthService {
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Login failed');
-    this.saveAuth(data.token, data.username);
+    this.saveAuth(data.token, data.username, data.role || 'user');
     return data;
   }
 
@@ -54,20 +64,24 @@ class AuthService {
       });
       if (!res.ok) { this.logout(); return null; }
       const data = await res.json();
+      // Update role in case it changed
+      if (data.role) localStorage.setItem(ROLE_KEY, data.role);
       return data.username;
     } catch {
       return this.getUsername(); // offline fallback
     }
   }
 
-  saveAuth(token: string, username: string) {
+  saveAuth(token: string, username: string, role = 'user') {
     localStorage.setItem(TOKEN_KEY, token);
     localStorage.setItem(USERNAME_KEY, username);
+    localStorage.setItem(ROLE_KEY, role);
   }
 
   logout() {
     localStorage.removeItem(TOKEN_KEY);
     localStorage.removeItem(USERNAME_KEY);
+    localStorage.removeItem(ROLE_KEY);
     localStorage.removeItem('flowlink_inbox_unread');
   }
 

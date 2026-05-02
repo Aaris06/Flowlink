@@ -21,6 +21,7 @@ export async function initDb() {
         id          SERIAL PRIMARY KEY,
         username    TEXT UNIQUE NOT NULL,
         password    TEXT NOT NULL,
+        role        TEXT NOT NULL DEFAULT 'user',
         created_at  TIMESTAMPTZ DEFAULT NOW(),
         last_active TIMESTAMPTZ DEFAULT NOW(),
         is_active   BOOLEAN DEFAULT TRUE
@@ -76,6 +77,9 @@ export async function initDb() {
       CREATE INDEX IF NOT EXISTS idx_friends_user ON friends(user_username);
       CREATE INDEX IF NOT EXISTS idx_inbox_to ON inbox(to_username);
       CREATE INDEX IF NOT EXISTS idx_chat_session ON chat_messages(session_id);
+
+      -- Add role column to existing tables if missing
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'user';
     `);
     console.log('✅ Database schema ready');
   } catch (err) {

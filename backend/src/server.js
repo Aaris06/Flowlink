@@ -90,7 +90,16 @@ const server = createServer(async (req, res) => {
   }
 
   // ── Admin auth helper ──────────────────────────────────────────────────
-  const isAdmin = req.headers['x-admin-secret'] === ADMIN_SECRET;
+  // Accept either the legacy secret header OR a valid admin JWT
+  const adminSecret = req.headers['x-admin-secret'] === ADMIN_SECRET;
+  const adminToken = (() => {
+    const auth = req.headers['authorization'] || '';
+    const t = auth.startsWith('Bearer ') ? auth.slice(7) : null;
+    if (!t) return false;
+    const p = verifyToken(t);
+    return p?.role === 'admin';
+  })();
+  const isAdmin = adminSecret || adminToken;
 
   if (req.url === '/health' || req.url === '/ping') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
