@@ -203,7 +203,19 @@ function Shell() {
         break;
       case 'clipboard_sync': {
         const txt = message.payload?.clipboard?.text || message.payload?.clipboard?.url;
-        if (txt) navigator.clipboard.writeText(txt).catch(() => {});
+        if (txt) {
+          navigator.clipboard.writeText(txt).then(() => {
+            if (invitationServiceRef.current) {
+              const preview = txt.length > 60 ? txt.slice(0, 60) + '…' : txt;
+              invitationServiceRef.current.notificationService.showToast({
+                type: 'success',
+                title: '📋 Copied to clipboard',
+                message: preview,
+                duration: 3000,
+              });
+            }
+          }).catch(() => {});
+        }
         break;
       }
       case 'link_open': {
@@ -217,29 +229,44 @@ function Shell() {
         break;
       }
       case 'tab_handoff_offer': {
-        // Extension sent active tab or window tabs - open them
+        // Extension sent active tab or window tabs
+        // window.open() is blocked from WebSocket handlers - show toast with Open button instead
         const tabs: any[] = message.payload?.tabs || [];
         const source = message.payload?.sourceUsername || message.payload?.sourceDeviceName || 'Extension';
+        if (!tabs.length || !invitationServiceRef.current) break;
+
         if (tabs.length === 1) {
           const url = tabs[0]?.url;
-          if (url) window.open(url, '_blank', 'noopener,noreferrer');
-          if (invitationServiceRef.current) {
-            invitationServiceRef.current.notificationService.showToast({
-              type: 'success', title: `Tab received from ${source}`,
-              message: tabs[0]?.title || url, duration: 4000,
-            });
-          }
-        } else if (tabs.length > 1) {
-          // Open all tabs
-          tabs.forEach((tab: any) => {
-            if (tab?.url) window.open(tab.url, '_blank', 'noopener,noreferrer');
+          const title = tabs[0]?.title || url;
+          if (!url) break;
+          invitationServiceRef.current.notificationService.showToast({
+            type: 'info',
+            title: `Tab from ${source}`,
+            message: title,
+            duration: 15000,
+            actions: [
+              { id: 'open', label: 'Open Tab', action: 'accept' as const },
+              { id: 'dismiss', label: 'Dismiss', action: 'dismiss' as const },
+            ],
+            onAction: (id: string) => {
+              if (id === 'open') window.open(url, '_blank', 'noopener,noreferrer');
+            },
           });
-          if (invitationServiceRef.current) {
-            invitationServiceRef.current.notificationService.showToast({
-              type: 'success', title: `${tabs.length} tabs received from ${source}`,
-              message: message.payload?.collectionTitle || '', duration: 4000,
-            });
-          }
+        } else {
+          const urls = tabs.map((t: any) => t?.url).filter(Boolean);
+          invitationServiceRef.current.notificationService.showToast({
+            type: 'info',
+            title: `${tabs.length} tabs from ${source}`,
+            message: message.payload?.collectionTitle || `${tabs.length} tabs`,
+            duration: 15000,
+            actions: [
+              { id: 'open', label: `Open All ${tabs.length}`, action: 'accept' as const },
+              { id: 'dismiss', label: 'Dismiss', action: 'dismiss' as const },
+            ],
+            onAction: (id: string) => {
+              if (id === 'open') urls.forEach((url: string) => window.open(url, '_blank', 'noopener,noreferrer'));
+            },
+          });
         }
         break;
       }
