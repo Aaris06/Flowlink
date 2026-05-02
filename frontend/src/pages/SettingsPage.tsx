@@ -5,21 +5,24 @@ import { friendService, Friend, FriendRequest, SosAlert } from '../services/Frie
 import './SettingsPage.css';
 
 interface Props { ctx: AppContext; }
-type Tab = 'session' | 'chat' | 'privacy' | 'inbox' | 'browser' | 'friends' | 'permissions' | 'about';
+type Tab = 'session' | 'chat' | 'privacy' | 'inbox' | 'browser' | 'friends' | 'permissions' | 'feedback' | 'about';
 
 export default function SettingsPage({ ctx }: Props) {
-  const { session, username, deviceName, deviceId } = ctx;
+  const { session, username, deviceName, deviceId, onLogout } = ctx;
   const [tab, setTab] = useState<Tab>('session');
+  const [feedbackText, setFeedbackText] = useState('');
+  const [feedbackType, setFeedbackType] = useState<'feedback' | 'report'>('feedback');
+  const [feedbackSent, setFeedbackSent] = useState(false);
 
-  // Chat settings
-  const [chatBg, setChatBg] = useState(() => localStorage.getItem('chat_bg') || '#eef2ff');
-  const [chatFontSize, setChatFontSize] = useState(() => localStorage.getItem('chat_font') || 'medium');
+  // Namespace settings keys by username
+  const uKey = (k: string) => `${(username || 'default').toLowerCase()}_${k}`;
 
-  // Privacy
-  const [readReceipts, setReadReceipts] = useState(() => localStorage.getItem('read_receipts') !== 'false');
-  const [showActive, setShowActive] = useState(() => localStorage.getItem('show_active') !== 'false');
-  const [clipboardSync, setClipboardSync] = useState(() => localStorage.getItem('clipboard_sync') !== 'false');
-  const [notifications, setNotifications] = useState(() => localStorage.getItem('notifications') !== 'false');
+  const [chatBg, setChatBg] = useState(() => localStorage.getItem(uKey('chat_bg')) || '#eef2ff');
+  const [chatFontSize, setChatFontSize] = useState(() => localStorage.getItem(uKey('chat_font')) || 'medium');
+  const [readReceipts, setReadReceipts] = useState(() => localStorage.getItem(uKey('read_receipts')) !== 'false');
+  const [showActive, setShowActive] = useState(() => localStorage.getItem(uKey('show_active')) !== 'false');
+  const [clipboardSync, setClipboardSync] = useState(() => localStorage.getItem(uKey('clipboard_sync')) !== 'false');
+  const [notifications, setNotifications] = useState(() => localStorage.getItem(uKey('notifications')) !== 'false');
 
   // Friends & inbox
   const [friends, setFriends] = useState<Friend[]>(() => friendService.getFriends());
@@ -68,7 +71,7 @@ export default function SettingsPage({ ctx }: Props) {
   }, []);
 
   const save = (key: string, val: string) => {
-    localStorage.setItem(key, val);
+    localStorage.setItem(uKey(key), val);
     logActivity({ type: 'settings', icon: '⚙️', label: `Setting changed: ${key}`, sub: val });
   };
 
@@ -88,12 +91,13 @@ export default function SettingsPage({ ctx }: Props) {
     { id: 'browser', label: 'Browser', icon: '🌐' },
     { id: 'friends', label: 'Friends', icon: '👥', badge: friends.length || undefined },
     { id: 'permissions', label: 'Permissions', icon: '🛡️' },
+    { id: 'feedback', label: 'Feedback', icon: '📝' },
     { id: 'about', label: 'About FlowLink', icon: 'ℹ️' },
   ];
 
   return (
     <div className="settings-page">
-      {/* Profile + SOS */}
+      {/* Profile + SOS + Logout */}
       <div className="card settings-profile">
         <div className="sp-avatar">{(username || 'U')[0].toUpperCase()}</div>
         <div className="sp-info">
@@ -107,6 +111,13 @@ export default function SettingsPage({ ctx }: Props) {
           disabled={sosSending}
         >
           {sosSending ? '📡 Sending…' : '🆘 SOS'}
+        </button>
+        <button
+          className="logout-btn"
+          onClick={() => { if (confirm('Log out and change username?')) onLogout(); }}
+          title="Log out to change username"
+        >
+          🚪 Logout
         </button>
       </div>
 
@@ -402,6 +413,48 @@ export default function SettingsPage({ ctx }: Props) {
                   </div>
                 );
               })}
+            </div>
+          )}
+
+          {/* ── Feedback ── */}
+          {tab === 'feedback' && (
+            <div className="settings-section">
+              <div className="ss-title">Feedback & Reports</div>
+              <div className="ss-desc" style={{ marginBottom: '1rem' }}>
+                Send feedback or report an issue. Your message goes directly to the FlowLink team.
+              </div>
+              <div className="ss-toggle-row" style={{ borderBottom: 'none', marginBottom: '0.75rem' }}>
+                <div><div className="ss-label">Type</div></div>
+                <div style={{ display: 'flex', gap: '0.5rem' }}>
+                  {(['feedback', 'report'] as const).map(t => (
+                    <button key={t} onClick={() => setFeedbackType(t)}
+                      style={{ padding: '0.35rem 0.85rem', borderRadius: '8px', border: '1.5px solid', fontSize: '0.8rem', fontWeight: 600, cursor: 'pointer',
+                        background: feedbackType === t ? 'var(--brand)' : 'transparent',
+                        color: feedbackType === t ? '#fff' : 'var(--text-2)',
+                        borderColor: feedbackType === t ? 'var(--brand)' : 'var(--border)' }}>
+                      {t === 'feedback' ? '💬 Feedback' : '🚨 Report'}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <textarea
+                style={{ width: '100%', minHeight: 120, padding: '0.75rem', borderRadius: '10px', border: '1.5px solid var(--border)', background: 'rgba(255,255,255,0.7)', color: 'var(--text)', fontSize: '0.88rem', resize: 'vertical', fontFamily: 'inherit', boxSizing: 'border-box' }}
+                placeholder={feedbackType === 'report' ? 'Describe the issue…' : 'Share your thoughts…'}
+                value={feedbackText}
+                onChange={e => setFeedbackText(e.target.value)}
+              />
+              {feedbackSent && <div style={{ color: '#16a34a', fontSize: '0.82rem', marginTop: '0.5rem' }}>✅ Sent! Thank you.</div>}
+              <button className="btn-primary" style={{ marginTop: '0.75rem' }}
+                disabled={!feedbackText.trim()}
+                onClick={() => {
+                  const ws = (window as any).appWebSocket as WebSocket | null;
+                  if (!ws || ws.readyState !== WebSocket.OPEN) return;
+                  ws.send(JSON.stringify({ type: 'feedback_submit', deviceId, payload: { type: feedbackType, text: feedbackText.trim(), fromUsername: username }, timestamp: Date.now() }));
+                  setFeedbackText(''); setFeedbackSent(true);
+                  setTimeout(() => setFeedbackSent(false), 4000);
+                }}>
+                Send {feedbackType === 'report' ? 'Report' : 'Feedback'}
+              </button>
             </div>
           )}
 

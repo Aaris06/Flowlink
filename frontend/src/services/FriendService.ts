@@ -1,7 +1,7 @@
 /**
  * FriendService — manages friend requests, accepted friends, and SOS alerts.
- * Uses localStorage for persistence + WebSocket for real-time routing.
- * Backend already handles: friend_request, friend_request_response, sos_alert
+ * All data is namespaced by username so different users on the same browser
+ * see only their own friends, inbox, and sent requests.
  */
 
 export interface Friend {
@@ -33,28 +33,38 @@ type Listener<T> = (data: T) => void;
 class FriendService {
   private listeners: Map<string, Listener<any>[]> = new Map();
 
+  // ── Username-scoped key helpers ───────────────────────────────────────────
+  private currentUser(): string {
+    return (localStorage.getItem('flowlink_username') || '').toLowerCase().trim();
+  }
+
+  private key(suffix: string): string {
+    const u = this.currentUser();
+    return u ? `fl_${u}_${suffix}` : `fl_${suffix}`;
+  }
+
   // ── Persistence ──────────────────────────────────────────────────────────
   getFriends(): Friend[] {
-    try { return JSON.parse(localStorage.getItem('fl_friends') || '[]'); } catch { return []; }
+    try { return JSON.parse(localStorage.getItem(this.key('friends')) || '[]'); } catch { return []; }
   }
   saveFriends(friends: Friend[]) {
-    localStorage.setItem('fl_friends', JSON.stringify(friends));
+    localStorage.setItem(this.key('friends'), JSON.stringify(friends));
     this.emit('friends_changed', friends);
   }
 
   getInbox(): FriendRequest[] {
-    try { return JSON.parse(localStorage.getItem('fl_inbox') || '[]'); } catch { return []; }
+    try { return JSON.parse(localStorage.getItem(this.key('inbox')) || '[]'); } catch { return []; }
   }
   saveInbox(inbox: FriendRequest[]) {
-    localStorage.setItem('fl_inbox', JSON.stringify(inbox));
+    localStorage.setItem(this.key('inbox'), JSON.stringify(inbox));
     this.emit('inbox_changed', inbox);
   }
 
   getSentRequests(): FriendRequest[] {
-    try { return JSON.parse(localStorage.getItem('fl_sent') || '[]'); } catch { return []; }
+    try { return JSON.parse(localStorage.getItem(this.key('sent')) || '[]'); } catch { return []; }
   }
   saveSentRequests(sent: FriendRequest[]) {
-    localStorage.setItem('fl_sent', JSON.stringify(sent));
+    localStorage.setItem(this.key('sent'), JSON.stringify(sent));
     this.emit('sent_changed', sent);
   }
 
@@ -63,7 +73,9 @@ class FriendService {
   }
 
   hasPendingSentRequest(toUsername: string): boolean {
-    return this.getSentRequests().some(r => r.toUsername.toLowerCase() === toUsername.toLowerCase() && r.status === 'pending');
+    return this.getSentRequests().some(
+      r => r.toUsername.toLowerCase() === toUsername.toLowerCase() && r.status === 'pending'
+    );
   }
 
   // ── WebSocket actions ─────────────────────────────────────────────────────
@@ -111,11 +123,13 @@ class FriendService {
       timestamp: Date.now(),
     }));
 
-    // Update inbox
-    const inbox = this.getInbox().map(r => r.id === req.id ? { ...r, status: (accepted ? 'accepted' : 'rejected') as 'accepted' | 'rejected' } : r);
+    const inbox = this.getInbox().map(r =>
+      r.id === req.id
+        ? { ...r, status: (accepted ? 'accepted' : 'rejected') as 'accepted' | 'rejected' }
+        : r
+    );
     this.saveInbox(inbox);
 
-    // Add to friends if accepted
     if (accepted) {
       const friends = this.getFriends();
       if (!this.isFriend(req.fromUsername)) {
@@ -131,24 +145,19 @@ class FriendService {
 
     const sendAlert = (lat?: number, lng?: number, address?: string) => {
       const friends = this.getFriends();
-      // Send to each friend individually
       friends.forEach(f => {
         ws.send(JSON.stringify({
           type: 'sos_alert',
           sessionId,
           deviceId: myDeviceId,
           payload: {
-            fromUsername: myUsername,
-            fromDeviceId: myDeviceId,
-            toUsername: f.username,
-            targetDeviceId: f.deviceId,
-            lat, lng, address,
-            sentAt: Date.now(),
+            fromUsername: myUsername, fromDeviceId: myDeviceId,
+            toUsername: f.username, targetDeviceId: f.deviceId,
+            lat, lng, address, sentAt: Date.now(),
           },
           timestamp: Date.now(),
         }));
       });
-      // Also broadcast to session if in one
       if (sessionId) {
         ws.send(JSON.stringify({
           type: 'sos_alert',
@@ -171,19 +180,16 @@ class FriendService {
     }
   }
 
-  // ── Incoming message handler (call from App.tsx WS handler) ──────────────
+  // ── Incoming message handler ──────────────────────────────────────────────
   handleIncoming(message: any, myUsername: string, _myDeviceId: string) {
     if (message.type === 'friend_request') {
       const p = message.payload;
       if (!p?.fromUsername) return;
-      // Ignore if I sent this request (echoed back from session broadcast)
       const me = myUsername || localStorage.getItem('flowlink_username') || '';
       if (p.fromUsername.toLowerCase() === me.toLowerCase()) return;
       const inbox = this.getInbox();
-      // Case-insensitive duplicate check
       if (inbox.some(r =>
-        r.fromUsername.toLowerCase() === p.fromUsername.toLowerCase() &&
-        r.status === 'pending'
+        r.fromUsername.toLowerCase() === p.fromUsername.toLowerCase() && r.status === 'pending'
       )) return;
       const req: FriendRequest = {
         id: p.requestId || `fr-${Date.now()}`,
@@ -206,15 +212,16 @@ class FriendService {
           friends.push({ username: p.fromUsername, deviceId: message.deviceId || '', addedAt: Date.now() });
           this.saveFriends(friends);
         }
-        // Update sent request status
         const sent = this.getSentRequests().map(r =>
-          r.toUsername.toLowerCase() === p.fromUsername.toLowerCase() ? { ...r, status: 'accepted' as const } : r
+          r.toUsername.toLowerCase() === p.fromUsername.toLowerCase()
+            ? { ...r, status: 'accepted' as const } : r
         );
         this.saveSentRequests(sent);
         this.emit('friend_accepted', { username: p.fromUsername });
       } else {
         const sent = this.getSentRequests().map(r =>
-          r.toUsername.toLowerCase() === p.fromUsername.toLowerCase() ? { ...r, status: 'rejected' as const } : r
+          r.toUsername.toLowerCase() === p.fromUsername.toLowerCase()
+            ? { ...r, status: 'rejected' as const } : r
         );
         this.saveSentRequests(sent);
         this.emit('friend_rejected', { username: p.fromUsername });
@@ -223,15 +230,12 @@ class FriendService {
 
     if (message.type === 'sos_alert') {
       const p = message.payload;
-      const alert: SosAlert = {
+      this.emit('sos_received', {
         fromUsername: p.fromUsername,
         fromDeviceId: p.fromDeviceId || message.deviceId || '',
-        lat: p.lat,
-        lng: p.lng,
-        address: p.address,
+        lat: p.lat, lng: p.lng, address: p.address,
         sentAt: p.sentAt || Date.now(),
-      };
-      this.emit('sos_received', alert);
+      } as SosAlert);
     }
   }
 

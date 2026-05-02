@@ -702,7 +702,21 @@ async function captureTabState(tab) {
 }
 
 async function collectWindowTabsForHandoff() {
-  const tabs = await queryTabsAsync({ currentWindow: true });
+  // Get the last focused normal browser window (not the popup window)
+  const allWindows = await new Promise((resolve) => {
+    chrome.windows.getAll({ populate: false, windowTypes: ['normal'] }, resolve);
+  });
+  const normalWindows = allWindows.filter(w => w.type === 'normal' && w.focused !== false);
+  // Pick the most recently focused normal window
+  const targetWindowId = normalWindows.length > 0
+    ? normalWindows[normalWindows.length - 1].id
+    : undefined;
+
+  const queryInfo = targetWindowId
+    ? { windowId: targetWindowId }
+    : { currentWindow: true };
+
+  const tabs = await queryTabsAsync(queryInfo);
   const validTabs = tabs
     .filter((tab) => tab.url && isInjectableUrl(tab.url))
     .sort((a, b) => (a.index ?? 0) - (b.index ?? 0));
@@ -720,11 +734,15 @@ async function collectWindowTabsForHandoff() {
 }
 
 async function collectActiveTabForHandoff() {
-  const [activeTab] = await queryTabsAsync({ active: true, currentWindow: true });
-  if (!activeTab) {
-    return { tabs: [], activeIndex: 0 };
+  // Query the last focused normal window for the active tab (not the popup)
+  const [activeTab] = await queryTabsAsync({ active: true, lastFocusedWindow: true });
+  if (!activeTab || !activeTab.url || !isInjectableUrl(activeTab.url)) {
+    // Fallback: get any active tab from normal windows
+    const allTabs = await queryTabsAsync({ active: true });
+    const normalTab = allTabs.find(t => t.url && isInjectableUrl(t.url));
+    if (!normalTab) return { tabs: [], activeIndex: 0 };
+    return { tabs: [await captureTabState(normalTab)], activeIndex: 0 };
   }
-
   return {
     tabs: [await captureTabState(activeTab)],
     activeIndex: 0

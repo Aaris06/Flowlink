@@ -1,0 +1,33 @@
+.admin-page { display: flex; flex-direction: column; gap: 1rem; animation: fadeInUp 0.3s ease; }
+.admin-header { display: flex; align-items: center; justify-content: space-between; padding: 1rem 1.5rem; }
+.admin-badge { font-size: 1rem; font-weight: 800; color: var(--brand); }
+.admin-user { font-size: 0.82rem; color: var(--text-3); }
+.admin-tabs { display: flex; gap: 8px; }
+.admin-tab { padding: 0.55rem 1.1rem; border-radius: var(--radius-sm); border: 1px solid var(--border); background: rgba(255,255,255,0.7); color: var(--text-2); font-size: 0.85rem; font-weight: 600; cursor: pointer; transition: all 0.18s; }
+.admin-tab.active { background: linear-gradient(135deg, var(--brand), var(--brand-dark)); color: #fff; border-color: transparent; }
+.admin-msg { padding: 0.6rem 1rem; background: rgba(22,163,74,0.1); border: 1px solid rgba(22,163,74,0.3); border-radius: 8px; font-size: 0.82rem; color: #16a34a; }
+.admin-loading { text-align: center; color: var(--text-3); padding: 2rem; }
+.admin-section { padding: 1.25rem; }
+.admin-section-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1rem; font-size: 0.85rem; font-weight: 700; color: var(--text); }
+.admin-empty { color: var(--text-3); font-size: 0.85rem; padding: 1.5rem 0; text-align: center; }
+.admin-device-row { display: flex; align-items: center; gap: 0.75rem; padding: 0.75rem 0; border-bottom: 1px solid var(--border); }
+.admin-device-row:last-child { border-bottom: none; }
+.admin-device-row.inactive { opacity: 0.65; }
+.admin-device-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+.admin-device-info { flex: 1; }
+.admin-device-name { font-size: 0.88rem; font-weight: 700; color: var(--text); }
+.admin-device-hw { font-weight: 400; color: var(--text-3); }
+.admin-device-meta { font-size: 0.72rem; color: var(--text-3); margin-top: 2px; }
+.admin-inactive-badge { color: #f59e0b; font-weight: 700; }
+.admin-kick-btn { font-size: 0.78rem; padding: 0.35rem 0.75rem; }
+.admin-feedback-row { padding: 0.85rem 0; border-bottom: 1px solid var(--border); }
+.admin-feedback-row:last-child { border-bottom: none; }
+.admin-feedback-header { display: flex; align-items: center; gap: 0.65rem; margin-bottom: 0.4rem; flex-wrap: wrap; }
+.admin-fb-type { font-size: 0.75rem; font-weight: 700; padding: 2px 8px; border-radius: 999px; }
+.admin-fb-type.report { background: rgba(220,38,38,0.1); color: #dc2626; }
+.admin-fb-type.feedback { background: rgba(108,99,255,0.1); color: var(--brand); }
+.admin-fb-user { font-size: 0.78rem; color: var(--text-2); }
+.admin-fb-time { font-size: 0.7rem; color: var(--text-3); margin-left: auto; }
+.admin-fb-delete { border: none; background: transparent; color: var(--text-3); cursor: pointer; font-size: 0.9rem; padding: 2px 6px; border-radius: 4px; }
+.admin-fb-delete:hover { background: rgba(220,38,38,0.1); color: #dc2626; }
+.admin-fb-text { font-size: 0.85rem; color: var(--text); line-height: 1.5; background: rgba(248,250,252,0.8); border-radius: 8px; padding: 0.6rem 0.85rem; }

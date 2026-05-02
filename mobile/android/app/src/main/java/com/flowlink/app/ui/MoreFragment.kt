@@ -50,7 +50,29 @@ class MoreFragment : Fragment() {
         binding.moreSettings.setOnClickListener { navigateTo(SettingsFragment.newInstance()) }
         binding.moreHelp.setOnClickListener { navigateTo(HelpFragment.newInstance()) }
         binding.moreAbout.setOnClickListener { navigateTo(AboutFragment.newInstance()) }
-        binding.moreLeaveSession.setOnClickListener { mainActivity.leaveSession() }    }
+        binding.moreLeaveSession.setOnClickListener { mainActivity.leaveSession() }
+
+        // Logout - clear username and restart app to username dialog
+        binding.moreLogout.setOnClickListener {
+            android.app.AlertDialog.Builder(requireContext())
+                .setTitle("Logout")
+                .setMessage("Log out and change username?")
+                .setPositiveButton("Logout") { _, _ ->
+                    // Clear username from prefs
+                    mainActivity.sessionManager.setUsername("")
+                    requireContext().getSharedPreferences("flowlink", android.content.Context.MODE_PRIVATE)
+                        .edit().remove("username").apply()
+                    // Leave session and disconnect
+                    mainActivity.leaveSession()
+                    // Restart activity to show username dialog
+                    val intent = requireActivity().intent
+                    requireActivity().finish()
+                    startActivity(intent)
+                }
+                .setNegativeButton("Cancel", null)
+                .show()
+        }
+    } // end onViewCreated
 
     private fun navigateTo(fragment: Fragment) {
         parentFragmentManager.beginTransaction()

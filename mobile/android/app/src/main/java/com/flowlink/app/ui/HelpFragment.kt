@@ -6,7 +6,9 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.Toast
 import androidx.fragment.app.Fragment
+import com.flowlink.app.MainActivity
 import com.flowlink.app.databinding.FragmentHelpBinding
+import org.json.JSONObject
 
 class HelpFragment : Fragment() {
     private var _binding: FragmentHelpBinding? = null
@@ -23,6 +25,7 @@ class HelpFragment : Fragment() {
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
+        val mainActivity = activity as? MainActivity
         binding.btnBack.setOnClickListener { parentFragmentManager.popBackStack() }
 
         binding.btnSubmitReport.setOnClickListener {
@@ -31,7 +34,7 @@ class HelpFragment : Fragment() {
                 Toast.makeText(requireContext(), "Please describe the issue", Toast.LENGTH_SHORT).show()
                 return@setOnClickListener
             }
-            // In production: send to backend or email
+            sendFeedback(mainActivity, "report", text)
             binding.etReport.setText("")
             Toast.makeText(requireContext(), "Report submitted. Thank you!", Toast.LENGTH_SHORT).show()
         }
@@ -42,8 +45,29 @@ class HelpFragment : Fragment() {
                 Toast.makeText(requireContext(), "Please enter your feedback", Toast.LENGTH_SHORT).show()
                 return@setOnClickListener
             }
+            sendFeedback(mainActivity, "feedback", text)
             binding.etFeedback.setText("")
             Toast.makeText(requireContext(), "Feedback sent. Thank you!", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun sendFeedback(mainActivity: MainActivity?, type: String, text: String) {
+        mainActivity ?: return
+        try {
+            val username = mainActivity.sessionManager.getUsername()
+            val deviceId = mainActivity.sessionManager.getDeviceId()
+            mainActivity.webSocketManager.sendMessage(JSONObject().apply {
+                put("type", "feedback_submit")
+                put("deviceId", deviceId)
+                put("payload", JSONObject().apply {
+                    put("type", type)
+                    put("text", text)
+                    put("fromUsername", username)
+                })
+                put("timestamp", System.currentTimeMillis())
+            }.toString())
+        } catch (e: Exception) {
+            android.util.Log.e("FlowLink", "Failed to send feedback", e)
         }
     }
 

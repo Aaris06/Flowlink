@@ -15,7 +15,8 @@ export default function MessagesPage({ ctx }: Props) {
   const { session, deviceId, username } = ctx;
 
   const loadFromStorage = () => {
-    const stored = sessionStorage.getItem(`flowlink_messages_${session?.id || 'none'}`);
+    const user = (ctx.username || localStorage.getItem('flowlink_username') || '').toLowerCase();
+    const stored = sessionStorage.getItem(`flowlink_messages_${user}_${session?.id || 'none'}`);
     return stored ? JSON.parse(stored) : [];
   };
 
@@ -40,9 +41,10 @@ export default function MessagesPage({ ctx }: Props) {
   // Persist messages whenever they change
   useEffect(() => {
     if (session && messages.length > 0) {
-      sessionStorage.setItem(`flowlink_messages_${session.id}`, JSON.stringify(messages));
+      const user = (username || localStorage.getItem('flowlink_username') || '').toLowerCase();
+      sessionStorage.setItem(`flowlink_messages_${user}_${session.id}`, JSON.stringify(messages));
     }
-  }, [messages, session]);
+  }, [messages, session, username]);
 
   // On mount, sync from sessionStorage to catch messages buffered while on another tab
   useEffect(() => {

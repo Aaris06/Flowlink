@@ -22,6 +22,15 @@
 .sos-btn:disabled { cursor: not-allowed; }
 @keyframes sos-pulse { from { transform: scale(1); } to { transform: scale(1.04); } }
 
+.logout-btn {
+  padding: 0.5rem 1rem; border-radius: 10px;
+  background: rgba(100,116,139,0.1);
+  color: var(--text-2); border: 1px solid var(--border);
+  font-size: 0.82rem; font-weight: 600; cursor: pointer; transition: all 0.18s;
+  white-space: nowrap;
+}
+.logout-btn:hover { background: rgba(220,38,38,0.08); color: var(--red); border-color: rgba(220,38,38,0.25); }
+
 /* Layout */
 .settings-layout { display: grid; grid-template-columns: 210px 1fr; gap: 1.25rem; align-items: start; }
 

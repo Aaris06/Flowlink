@@ -133,12 +133,9 @@ export default function MyDevicesPage({ ctx }: Props) {
           break;
         }
         case 'clipboard_broadcast':
-        case 'clipboard_sync': {
-          // Extension sent clipboard content
-          const txt = msg.payload?.clipboard?.text || msg.payload?.clipboard?.url;
-          if (txt) navigator.clipboard.writeText(txt).catch(() => {});
+        case 'clipboard_sync':
+          // App.tsx handles clipboard_sync globally (writes + shows toast) - skip here
           break;
-        }
       }
     };
     ws.addEventListener('message', handler);

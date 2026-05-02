@@ -1,6 +1,10 @@
 import { WebSocketServer } from 'ws';
 import { v4 as uuidv4 } from 'uuid';
 import { createServer } from 'http';
+import { config } from 'dotenv';
+config();
+import pool, { initDb } from './db.js';
+import { handleAuthRoutes, handleUserDataRoutes, verifyToken } from './auth.js';
 
 // Session utilities (inline for Node.js compatibility)
 function generateSessionCode() {
@@ -47,6 +51,13 @@ const globalDevices = new Map();
 const clipboardDedupeCache = new Map();
 const CLIPBOARD_DEDUPE_TTL_MS = 5000; // 5 second dedupe window
 
+// Admin config
+const ADMIN_USERNAME = process.env.ADMIN_USERNAME || 'flowlink_admin';
+const ADMIN_SECRET   = process.env.ADMIN_SECRET   || 'flowlink_admin_2024';
+
+// In-memory feedback store (persists until server restart)
+const feedbackStore = [];
+
 // Cleanup old clipboard dedupe entries periodically
 setInterval(() => {
   const now = Date.now();
@@ -58,10 +69,28 @@ setInterval(() => {
 }, 10000); // Cleanup every 10 seconds
 
 // Create HTTP server for health checks
-const server = createServer((req, res) => {
+const server = createServer(async (req, res) => {
   // CORS headers for all routes
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, PATCH, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-admin-secret, Authorization');
+
+  if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
+
+  // Auth routes (no token required)
+  if (req.url?.startsWith('/auth/')) {
+    const handled = await handleAuthRoutes(req, res);
+    if (handled) return;
+  }
+
+  // User data routes (token required)
+  if (req.url?.startsWith('/user/')) {
+    const handled = await handleUserDataRoutes(req, res);
+    if (handled) return;
+  }
+
+  // ── Admin auth helper ──────────────────────────────────────────────────
+  const isAdmin = req.headers['x-admin-secret'] === ADMIN_SECRET;
 
   if (req.url === '/health' || req.url === '/ping') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -73,6 +102,61 @@ const server = createServer((req, res) => {
       uptime: Math.floor(process.uptime()),
       timestamp: new Date().toISOString()
     }));
+
+  // ── Admin: list all connected devices ──────────────────────────────────
+  } else if (req.url === '/admin/devices' && req.method === 'GET') {
+    if (!isAdmin) { res.writeHead(403); res.end(JSON.stringify({ error: 'Forbidden' })); return; }
+    const now = Date.now();
+    const INACTIVE_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+    const devices = Array.from(globalDevices.entries()).map(([id, entry]) => ({
+      id,
+      username: entry.device.username,
+      name: entry.device.name,
+      online: entry.device.online,
+      connections: entry.connections.size,
+      sessionId: entry.sessionId,
+      lastSeen: new Date(entry.lastSeen).toISOString(),
+      inactive: (now - entry.lastSeen) > INACTIVE_MS,
+    }));
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ devices, total: devices.length }));
+
+  // ── Admin: kick / delete inactive device ──────────────────────────────
+  } else if (req.url.startsWith('/admin/devices/') && req.method === 'DELETE') {
+    if (!isAdmin) { res.writeHead(403); res.end(JSON.stringify({ error: 'Forbidden' })); return; }
+    const targetId = req.url.replace('/admin/devices/', '');
+    const entry = globalDevices.get(targetId);
+    if (!entry) { res.writeHead(404); res.end(JSON.stringify({ error: 'Device not found' })); return; }
+    // Close all connections
+    entry.connections.forEach(ws => { try { ws.close(); } catch (_) {} });
+    globalDevices.delete(targetId);
+    deviceConnections.delete(targetId);
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ success: true, deleted: targetId }));
+
+  // ── Admin: list feedback ───────────────────────────────────────────────
+  } else if (req.url === '/admin/feedback' && req.method === 'GET') {
+    if (!isAdmin) { res.writeHead(403); res.end(JSON.stringify({ error: 'Forbidden' })); return; }
+    try {
+      const r = await pool.query('SELECT * FROM feedback ORDER BY sent_at DESC LIMIT 500');
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ feedback: r.rows, total: r.rows.length }));
+    } catch {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ feedback: feedbackStore, total: feedbackStore.length }));
+    }
+
+  // ── Admin: delete feedback entry ──────────────────────────────────────
+  } else if (req.url.startsWith('/admin/feedback/') && req.method === 'DELETE') {
+    if (!isAdmin) { res.writeHead(403); res.end(JSON.stringify({ error: 'Forbidden' })); return; }
+    const idx = parseInt(req.url.replace('/admin/feedback/', ''));
+    if (isNaN(idx) || idx < 0 || idx >= feedbackStore.length) {
+      res.writeHead(404); res.end(JSON.stringify({ error: 'Not found' })); return;
+    }
+    feedbackStore.splice(idx, 1);
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ success: true }));
+
   } else if (req.url === '/debug') {
     // Debug endpoint to see device registry state
     const debugInfo = {
@@ -121,13 +205,12 @@ function sendError(ws, errorMessage) {
   }));
 }
 
-server.listen(PORT, '0.0.0.0', () => {
+server.listen(PORT, '0.0.0.0', async () => {
   console.log(`FlowLink backend server running on port ${PORT}`);
   console.log(`Environment: ${NODE_ENV}`);
   console.log(`Server ready for WebSocket connections`);
   console.log(`Health check available at /health`);
-  
-  // Health check for Railway
+  await initDb();
   if (NODE_ENV === 'production') {
     console.log('Production mode: Railway deployment detected');
   }
@@ -322,6 +405,38 @@ wss.on('connection', (ws, req) => {
             ws.send(JSON.stringify({ type: 'pong', timestamp: Date.now() }));
           }
           break;
+
+        case 'feedback_submit': {
+          const { type: fbType, text, fromUsername } = message.payload || {};
+          if (text && text.trim()) {
+            const entry = {
+              id: feedbackStore.length,
+              type: fbType || 'feedback',
+              text: text.trim().slice(0, 2000),
+              fromUsername: fromUsername || message.deviceId || 'anonymous',
+              deviceId: message.deviceId || '',
+              sentAt: Date.now(),
+            };
+            feedbackStore.push(entry);
+            feedbackStore.splice(0, Math.max(0, feedbackStore.length - 500));
+            // Persist to DB
+            pool.query(
+              'INSERT INTO feedback (from_username, type, text) VALUES ($1,$2,$3)',
+              [entry.fromUsername, entry.type, entry.text]
+            ).catch(err => console.error('Feedback persist error:', err.message));
+            // Route to admin if online
+            for (const [, entry2] of globalDevices.entries()) {
+              if ((entry2.device?.username || '').toLowerCase() === ADMIN_USERNAME.toLowerCase()) {
+                const adminWs = deviceConnections.get(entry2.device.id);
+                if (adminWs && adminWs.readyState === adminWs.OPEN) {
+                  adminWs.send(JSON.stringify({ type: 'admin_feedback', payload: entry, timestamp: Date.now() }));
+                }
+              }
+            }
+            ws.send(JSON.stringify({ type: 'feedback_ack', payload: { success: true }, timestamp: Date.now() }));
+          }
+          break;
+        }
           
         default:
           sendError(ws, `Unknown message type: ${message.type}`);
@@ -1507,12 +1622,17 @@ function handleChatMessage(ws, message) {
 
   if (type === 'chat_message') {
     session.chatHistory = Array.isArray(session.chatHistory) ? session.chatHistory : [];
-    session.chatHistory.push({
-      ...message.payload?.chat,
-      sourceDevice: deviceId,
-      targetDevice: null,
-    });
+    const chatEntry = { ...message.payload?.chat, sourceDevice: deviceId, targetDevice: null };
+    session.chatHistory.push(chatEntry);
     session.chatHistory = session.chatHistory.slice(-200);
+
+    // Persist to DB
+    if (chatEntry.messageId && sessionId) {
+      pool.query(
+        'INSERT INTO chat_messages (session_id, message_id, text, username, source_device, sent_at, attachment) VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT (message_id) DO NOTHING',
+        [sessionId, chatEntry.messageId, chatEntry.text || '', chatEntry.username || '', deviceId, new Date(chatEntry.sentAt || Date.now()), chatEntry.attachment ? JSON.stringify(chatEntry.attachment) : null]
+      ).catch(err => console.error('Chat persist error:', err.message));
+    }
 
     broadcastToSession(sessionId, {
       ...message,

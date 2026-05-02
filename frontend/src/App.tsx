@@ -1,9 +1,10 @@
-import { Component, ReactNode, useState, useEffect, useRef } from 'react';
+﻿import { Component, ReactNode, useState, useEffect, useRef } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, NavLink, useNavigate, useLocation } from 'react-router-dom';
 import { Session } from '@shared/types';
 import { generateDeviceId } from '@shared/utils';
 import InvitationService from './services/InvitationService';
 import { friendService } from './services/FriendService';
+import { authService } from './services/AuthService';
 import { SIGNALING_WS_URL } from './config/signaling';
 import OverviewPage from './pages/OverviewPage';
 import MyDevicesPage from './pages/MyDevicesPage';
@@ -14,9 +15,10 @@ import ActivityPage from './pages/ActivityPage';
 import SettingsPage from './pages/SettingsPage';
 import StudyPage from './pages/StudyPage';
 import StudyRoomPage from './pages/StudyRoomPage';
+import AdminPage from './pages/AdminPage';
+import AuthPage from './pages/AuthPage';
 import RemoteAccess from './components/RemoteAccess';
 import DownloadPage from './components/DownloadPage';
-import UsernameModal from './components/UsernameModal';
 import './App.css';
 
 export interface AppContext {
@@ -28,6 +30,7 @@ export interface AppContext {
   onSessionCreated: (s: Session) => void;
   onSessionJoined: (s: Session) => void;
   onLeaveSession: () => void;
+  onLogout: () => void;
 }
 
 class AppErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean }> {
@@ -63,15 +66,24 @@ function Shell() {
   const [session, setSession] = useState<Session | null>(null);
   const [deviceId] = useState(() => generateDeviceId());
   const [deviceName] = useState(() => (navigator as any).userAgentData?.platform || 'Laptop');
-  const [username, setUsername] = useState<string | null>(() => localStorage.getItem('flowlink_username'));
+  const [username, setUsername] = useState<string | null>(() => authService.getUsername());
+  const [authChecked, setAuthChecked] = useState(false);
   const [invitationService, setInvitationService] = useState<InvitationService | null>(null);
   const [chatUnread, setChatUnread] = useState(0);
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  // CRITICAL FIX #6: Persist inbox unread count to localStorage
   const [inboxUnread, setInboxUnread] = useState(() => {
     const stored = localStorage.getItem('flowlink_inbox_unread');
     return stored ? parseInt(stored, 10) : friendService.getInbox().filter(r => r.status === 'pending').length;
   });
+
+  // Verify token on mount
+  useEffect(() => {
+    authService.verifyToken().then(u => {
+      if (u) setUsername(u);
+      else setUsername(null);
+      setAuthChecked(true);
+    });
+  }, []);
 
   // Persist inbox unread count
   useEffect(() => {
@@ -87,7 +99,11 @@ function Shell() {
     if (wsRef.current?.readyState === WebSocket.OPEN) return wsRef.current;
     const ws = new WebSocket(SIGNALING_WS_URL);
     ws.onopen = () => {
-      ws.send(JSON.stringify({ type: 'device_register', payload: { deviceId, deviceName, deviceType: 'laptop', username }, timestamp: Date.now() }));
+      ws.send(JSON.stringify({
+        type: 'device_register',
+        payload: { deviceId, deviceName, deviceType: 'laptop', username, token: authService.getToken() },
+        timestamp: Date.now()
+      }));
       wsRef.current = ws;
       (window as any).appWebSocket = ws;
       setIsConnected(true);
@@ -123,7 +139,8 @@ function Shell() {
             const chat = message.payload?.chat;
             if (chat?.messageId) {
               const sessionId = message.sessionId || message.payload?.sessionId;
-              const key = `flowlink_messages_${sessionId || 'none'}`;
+              const user = (username || localStorage.getItem('flowlink_username') || '').toLowerCase();
+              const key = `flowlink_messages_${user}_${sessionId || 'none'}`;
               const stored = sessionStorage.getItem(key);
               const msgs: any[] = stored ? JSON.parse(stored) : [];
               if (!msgs.find((m: any) => m.messageId === chat.messageId)) {
@@ -379,12 +396,30 @@ function Shell() {
     return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
   }, []);
 
+  const handleLogout = () => {
+    if (session) {
+      const user = (username || '').toLowerCase().trim();
+      sessionStorage.removeItem(`flowlink_messages_${user}_${session.id}`);
+    }
+    authService.logout();
+    wsRef.current?.close();
+    wsRef.current = null;
+    (window as any).appWebSocket = null;
+    setSession(null);
+    setUsername(null);
+    setChatUnread(0);
+    setInboxUnread(0);
+  };
+
+  const isAdmin = (username || '').toLowerCase() === 'Aaris';
+
   const ctx: AppContext = {
     session, deviceId, deviceName, username: username || '',
     invitationService,
     onSessionCreated: setSession,
     onSessionJoined: setSession,
     onLeaveSession: () => setSession(null),
+    onLogout: handleLogout,
   };
 
   const navItems: { to: string; icon: string; label: string; badge?: number }[] = [
@@ -395,6 +430,7 @@ function Shell() {
     { to: '/activity', icon: '⚡', label: 'Activity' },
     { to: '/study', icon: '📚', label: 'Study' },
     { to: '/settings', icon: '⚙️', label: 'Settings', badge: inboxUnread },
+    ...(isAdmin ? [{ to: '/admin', icon: '🛡️', label: 'Admin' }] : []),
   ];
 
   const pageTitles: Record<string, { title: string; sub: string }> = {
@@ -410,14 +446,22 @@ function Shell() {
   };
   const pt = pageTitles[location.pathname] || { title: 'FlowLink', sub: '' };
 
+  // Show loading while verifying token
+  if (!authChecked) {
+    return (
+      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'linear-gradient(135deg,#0f0c29,#302b63,#24243e)' }}>
+        <div style={{ color: '#a78bfa', fontSize: '1.1rem', fontWeight: 700 }}>⚡ Loading FlowLink…</div>
+      </div>
+    );
+  }
+
+  // Show auth page if not logged in
+  if (!username) {
+    return <AuthPage onAuth={(u) => setUsername(u)} />;
+  }
+
   return (
     <div className="app-shell">
-      <UsernameModal
-        isOpen={!username}
-        onSubmit={(u) => { localStorage.setItem('flowlink_username', u); setUsername(u); }}
-        deviceName={deviceName}
-      />
-
       {/* Mobile sidebar overlay */}
       {sidebarOpen && (
         <div className="sidebar-overlay" onClick={() => setSidebarOpen(false)} />
@@ -510,6 +554,7 @@ function Shell() {
             <Route path="/settings" element={<SettingsPage ctx={ctx} />} />
             <Route path="/study" element={<StudyPage ctx={ctx} />} />
             <Route path="/study/room" element={<StudyRoomPage ctx={ctx} />} />
+            <Route path="/admin" element={isAdmin ? <AdminPage ctx={ctx} /> : <Navigate to="/" replace />} />
             <Route path="/download" element={<DownloadPage />} />
             <Route path="/remote/:deviceId" element={<RemoteAccess />} />
             <Route path="*" element={<Navigate to="/" replace />} />
