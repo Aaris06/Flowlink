@@ -112,36 +112,96 @@ const server = createServer(async (req, res) => {
       timestamp: new Date().toISOString()
     }));
 
-  // ── Admin: list all connected devices ──────────────────────────────────
+  // ── Admin: list all users (from DB, deduplicated by username) ──────────
   } else if (req.url === '/admin/devices' && req.method === 'GET') {
     if (!isAdmin) { res.writeHead(403); res.end(JSON.stringify({ error: 'Forbidden' })); return; }
     const now = Date.now();
     const INACTIVE_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
-    const devices = Array.from(globalDevices.entries()).map(([id, entry]) => ({
-      id,
-      username: entry.device.username,
-      name: entry.device.name,
-      online: entry.device.online,
-      connections: entry.connections.size,
-      sessionId: entry.sessionId,
-      lastSeen: new Date(entry.lastSeen).toISOString(),
-      inactive: (now - entry.lastSeen) > INACTIVE_MS,
-    }));
-    res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ devices, total: devices.length }));
 
-  // ── Admin: kick / delete inactive device ──────────────────────────────
+    try {
+      // Get all registered users from DB
+      const dbResult = await pool.query(
+        'SELECT id, username, role, created_at, last_active, is_active FROM users ORDER BY last_active DESC'
+      );
+
+      // Build a map of username -> online status from globalDevices (most recent connection)
+      const onlineByUsername = new Map();
+      for (const [, entry] of globalDevices.entries()) {
+        const uname = (entry.device?.username || '').toLowerCase();
+        if (!uname) continue;
+        const existing = onlineByUsername.get(uname);
+        // Keep the most recently seen / online entry
+        if (!existing || entry.device.online || entry.lastSeen > (existing.lastSeen || 0)) {
+          onlineByUsername.set(uname, {
+            online: entry.device.online && entry.connections.size > 0,
+            deviceName: entry.device.name,
+            lastSeen: entry.lastSeen,
+          });
+        }
+      }
+
+      const devices = dbResult.rows.map(user => {
+        const live = onlineByUsername.get(user.username.toLowerCase());
+        const lastActive = live?.lastSeen
+          ? new Date(Math.max(live.lastSeen, new Date(user.last_active).getTime())).toISOString()
+          : user.last_active;
+        return {
+          id: String(user.id),
+          username: user.username,
+          name: live?.deviceName || 'Unknown',
+          role: user.role,
+          online: live?.online || false,
+          isActive: user.is_active,
+          lastSeen: lastActive,
+          inactive: (now - new Date(user.last_active).getTime()) > INACTIVE_MS,
+        };
+      });
+
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ devices, total: devices.length }));
+    } catch (err) {
+      // Fallback to in-memory if DB fails
+      const devices = Array.from(globalDevices.entries()).map(([id, entry]) => ({
+        id, username: entry.device.username, name: entry.device.name,
+        online: entry.device.online, lastSeen: new Date(entry.lastSeen).toISOString(),
+        inactive: (now - entry.lastSeen) > INACTIVE_MS,
+      }));
+      // Deduplicate by username
+      const seen = new Set();
+      const deduped = devices.filter(d => {
+        const key = d.username?.toLowerCase();
+        if (!key || seen.has(key)) return false;
+        seen.add(key); return true;
+      });
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ devices: deduped, total: deduped.length }));
+    }
+
+  // ── Admin: deactivate user account ────────────────────────────────────
   } else if (req.url.startsWith('/admin/devices/') && req.method === 'DELETE') {
     if (!isAdmin) { res.writeHead(403); res.end(JSON.stringify({ error: 'Forbidden' })); return; }
     const targetId = req.url.replace('/admin/devices/', '');
-    const entry = globalDevices.get(targetId);
-    if (!entry) { res.writeHead(404); res.end(JSON.stringify({ error: 'Device not found' })); return; }
-    // Close all connections
-    entry.connections.forEach(ws => { try { ws.close(); } catch (_) {} });
-    globalDevices.delete(targetId);
-    deviceConnections.delete(targetId);
+
+    // Try DB deactivation first (targetId can be DB id or username)
+    try {
+      const isNumeric = /^\d+$/.test(targetId);
+      const query = isNumeric
+        ? 'UPDATE users SET is_active = FALSE WHERE id = $1'
+        : 'UPDATE users SET is_active = FALSE WHERE LOWER(username) = LOWER($1)';
+      await pool.query(query, [targetId]);
+    } catch (_) {}
+
+    // Also kick from in-memory connections
+    for (const [devId, entry] of globalDevices.entries()) {
+      const uname = (entry.device?.username || '').toLowerCase();
+      if (uname === targetId.toLowerCase() || devId === targetId) {
+        entry.connections.forEach(ws => { try { ws.close(); } catch (_) {} });
+        globalDevices.delete(devId);
+        deviceConnections.delete(devId);
+      }
+    }
     res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ success: true, deleted: targetId }));
+    res.end(JSON.stringify({ success: true, deactivated: targetId }));
 
   // ── Admin: list feedback ───────────────────────────────────────────────
   } else if (req.url === '/admin/feedback' && req.method === 'GET') {

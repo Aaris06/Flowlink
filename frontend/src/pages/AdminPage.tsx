@@ -6,8 +6,8 @@ import './AdminPage.css';
 const ADMIN_SECRET = 'flowlink_admin_2024';
 
 interface DeviceEntry {
-  id: string; username: string; name: string; online: boolean;
-  connections: number; sessionId: string | null; lastSeen: string; inactive: boolean;
+  id: string; username: string; name: string; online: boolean; role?: string;
+  isActive?: boolean; lastSeen: string; inactive: boolean;
 }
 interface FeedbackEntry {
   id: number; type: string; text: string; fromUsername: string; sentAt: number;
@@ -103,18 +103,22 @@ export default function AdminPage({ ctx }: Props) {
           </div>
           {devices.length === 0 && <div className="admin-empty">No devices registered.</div>}
           {devices.map(d => (
-            <div key={d.id} className={`admin-device-row${d.inactive ? ' inactive' : ''}`}>
+            <div key={d.id} className={`admin-device-row${d.inactive ? ' inactive' : ''}${!d.isActive ? ' deactivated' : ''}`}>
               <div className="admin-device-dot" style={{ background: d.online ? '#22c55e' : '#6b7280' }} />
               <div className="admin-device-info">
-                <div className="admin-device-name">{d.username} <span className="admin-device-hw">({d.name})</span></div>
+                <div className="admin-device-name">
+                  {d.username}
+                  {d.role === 'admin' && <span className="admin-role-badge">👑 admin</span>}
+                  {!d.isActive && <span className="admin-deactivated-badge"> · Deactivated</span>}
+                </div>
                 <div className="admin-device-meta">
                   Last seen: {new Date(d.lastSeen).toLocaleString()}
-                  {d.inactive && <span className="admin-inactive-badge"> · Inactive 7d+</span>}
-                  {d.sessionId && <span> · Session: {d.sessionId.slice(0, 8)}</span>}
+                  {d.inactive && d.isActive && <span className="admin-inactive-badge"> · Inactive 7d+</span>}
                 </div>
               </div>
-              <button className="btn-danger admin-kick-btn" onClick={() => deleteDevice(d.id)}>
-                🗑 Remove
+              <button className="btn-danger admin-kick-btn" onClick={() => deleteDevice(d.id)}
+                title={d.isActive ? 'Deactivate account' : 'Already deactivated'}>
+                {d.isActive ? '🚫 Deactivate' : '✓ Inactive'}
               </button>
             </div>
           ))}

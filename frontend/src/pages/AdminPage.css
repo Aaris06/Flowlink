@@ -31,3 +31,7 @@
 .admin-fb-delete { border: none; background: transparent; color: var(--text-3); cursor: pointer; font-size: 0.9rem; padding: 2px 6px; border-radius: 4px; }
 .admin-fb-delete:hover { background: rgba(220,38,38,0.1); color: #dc2626; }
 .admin-fb-text { font-size: 0.85rem; color: var(--text); line-height: 1.5; background: rgba(248,250,252,0.8); border-radius: 8px; padding: 0.6rem 0.85rem; }
+
+.admin-role-badge { font-size: 0.7rem; background: rgba(108,99,255,0.15); color: var(--brand); padding: 2px 7px; border-radius: 999px; margin-left: 6px; font-weight: 700; }
+.admin-deactivated-badge { font-size: 0.72rem; color: #ef4444; font-weight: 600; }
+.admin-device-row.deactivated { opacity: 0.45; }
