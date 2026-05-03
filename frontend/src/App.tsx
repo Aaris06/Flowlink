@@ -347,6 +347,31 @@ function Shell() {
           });
         }
         break;
+      case 'admin_announcement': {
+        const ann = message.payload;
+        if (invitationServiceRef.current && ann?.title) {
+          const icon = ann.type === 'update' ? '🚀' : ann.type === 'warning' ? '⚠️' : 'ℹ️';
+          invitationServiceRef.current.notificationService.showToast({
+            type: ann.type === 'warning' ? 'warning' : ann.type === 'update' ? 'success' : 'info',
+            title: `${icon} ${ann.title}`,
+            message: ann.message || '',
+            duration: 12000,
+          });
+        }
+        break;
+      }
+      case 'session_terminated': {
+        if (invitationServiceRef.current) {
+          invitationServiceRef.current.notificationService.showToast({
+            type: 'warning',
+            title: '⚠️ Session Terminated',
+            message: message.payload?.reason || 'This session was terminated by an admin.',
+            duration: 8000,
+          });
+        }
+        setSession(null);
+        break;
+      }
     }
   };
 

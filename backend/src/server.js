@@ -57,6 +57,8 @@ const ADMIN_SECRET   = process.env.ADMIN_SECRET   || 'flowlink_admin_2024';
 
 // In-memory feedback store (persists until server restart)
 const feedbackStore = [];
+// In-memory announcement store
+const announcementStore = [];
 
 // Cleanup old clipboard dedupe entries periodically
 setInterval(() => {
@@ -203,8 +205,66 @@ const server = createServer(async (req, res) => {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ success: true, deactivated: targetId }));
 
-  // ── Admin: list feedback ───────────────────────────────────────────────
-  } else if (req.url === '/admin/feedback' && req.method === 'GET') {
+  // ── Admin: list active sessions ───────────────────────────────────────
+  } else if (req.url === '/admin/sessions' && req.method === 'GET') {
+    if (!isAdmin) { res.writeHead(403); res.end(JSON.stringify({ error: 'Forbidden' })); return; }
+    const activeSessions = Array.from(sessions.entries()).map(([id, session]) => ({
+      id,
+      code: session.code,
+      createdBy: session.createdBy,
+      deviceCount: session.devices ? session.devices.size : 0,
+      devices: session.devices ? Array.from(session.devices.values()).map(d => ({
+        id: d.id, username: d.username, name: d.name, online: d.online
+      })) : [],
+      createdAt: session.createdAt ? new Date(session.createdAt).toISOString() : null,
+      expiresAt: session.expiresAt ? new Date(session.expiresAt).toISOString() : null,
+      reportCount: (session.reports || []).length,
+    }));
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ sessions: activeSessions, total: activeSessions.length }));
+
+  // ── Admin: deactivate a session ────────────────────────────────────────
+  } else if (req.url.startsWith('/admin/sessions/') && req.method === 'DELETE') {
+    if (!isAdmin) { res.writeHead(403); res.end(JSON.stringify({ error: 'Forbidden' })); return; }
+    const targetSessionId = req.url.replace('/admin/sessions/', '');
+    const session = sessions.get(targetSessionId);
+    if (!session) { res.writeHead(404); res.end(JSON.stringify({ error: 'Session not found' })); return; }
+    // Notify all devices in session
+    broadcastToSession(targetSessionId, {
+      type: 'session_terminated',
+      payload: { reason: 'Session deactivated by admin' },
+      timestamp: Date.now()
+    }, null);
+    sessions.delete(targetSessionId);
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ success: true }));
+
+  // ── Admin: send announcement to all connected devices ─────────────────
+  } else if (req.url === '/admin/announce' && req.method === 'POST') {
+    if (!isAdmin) { res.writeHead(403); res.end(JSON.stringify({ error: 'Forbidden' })); return; }
+    const body = await new Promise(resolve => {
+      let d = ''; req.on('data', c => d += c); req.on('end', () => { try { resolve(JSON.parse(d)); } catch { resolve({}); } });
+    });
+    const { title, message, type = 'info' } = body;
+    if (!title || !message) { res.writeHead(400); res.end(JSON.stringify({ error: 'title and message required' })); return; }
+    const announcement = { title, message, type, sentAt: Date.now() };
+    // Store in memory
+    announcementStore.push(announcement);
+    announcementStore.splice(0, Math.max(0, announcementStore.length - 50));
+    // Broadcast to ALL connected devices
+    for (const [, ws] of deviceConnections.entries()) {
+      if (ws.readyState === ws.OPEN) {
+        ws.send(JSON.stringify({ type: 'admin_announcement', payload: announcement, timestamp: Date.now() }));
+      }
+    }
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ success: true, reached: deviceConnections.size }));
+
+  // ── Admin: get announcements ───────────────────────────────────────────
+  } else if (req.url === '/admin/announcements' && req.method === 'GET') {
+    if (!isAdmin) { res.writeHead(403); res.end(JSON.stringify({ error: 'Forbidden' })); return; }
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ announcements: announcementStore }));
     if (!isAdmin) { res.writeHead(403); res.end(JSON.stringify({ error: 'Forbidden' })); return; }
     try {
       const r = await pool.query('SELECT * FROM feedback ORDER BY sent_at DESC LIMIT 500');
@@ -475,8 +535,23 @@ wss.on('connection', (ws, req) => {
           }
           break;
 
-        case 'feedback_submit': {
-          const { type: fbType, text, fromUsername } = message.payload || {};
+        case 'session_report': {
+          // User reports a session - flag it for admin review
+          const { reason, sessionIdToReport } = message.payload || {};
+          const reportedSession = sessions.get(sessionIdToReport || sessionId);
+          if (reportedSession) {
+            reportedSession.reports = reportedSession.reports || [];
+            reportedSession.reports.push({ from: deviceId, reason: reason || 'No reason', at: Date.now() });
+          }
+          // Also store as feedback
+          const entry = { type: 'session_report', text: `Session ${sessionIdToReport || sessionId}: ${reason || 'No reason'}`, fromUsername: message.deviceId || 'unknown', sentAt: Date.now() };
+          feedbackStore.push(entry);
+          pool.query('INSERT INTO feedback (from_username, type, text) VALUES ($1,$2,$3)', [entry.fromUsername, 'session_report', entry.text]).catch(() => {});
+          ws.send(JSON.stringify({ type: 'report_ack', payload: { success: true }, timestamp: Date.now() }));
+          break;
+        }
+
+        case 'feedback_submit': {          const { type: fbType, text, fromUsername } = message.payload || {};
           if (text && text.trim()) {
             const entry = {
               id: feedbackStore.length,

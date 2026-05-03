@@ -61,6 +61,12 @@
         </activity>
 
         <activity
+            android:name=".ui.AuthActivity"
+            android:exported="false"
+            android:theme="@style/Theme.FlowLink"
+            android:windowSoftInputMode="adjustResize" />
+
+        <activity
             android:name=".TabMirrorActivity"
             android:exported="false"
             android:theme="@style/Theme.FlowLink" />

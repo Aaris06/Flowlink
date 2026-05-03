@@ -216,20 +216,27 @@ class MainActivity : AppCompatActivity(), UsernameDialogFragment.UsernameDialogL
         webSocketManager = WebSocketManager(this)
         notificationService = NotificationService(this)
         (application as? FlowLinkApplication)?.initWebSocketManager(webSocketManager)
-        
-        // Check if username is set, show dialog if not
-        if (!sessionManager.hasUsername()) {
-            showUsernameDialog()
-        } else {
-            initializeApp(savedInstanceState)
+
+        // Check auth - redirect to AuthActivity if not logged in
+        if (!com.flowlink.app.ui.AuthActivity.isLoggedIn(this)) {
+            startActivity(android.content.Intent(this, com.flowlink.app.ui.AuthActivity::class.java))
+            finish()
+            return
         }
+
+        // Sync username from auth token into SessionManager
+        val authUsername = com.flowlink.app.ui.AuthActivity.getUsername(this)
+        if (authUsername.isNotEmpty()) {
+            sessionManager.setUsername(authUsername)
+        }
+
+        initializeApp(savedInstanceState)
     }
-    
+
     private fun showUsernameDialog() {
-        val dialog = UsernameDialogFragment.newInstance()
-        dialog.show(supportFragmentManager, UsernameDialogFragment.TAG)
+        // Legacy - no longer used, kept for interface compliance
     }
-    
+
     override fun onUsernameSubmitted(username: String) {
         sessionManager.setUsername(username)
         initializeApp(null)

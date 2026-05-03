@@ -1383,8 +1383,7 @@ class WebSocketManager(private val mainActivity: MainActivity) {
                     val fromDeviceName = payload.optString("fromDeviceName", "")
                     // Ignore if I sent this request (echoed back from session broadcast)
                     val myUsername = sessionManager.getUsername()
-                    if (fromUsername.equals(myUsername, ignoreCase = true)) return
-                    // Add to persistent inbox so it survives fragment recreation
+                    if (fromUsername.equals(myUsername, ignoreCase = true)) return                    // Add to persistent inbox so it survives fragment recreation
                     com.flowlink.app.ui.InboxFragment.addItem(mainActivity, com.flowlink.app.ui.InboxItem(
                         id = "fr-${System.currentTimeMillis()}",
                         type = "friend_request",
@@ -1447,6 +1446,32 @@ class WebSocketManager(private val mainActivity: MainActivity) {
                     Log.e("FlowLink", "Backend error: $message")
                     if (_sessionJoinState.value is SessionJoinState.InProgress) {
                         _sessionJoinState.value = SessionJoinState.Error(message)
+                    }
+                }
+                "admin_announcement" -> {
+                    val payload = json.optJSONObject("payload") ?: return
+                    val title = payload.optString("title", "FlowLink Update")
+                    val msg = payload.optString("message", "")
+                    val type = payload.optString("type", "info")
+                    val icon = when (type) { "update" -> "🚀"; "warning" -> "⚠️"; else -> "ℹ️" }
+                    mainActivity.notificationService.showNotification("$icon $title", msg)
+                    // Also show as in-app toast via InboxFragment
+                    com.flowlink.app.ui.InboxFragment.addItem(mainActivity, com.flowlink.app.ui.InboxItem(
+                        id = "ann-${System.currentTimeMillis()}",
+                        type = "info",
+                        title = "$icon $title",
+                        body = msg,
+                        fromUsername = "FlowLink Admin"
+                    ))
+                }
+                "session_terminated" -> {
+                    val payload = json.optJSONObject("payload")
+                    val reason = payload?.optString("reason", "Session terminated by admin") ?: "Session terminated by admin"
+                    mainActivity.notificationService.showNotification("⚠️ Session Terminated", reason)
+                    // Leave session gracefully
+                    mainActivity.runOnUiThread {
+                        android.widget.Toast.makeText(mainActivity, reason, android.widget.Toast.LENGTH_LONG).show()
+                        mainActivity.leaveSession()
                     }
                 }
             }

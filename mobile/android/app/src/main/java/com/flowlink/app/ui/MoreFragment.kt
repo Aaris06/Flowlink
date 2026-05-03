@@ -58,15 +58,14 @@ class MoreFragment : Fragment() {
                 .setTitle("Logout")
                 .setMessage("Log out and change username?")
                 .setPositiveButton("Logout") { _, _ ->
-                    // Clear username from prefs
+                    // Clear auth token and username
+                    com.flowlink.app.ui.AuthActivity.logout(requireContext())
                     mainActivity.sessionManager.setUsername("")
-                    requireContext().getSharedPreferences("flowlink", android.content.Context.MODE_PRIVATE)
-                        .edit().remove("username").apply()
                     // Leave session and disconnect
                     mainActivity.leaveSession()
-                    // Restart activity to show username dialog
-                    val intent = requireActivity().intent
-                    requireActivity().finish()
+                    // Go to AuthActivity
+                    val intent = android.content.Intent(requireContext(), com.flowlink.app.ui.AuthActivity::class.java)
+                    intent.flags = android.content.Intent.FLAG_ACTIVITY_NEW_TASK or android.content.Intent.FLAG_ACTIVITY_CLEAR_TASK
                     startActivity(intent)
                 }
                 .setNegativeButton("Cancel", null)
