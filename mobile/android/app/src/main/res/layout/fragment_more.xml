@@ -170,7 +170,20 @@
             android:textSize="15sp"
             android:gravity="center_vertical"
             android:paddingHorizontal="18dp"
-            android:background="@drawable/glass_card_bg_dark" />
+            android:background="@drawable/glass_card_bg_dark"
+            android:layout_marginBottom="10dp" />
+
+        <TextView
+            android:id="@+id/more_admin"
+            android:layout_width="match_parent"
+            android:layout_height="56dp"
+            android:text="🛡️   Admin Panel"
+            android:textColor="#A78BFA"
+            android:textSize="15sp"
+            android:gravity="center_vertical"
+            android:paddingHorizontal="18dp"
+            android:background="@drawable/glass_card_bg_dark"
+            android:visibility="gone" />
 
     </LinearLayout>
 </ScrollView>

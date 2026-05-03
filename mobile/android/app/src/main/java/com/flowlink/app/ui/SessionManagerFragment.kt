@@ -51,9 +51,23 @@ class SessionManagerFragment : Fragment() {
                     mainActivity.sessionManager.leaveSession()
                     mainActivity.webSocketManager.disconnect()
                     Toast.makeText(requireContext(), "Session cleared", Toast.LENGTH_SHORT).show()
-                    android.util.Log.d("FlowLink", "Session manually cleared by user")
                 }
             }
+        }
+
+        binding.btnLogout.setOnClickListener {
+            android.app.AlertDialog.Builder(requireContext())
+                .setTitle("Logout")
+                .setMessage("Log out and change account?")
+                .setPositiveButton("Logout") { _, _ ->
+                    AuthActivity.logout(requireContext())
+                    val intent = android.content.Intent(requireContext(), AuthActivity::class.java)
+                    intent.flags = android.content.Intent.FLAG_ACTIVITY_NEW_TASK or
+                                   android.content.Intent.FLAG_ACTIVITY_CLEAR_TASK
+                    startActivity(intent)
+                }
+                .setNegativeButton("Cancel", null)
+                .show()
         }
     }
 

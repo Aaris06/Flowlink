@@ -91,23 +91,23 @@ class HomeFragment : Fragment() {
         binding.drawerOverlay.setOnClickListener { closeDrawer() }
         binding.drawerLeaveSession.setOnClickListener {
             closeDrawer()
-            mainActivity.leaveSession()
+            (activity as? MainActivity)?.leaveSession()
         }
         binding.drawerSessionDetails.setOnClickListener {
             closeDrawer()
-            Toast.makeText(requireContext(), "Session: ${code ?: "N/A"}", Toast.LENGTH_SHORT).show()
+            openSubScreen { SessionDetailsFragment.newInstance() }
         }
         binding.drawerPermissions.setOnClickListener {
             closeDrawer()
-            Toast.makeText(requireContext(), "Permissions coming soon", Toast.LENGTH_SHORT).show()
+            openSubScreen { PermissionsFragment.newInstance() }
         }
         binding.drawerSettings.setOnClickListener {
             closeDrawer()
-            Toast.makeText(requireContext(), "Settings coming soon", Toast.LENGTH_SHORT).show()
+            openSubScreen { SettingsFragment.newInstance() }
         }
         binding.drawerHelp.setOnClickListener {
             closeDrawer()
-            Toast.makeText(requireContext(), "Help & Support coming soon", Toast.LENGTH_SHORT).show()
+            openSubScreen { HelpFragment.newInstance() }
         }
 
         // Avatar initial
@@ -265,13 +265,32 @@ class HomeFragment : Fragment() {
     private fun closeDrawer() {
         isDrawerOpen = false
         binding.drawerOverlay.animate().alpha(0f).setDuration(180)
-            .withEndAction { binding.drawerOverlay.visibility = View.GONE }.start()
+            .withEndAction { _binding?.drawerOverlay?.visibility = View.GONE }.start()
         binding.sideDrawer.animate().translationX(-binding.sideDrawer.width.toFloat()).setDuration(250).start()
     }
 
     private fun showInvitationDialog() {
         val dialog = InvitationDialogFragment.newInstance()
         dialog.show(parentFragmentManager, InvitationDialogFragment.TAG)
+    }
+
+    private fun openSubScreen(factory: () -> androidx.fragment.app.Fragment) {
+        val act = activity ?: return
+        // Post to avoid IllegalStateException when called during drawer animation
+        act.window.decorView.post {
+            try {
+                act.supportFragmentManager.beginTransaction()
+                    .replace(com.flowlink.app.R.id.fragment_container, factory())
+                    .addToBackStack(null)
+                    .commitAllowingStateLoss()
+            } catch (e: Exception) {
+                android.util.Log.e("FlowLink", "openSubScreen failed: ${e.message}")
+            }
+        }
+    }
+
+    private fun navigateToFragment(fragment: androidx.fragment.app.Fragment) {
+        openSubScreen { fragment }
     }
 
     private fun handleDeviceTileClick(device: Device, mainActivity: MainActivity) {
@@ -327,6 +346,9 @@ class HomeFragment : Fragment() {
 
     override fun onDestroyView() {
         super.onDestroyView()
+        // Cancel any running animations to prevent callbacks firing after binding is null
+        _binding?.drawerOverlay?.animate()?.cancel()
+        _binding?.sideDrawer?.animate()?.cancel()
         _binding = null
     }
 }

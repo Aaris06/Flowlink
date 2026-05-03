@@ -175,7 +175,19 @@
             android:textSize="14sp"
             android:textColor="#EF4444"
             android:textAllCaps="false"
-            android:background="@drawable/btn_danger_bg" />
+            android:background="@drawable/btn_danger_bg"
+            android:layout_marginBottom="10dp" />
+
+        <!-- Logout -->
+        <Button
+            android:id="@+id/btn_logout"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:text="👤  Logout / Change Account"
+            android:textSize="14sp"
+            android:textColor="#94A3B8"
+            android:textAllCaps="false"
+            android:background="@drawable/glass_card_bg_dark" />
 
     </LinearLayout>
 </ScrollView>

@@ -48,11 +48,15 @@ class FriendsFragment : Fragment() {
 
         fun newInstance() = FriendsFragment()
 
+        private fun prefsKey(ctx: Context): String {
+            val username = AuthActivity.getUsername(ctx).lowercase().trim()
+            return if (username.isNotEmpty()) "${PREFS_KEY}_$username" else PREFS_KEY
+        }
+
         /** Save an accepted friend (called after request accepted) */
         fun saveFriend(ctx: Context, friend: Friend) {
-            val prefs = ctx.getSharedPreferences(PREFS_KEY, Context.MODE_PRIVATE)
+            val prefs = ctx.getSharedPreferences(prefsKey(ctx), Context.MODE_PRIVATE)
             val list = loadFriends(ctx).toMutableList()
-            // Remove any pending entry for same deviceId, then add accepted
             list.removeAll { it.deviceId == friend.deviceId }
             list.add(friend.copy(status = "accepted"))
             prefs.edit().putString("list", Gson().toJson(list)).apply()
@@ -60,7 +64,7 @@ class FriendsFragment : Fragment() {
 
         /** Save a pending-sent request */
         fun savePendingSent(ctx: Context, friend: Friend) {
-            val prefs = ctx.getSharedPreferences(PREFS_KEY, Context.MODE_PRIVATE)
+            val prefs = ctx.getSharedPreferences(prefsKey(ctx), Context.MODE_PRIVATE)
             val list = loadFriends(ctx).toMutableList()
             if (list.none { it.deviceId == friend.deviceId }) {
                 list.add(friend.copy(status = "pending_sent"))
@@ -70,14 +74,14 @@ class FriendsFragment : Fragment() {
 
         /** Remove a friend or pending entry */
         fun removeFriend(ctx: Context, deviceId: String) {
-            val prefs = ctx.getSharedPreferences(PREFS_KEY, Context.MODE_PRIVATE)
+            val prefs = ctx.getSharedPreferences(prefsKey(ctx), Context.MODE_PRIVATE)
             val list = loadFriends(ctx).toMutableList()
             list.removeAll { it.deviceId == deviceId }
             prefs.edit().putString("list", Gson().toJson(list)).apply()
         }
 
         fun loadFriends(ctx: Context): List<Friend> {
-            val prefs = ctx.getSharedPreferences(PREFS_KEY, Context.MODE_PRIVATE)
+            val prefs = ctx.getSharedPreferences(prefsKey(ctx), Context.MODE_PRIVATE)
             val json = prefs.getString("list", null) ?: return emptyList()
             return try {
                 Gson().fromJson(json, object : TypeToken<List<Friend>>() {}.type)

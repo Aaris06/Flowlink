@@ -44,18 +44,23 @@ class InboxFragment : Fragment() {
 
     companion object {
         private const val PREFS_KEY = "flowlink_inbox"
+
         fun newInstance() = InboxFragment()
 
+        private fun prefsKey(ctx: Context): String {
+            val username = AuthActivity.getUsername(ctx).lowercase().trim()
+            return if (username.isNotEmpty()) "${PREFS_KEY}_$username" else PREFS_KEY
+        }
+
         fun addItem(ctx: Context, item: InboxItem) {
-            val prefs = ctx.getSharedPreferences(PREFS_KEY, Context.MODE_PRIVATE)
+            val prefs = ctx.getSharedPreferences(prefsKey(ctx), Context.MODE_PRIVATE)
             val list = loadItems(ctx).toMutableList()
             list.add(0, item)
-            // Keep last 50
             prefs.edit().putString("items", Gson().toJson(list.take(50))).apply()
         }
 
         fun loadItems(ctx: Context): List<InboxItem> {
-            val prefs = ctx.getSharedPreferences(PREFS_KEY, Context.MODE_PRIVATE)
+            val prefs = ctx.getSharedPreferences(prefsKey(ctx), Context.MODE_PRIVATE)
             val json = prefs.getString("items", null) ?: return emptyList()
             return try {
                 Gson().fromJson(json, object : TypeToken<List<InboxItem>>() {}.type)
@@ -134,17 +139,15 @@ class InboxFragment : Fragment() {
 
     private fun markHandled(item: InboxItem) {
         item.handled = true
-        val prefs = requireContext().getSharedPreferences(PREFS_KEY, Context.MODE_PRIVATE)
+        val prefs = requireContext().getSharedPreferences(prefsKey(requireContext()), Context.MODE_PRIVATE)
         prefs.edit().putString("items", Gson().toJson(items)).apply()
         adapter?.notifyDataSetChanged()
         updateEmptyState()
     }
 
     private fun markAllRead() {
-        // Only mark non-friend-request items as read
-        // Friend requests need explicit Accept/Decline action
         items.forEach { if (it.type != "friend_request") it.handled = true }
-        val prefs = requireContext().getSharedPreferences(PREFS_KEY, Context.MODE_PRIVATE)
+        val prefs = requireContext().getSharedPreferences(prefsKey(requireContext()), Context.MODE_PRIVATE)
         prefs.edit().putString("items", Gson().toJson(items)).apply()
     }
 

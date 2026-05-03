@@ -622,6 +622,19 @@ class MainActivity : AppCompatActivity(), UsernameDialogFragment.UsernameDialogL
         }
     }
 
+    fun navigateToSubFragment(fragment: androidx.fragment.app.Fragment) {
+        runOnUiThread {
+            try {
+                supportFragmentManager.beginTransaction()
+                    .replace(R.id.fragment_container, fragment)
+                    .addToBackStack(null)
+                    .commitAllowingStateLoss()
+            } catch (e: Exception) {
+                android.util.Log.e("FlowLink", "navigateToSubFragment failed", e)
+            }
+        }
+    }
+
     fun showSessionCreated(code: String, sessionId: String) {
         val currentFragment = supportFragmentManager.findFragmentById(R.id.fragment_container)
         if (currentFragment is SessionCreatedFragment) {

@@ -52,6 +52,15 @@ class MoreFragment : Fragment() {
         binding.moreAbout.setOnClickListener { navigateTo(AboutFragment.newInstance()) }
         binding.moreLeaveSession.setOnClickListener { mainActivity.leaveSession() }
 
+        // Show admin panel only for admin role
+        val role = com.flowlink.app.ui.AuthActivity.getRole(requireContext())
+        if (role == "admin") {
+            binding.moreAdmin.visibility = View.VISIBLE
+            binding.moreAdmin.setOnClickListener {
+                navigateTo(AdminFragment.newInstance())
+            }
+        }
+
         // Logout - clear username and restart app to username dialog
         binding.moreLogout.setOnClickListener {
             android.app.AlertDialog.Builder(requireContext())

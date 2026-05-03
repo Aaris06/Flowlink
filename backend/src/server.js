@@ -114,6 +114,19 @@ const server = createServer(async (req, res) => {
       timestamp: new Date().toISOString()
     }));
 
+  // ── DB ping - keeps Supabase active ───────────────────────────────────
+  } else if (req.url === '/db-ping' && req.method === 'GET') {
+    try {
+      const start = Date.now();
+      await pool.query('SELECT 1');
+      const ms = Date.now() - start;
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ status: 'ok', db: 'connected', latencyMs: ms, timestamp: new Date().toISOString() }));
+    } catch (err) {
+      res.writeHead(503, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ status: 'error', db: 'disconnected', error: err.message }));
+    }
+
   // ── Admin: list all users (from DB, deduplicated by username) ──────────
   } else if (req.url === '/admin/devices' && req.method === 'GET') {
     if (!isAdmin) { res.writeHead(403); res.end(JSON.stringify({ error: 'Forbidden' })); return; }
@@ -674,6 +687,28 @@ function handleDeviceRegister(ws, message) {
   if (!deviceId || !deviceName || !deviceType || !username) {
     sendError(ws, 'Missing required fields: deviceId, deviceName, deviceType, username');
     return;
+  }
+
+  // Issue 2: Kick any existing connections for the same username on a DIFFERENT deviceId
+  // This enforces single-device login per username
+  for (const [existingDeviceId, entry] of globalDevices.entries()) {
+    if (existingDeviceId === deviceId) continue; // same device reconnecting - OK
+    if ((entry.device?.username || '').toLowerCase() === username.toLowerCase()) {
+      // Same username, different device - kick the old one
+      entry.connections.forEach(oldWs => {
+        try {
+          oldWs.send(JSON.stringify({
+            type: 'session_terminated',
+            payload: { reason: 'Your account was logged in from another device.' },
+            timestamp: Date.now()
+          }));
+          oldWs.close();
+        } catch (_) {}
+      });
+      globalDevices.delete(existingDeviceId);
+      deviceConnections.delete(existingDeviceId);
+      console.log(`Kicked old device ${existingDeviceId} for username ${username} (new login from ${deviceId})`);
+    }
   }
 
   // Create or update device info

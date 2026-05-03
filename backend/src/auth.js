@@ -76,6 +76,9 @@ export async function handleAuthRoutes(req, res) {
       const valid = await bcrypt.compare(password, user.password);
       if (!valid) return json(res, 401, { error: 'Invalid username or password' });
 
+      // Check if user is already logged in on another device
+      // (skip this check - allow multiple devices for now, just update last_active)
+
       await pool.query('UPDATE users SET last_active = NOW() WHERE id = $1', [user.id]);
 
       const token = signToken({ id: user.id, username: user.username, role: user.role });
