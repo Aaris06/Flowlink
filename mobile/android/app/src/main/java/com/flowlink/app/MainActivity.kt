@@ -230,6 +230,12 @@ class MainActivity : AppCompatActivity(), UsernameDialogFragment.UsernameDialogL
             sessionManager.setUsername(authUsername)
         }
 
+        // Sync friends and inbox from DB on login
+        lifecycleScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            syncFriendsFromDb()
+            syncInboxFromDb()
+        }
+
         initializeApp(savedInstanceState)
     }
 
@@ -632,6 +638,133 @@ class MainActivity : AppCompatActivity(), UsernameDialogFragment.UsernameDialogL
             } catch (e: Exception) {
                 android.util.Log.e("FlowLink", "navigateToSubFragment failed", e)
             }
+        }
+    }
+
+    // ── DB sync helpers ────────────────────────────────────────────────────
+    private fun httpUrl() = com.flowlink.app.service.BackendConfig.WS_URL
+        .replace("wss://", "https://").replace("ws://", "http://")
+
+    private fun authToken() = com.flowlink.app.ui.AuthActivity.getToken(this) ?: ""
+
+    fun syncFriendsFromDb() {
+        try {
+            val url = java.net.URL("${httpUrl()}/user/friends")
+            val conn = url.openConnection() as java.net.HttpURLConnection
+            conn.setRequestProperty("Authorization", "Bearer ${authToken()}")
+            conn.connectTimeout = 8000; conn.readTimeout = 8000
+            if (conn.responseCode !in 200..299) return
+            val json = org.json.JSONObject(conn.inputStream.bufferedReader().readText())
+            val arr = json.optJSONArray("friends") ?: return
+            val list = mutableListOf<com.flowlink.app.model.Friend>()
+            for (i in 0 until arr.length()) {
+                val r = arr.getJSONObject(i)
+                list.add(com.flowlink.app.model.Friend(
+                    username = r.optString("friend_username"),
+                    deviceName = "",
+                    deviceId = r.optString("friend_device_id", ""),
+                    status = "accepted"
+                ))
+            }
+            // Save to SharedPreferences
+            val prefs = getSharedPreferences(
+                "flowlink_friends_${authToken().let { com.flowlink.app.ui.AuthActivity.getUsername(this).lowercase() }}",
+                android.content.Context.MODE_PRIVATE
+            )
+            prefs.edit().putString("list", com.google.gson.Gson().toJson(list)).apply()
+            android.util.Log.d("FlowLink", "Synced ${list.size} friends from DB")
+        } catch (e: Exception) {
+            android.util.Log.e("FlowLink", "Failed to sync friends from DB", e)
+        }
+    }
+
+    fun syncInboxFromDb() {
+        try {
+            val url = java.net.URL("${httpUrl()}/user/inbox")
+            val conn = url.openConnection() as java.net.HttpURLConnection
+            conn.setRequestProperty("Authorization", "Bearer ${authToken()}")
+            conn.connectTimeout = 8000; conn.readTimeout = 8000
+            if (conn.responseCode !in 200..299) return
+            val json = org.json.JSONObject(conn.inputStream.bufferedReader().readText())
+            val arr = json.optJSONArray("inbox") ?: return
+            val list = mutableListOf<com.flowlink.app.ui.InboxItem>()
+            for (i in 0 until arr.length()) {
+                val r = arr.getJSONObject(i)
+                val status = r.optString("status", "pending")
+                if (status == "pending") {
+                    list.add(com.flowlink.app.ui.InboxItem(
+                        id = r.optString("request_id"),
+                        type = "friend_request",
+                        title = "Friend Request",
+                        body = "${r.optString("from_username")} wants to be your friend",
+                        fromUsername = r.optString("from_username"),
+                        fromDeviceId = r.optString("from_device_id", ""),
+                        timestamp = try { java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", java.util.Locale.getDefault()).parse(r.optString("sent_at"))?.time ?: System.currentTimeMillis() } catch (_: Exception) { System.currentTimeMillis() }
+                    ))
+                }
+            }
+            // Save to SharedPreferences (merge with existing)
+            val username = com.flowlink.app.ui.AuthActivity.getUsername(this).lowercase()
+            val prefsKey = if (username.isNotEmpty()) "flowlink_inbox_$username" else "flowlink_inbox"
+            val prefs = getSharedPreferences(prefsKey, android.content.Context.MODE_PRIVATE)
+            val existing = com.flowlink.app.ui.InboxFragment.loadItems(this).toMutableList()
+            // Add DB items that aren't already in local
+            val existingIds = existing.map { it.id }.toSet()
+            list.filter { it.id !in existingIds }.forEach { existing.add(0, it) }
+            prefs.edit().putString("items", com.google.gson.Gson().toJson(existing.take(50))).apply()
+            android.util.Log.d("FlowLink", "Synced ${list.size} inbox items from DB")
+        } catch (e: Exception) {
+            android.util.Log.e("FlowLink", "Failed to sync inbox from DB", e)
+        }
+    }
+
+    fun persistFriendToDb(friendUsername: String, friendDeviceId: String) {
+        lifecycleScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            try {
+                val url = java.net.URL("${httpUrl()}/user/friends")
+                val conn = url.openConnection() as java.net.HttpURLConnection
+                conn.requestMethod = "POST"
+                conn.setRequestProperty("Content-Type", "application/json")
+                conn.setRequestProperty("Authorization", "Bearer ${authToken()}")
+                conn.doOutput = true; conn.connectTimeout = 8000; conn.readTimeout = 8000
+                conn.outputStream.write(org.json.JSONObject().apply {
+                    put("friendUsername", friendUsername); put("friendDeviceId", friendDeviceId)
+                }.toString().toByteArray())
+                conn.responseCode // trigger request
+            } catch (e: Exception) { android.util.Log.e("FlowLink", "Failed to persist friend to DB", e) }
+        }
+    }
+
+    fun persistInboxToDb(fromUsername: String, fromDeviceId: String, requestId: String) {
+        lifecycleScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            try {
+                val url = java.net.URL("${httpUrl()}/user/inbox")
+                val conn = url.openConnection() as java.net.HttpURLConnection
+                conn.requestMethod = "POST"
+                conn.setRequestProperty("Content-Type", "application/json")
+                conn.setRequestProperty("Authorization", "Bearer ${authToken()}")
+                conn.doOutput = true; conn.connectTimeout = 8000; conn.readTimeout = 8000
+                conn.outputStream.write(org.json.JSONObject().apply {
+                    put("fromUsername", fromUsername); put("fromDeviceId", fromDeviceId)
+                    put("requestId", requestId); put("status", "pending")
+                }.toString().toByteArray())
+                conn.responseCode
+            } catch (e: Exception) { android.util.Log.e("FlowLink", "Failed to persist inbox to DB", e) }
+        }
+    }
+
+    fun updateInboxStatusInDb(requestId: String, status: String) {
+        lifecycleScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            try {
+                val url = java.net.URL("${httpUrl()}/user/inbox/$requestId")
+                val conn = url.openConnection() as java.net.HttpURLConnection
+                conn.requestMethod = "PATCH"
+                conn.setRequestProperty("Content-Type", "application/json")
+                conn.setRequestProperty("Authorization", "Bearer ${authToken()}")
+                conn.doOutput = true; conn.connectTimeout = 8000; conn.readTimeout = 8000
+                conn.outputStream.write(org.json.JSONObject().apply { put("status", status) }.toString().toByteArray())
+                conn.responseCode
+            } catch (e: Exception) { android.util.Log.e("FlowLink", "Failed to update inbox in DB", e) }
         }
     }
 

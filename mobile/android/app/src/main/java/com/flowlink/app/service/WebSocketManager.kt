@@ -1393,6 +1393,9 @@ class WebSocketManager(private val mainActivity: MainActivity) {
                         fromDeviceId = fromDeviceId,
                         fromDeviceName = fromDeviceName
                     ))
+                    // Persist to DB
+                    val requestId = payload.optString("requestId", "fr-${System.currentTimeMillis()}")
+                    mainActivity.persistInboxToDb(fromUsername, fromDeviceId, requestId)
                     _friendRequestEvents.tryEmit(FriendRequestEvent(
                         type = "received",
                         fromUsername = fromUsername,

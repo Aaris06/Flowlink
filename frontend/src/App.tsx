@@ -76,11 +76,16 @@ function Shell() {
     return stored ? parseInt(stored, 10) : friendService.getInbox().filter(r => r.status === 'pending').length;
   });
 
-  // Verify token on mount
+  // Verify token on mount and sync DB data
   useEffect(() => {
-    authService.verifyToken().then(u => {
-      if (u) setUsername(u);
-      else setUsername(null);
+    authService.verifyToken().then(async u => {
+      if (u) {
+        setUsername(u);
+        // Sync friends and inbox from DB
+        await friendService.syncFromDb();
+      } else {
+        setUsername(null);
+      }
       setAuthChecked(true);
     });
   }, []);
@@ -475,7 +480,10 @@ function Shell() {
   if (!authChecked) {
     return (
       <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'linear-gradient(135deg,#0f0c29,#302b63,#24243e)' }}>
-        <div style={{ color: '#a78bfa', fontSize: '1.1rem', fontWeight: 700 }}>⚡ Loading FlowLink…</div>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1rem' }}>
+          <img src="/logo.png" alt="FlowLink" style={{ width: '80px', height: '80px', objectFit: 'cover', objectPosition: 'center', borderRadius: '50%' }} />
+          <div style={{ color: '#a78bfa', fontSize: '1.1rem', fontWeight: 700 }}>Loading FlowLink…</div>
+        </div>
       </div>
     );
   }
@@ -494,7 +502,9 @@ function Shell() {
 
       <aside className={`sidebar${sidebarOpen ? ' open' : ''}`}>
         <div className="sidebar-brand">
-          <div className="sidebar-logo">⚡</div>
+          <div className="sidebar-logo">
+            <img src="/logo.png" alt="FlowLink" style={{ width: '36px', height: '36px', objectFit: 'cover', objectPosition: 'center', borderRadius: '50%' }} />
+          </div>
           <div className="sidebar-brand-text">
             <h1>FlowLink</h1>
             <p>Cross-Device Continuity</p>

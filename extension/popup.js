@@ -541,6 +541,9 @@ function showSetupScreen() {
 function showMainScreen() {
   setupScreen.style.display = 'none';
   mainScreen.style.display = 'block';
+  // Hide auth screen if it exists
+  const authScreen = document.getElementById('authScreen');
+  if (authScreen) authScreen.style.display = 'none';
 }
 
 // Add activity item (for future use)

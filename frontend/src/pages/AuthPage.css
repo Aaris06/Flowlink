@@ -45,11 +45,10 @@
 }
 .auth-logo-icon {
   width: 48px; height: 48px;
-  background: linear-gradient(135deg, #6c63ff, #a855f7);
   border-radius: 14px;
   display: flex; align-items: center; justify-content: center;
-  font-size: 1.5rem;
-  box-shadow: 0 0 24px rgba(108,99,255,0.5);
+  overflow: hidden;
+  flex-shrink: 0;
 }
 .auth-logo-text h1 {
   font-size: 1.4rem; font-weight: 900;

@@ -90,7 +90,6 @@ class InboxFragment : Fragment() {
         adapter = InboxAdapter(
             items = items,
             onAccept = { item ->
-                // Accept friend request
                 FriendsFragment.saveFriend(requireContext(), Friend(
                     username = item.fromUsername,
                     deviceName = item.fromDeviceName,
@@ -100,6 +99,9 @@ class InboxFragment : Fragment() {
                 mainActivity.webSocketManager.respondFriendRequest(
                     item.fromDeviceId, item.fromUsername, true
                 )
+                // Persist to DB
+                mainActivity.persistFriendToDb(item.fromUsername, item.fromDeviceId)
+                mainActivity.updateInboxStatusInDb(item.id, "accepted")
                 markHandled(item)
                 Toast.makeText(requireContext(), "✅ Accepted ${item.fromUsername}", Toast.LENGTH_SHORT).show()
             },
@@ -107,6 +109,8 @@ class InboxFragment : Fragment() {
                 mainActivity.webSocketManager.respondFriendRequest(
                     item.fromDeviceId, item.fromUsername, false
                 )
+                // Persist to DB
+                mainActivity.updateInboxStatusInDb(item.id, "rejected")
                 markHandled(item)
                 Toast.makeText(requireContext(), "Declined ${item.fromUsername}", Toast.LENGTH_SHORT).show()
             }

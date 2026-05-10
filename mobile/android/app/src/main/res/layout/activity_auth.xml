@@ -22,14 +22,13 @@
             android:gravity="center_vertical"
             android:layout_marginBottom="36dp">
 
-            <TextView
-                android:layout_width="52dp"
-                android:layout_height="52dp"
-                android:text="⚡"
-                android:textSize="26sp"
-                android:gravity="center"
-                android:background="@drawable/share_fab_bg"
-                android:layout_marginEnd="12dp" />
+            <ImageView
+                android:layout_width="56dp"
+                android:layout_height="56dp"
+                android:src="@drawable/app_logo"
+                android:scaleType="fitCenter"
+                android:layout_marginEnd="12dp"
+                android:contentDescription="FlowLink Logo" />
 
             <LinearLayout
                 android:layout_width="wrap_content"

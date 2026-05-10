@@ -56,7 +56,9 @@ export default function AuthPage({ onAuth }: Props) {
       <div className="auth-bg" />
       <div className="auth-card">
         <div className="auth-logo">
-          <div className="auth-logo-icon">⚡</div>
+          <div className="auth-logo-icon">
+            <img src="/logo.png" alt="FlowLink" style={{ width: '56px', height: '56px', objectFit: 'cover', objectPosition: 'center', borderRadius: '50%' }} />
+          </div>
           <div className="auth-logo-text">
             <h1>FlowLink</h1>
             <p>Cross-Device Continuity</p>

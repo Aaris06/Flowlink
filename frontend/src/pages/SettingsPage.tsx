@@ -346,8 +346,7 @@ export default function SettingsPage({ ctx }: Props) {
                             className="btn-danger friend-remove-btn"
                             title="Remove friend"
                             onClick={() => {
-                              const updated = friendService.getFriends().filter(fr => fr.username !== f.username);
-                              friendService.saveFriends(updated);
+                              friendService.removeFriend(f.username);
                               logActivity({ type: 'friends', icon: '🗑', label: `Removed friend: ${f.username}`, sub: '' });
                             }}
                           >
