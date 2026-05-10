@@ -511,3 +511,13 @@ body {
 ::-webkit-scrollbar-thumb:hover {
   background: #94a3b8;
 }
+
+/* ── Extension Auth Screen ── */
+.auth-logo-row { display:flex; align-items:center; gap:10px; margin-bottom:16px; }
+.auth-icon { font-size:1.8rem; background:linear-gradient(135deg,#6c63ff,#a855f7); border-radius:10px; width:40px; height:40px; display:flex; align-items:center; justify-content:center; }
+.auth-title { font-size:1.1rem; font-weight:800; color:#fff; }
+.auth-sub { font-size:0.7rem; color:#6b6890; }
+.auth-tabs-ext { display:flex; background:rgba(255,255,255,0.06); border-radius:8px; padding:3px; margin-bottom:14px; gap:3px; }
+.ext-tab { flex:1; padding:6px; border:none; border-radius:6px; background:transparent; color:rgba(255,255,255,0.5); font-size:0.82rem; font-weight:600; cursor:pointer; }
+.ext-tab.active { background:linear-gradient(135deg,#6c63ff,#a855f7); color:#fff; }
+.auth-error-ext { background:rgba(239,68,68,0.12); border:1px solid rgba(239,68,68,0.3); border-radius:6px; padding:8px 10px; font-size:0.78rem; color:#fca5a5; margin-bottom:8px; white-space:pre-wrap; }

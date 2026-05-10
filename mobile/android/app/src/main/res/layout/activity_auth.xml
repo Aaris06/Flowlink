@@ -111,10 +111,36 @@
                 android:background="@drawable/glass_card_bg_dark"
                 android:textColor="#FFFFFF"
                 android:textColorHint="#44FFFFFF"
-                android:hint="Enter your username"
+                android:hint="e.g. Aaris (letters, numbers only)"
                 android:paddingHorizontal="14dp"
                 android:inputType="text"
                 android:layout_marginBottom="16dp" />
+
+            <!-- Email (signup only) -->
+            <TextView
+                android:id="@+id/tv_email_label"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="EMAIL"
+                android:textColor="#6B6890"
+                android:textSize="11sp"
+                android:textStyle="bold"
+                android:letterSpacing="0.1"
+                android:layout_marginBottom="6dp"
+                android:visibility="gone" />
+
+            <EditText
+                android:id="@+id/et_auth_email"
+                android:layout_width="match_parent"
+                android:layout_height="52dp"
+                android:background="@drawable/glass_card_bg_dark"
+                android:textColor="#FFFFFF"
+                android:textColorHint="#44FFFFFF"
+                android:hint="your@email.com"
+                android:paddingHorizontal="14dp"
+                android:inputType="textEmailAddress"
+                android:layout_marginBottom="16dp"
+                android:visibility="gone" />
 
             <!-- Password -->
             <TextView

@@ -31,11 +31,11 @@ class AuthService {
     return !!this.getToken() && !!this.getUsername();
   }
 
-  async signup(username: string, password: string): Promise<AuthUser> {
+  async signup(username: string, password: string, email?: string): Promise<AuthUser> {
     const res = await fetch(`${SIGNALING_HTTP_URL}/auth/signup`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username: username.trim(), password }),
+      body: JSON.stringify({ username: username.trim(), password, email: email?.trim() }),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Signup failed');
@@ -43,14 +43,18 @@ class AuthService {
     return data;
   }
 
-  async login(username: string, password: string): Promise<AuthUser> {
+  async login(username: string, password: string, deviceType = 'web', force = false): Promise<AuthUser> {
     const res = await fetch(`${SIGNALING_HTTP_URL}/auth/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username: username.trim(), password }),
+      body: JSON.stringify({ username: username.trim(), password, deviceType, force }),
     });
     const data = await res.json();
-    if (!res.ok) throw new Error(data.error || 'Login failed');
+    if (!res.ok) {
+      const err: any = new Error(data.error || 'Login failed');
+      err.alreadyLoggedIn = data.alreadyLoggedIn || false;
+      throw err;
+    }
     this.saveAuth(data.token, data.username, data.role || 'user');
     return data;
   }

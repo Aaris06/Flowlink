@@ -20,12 +20,17 @@ export async function initDb() {
       CREATE TABLE IF NOT EXISTS users (
         id          SERIAL PRIMARY KEY,
         username    TEXT UNIQUE NOT NULL,
+        email       TEXT UNIQUE,
         password    TEXT NOT NULL,
         role        TEXT NOT NULL DEFAULT 'user',
         created_at  TIMESTAMPTZ DEFAULT NOW(),
         last_active TIMESTAMPTZ DEFAULT NOW(),
         is_active   BOOLEAN DEFAULT TRUE
       );
+
+      -- Add columns to existing tables if missing
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'user';
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS email TEXT;
 
       CREATE TABLE IF NOT EXISTS friends (
         id              SERIAL PRIMARY KEY,

@@ -22,6 +22,8 @@ class AuthActivity : AppCompatActivity() {
     private lateinit var tabLogin: TextView
     private lateinit var tabSignup: TextView
     private lateinit var etUsername: EditText
+    private lateinit var etEmail: EditText
+    private lateinit var tvEmailLabel: TextView
     private lateinit var etPassword: EditText
     private lateinit var etConfirmPassword: EditText
     private lateinit var tvConfirmLabel: TextView
@@ -31,6 +33,7 @@ class AuthActivity : AppCompatActivity() {
     private lateinit var tvSwitch: TextView
 
     private var isLoginMode = true
+    private var forceLogin = false
 
     companion object {
         private const val PREFS = "flowlink"
@@ -79,6 +82,8 @@ class AuthActivity : AppCompatActivity() {
         tabLogin = findViewById(R.id.tab_login)
         tabSignup = findViewById(R.id.tab_signup)
         etUsername = findViewById(R.id.et_auth_username)
+        etEmail = findViewById(R.id.et_auth_email)
+        tvEmailLabel = findViewById(R.id.tv_email_label)
         etPassword = findViewById(R.id.et_auth_password)
         etConfirmPassword = findViewById(R.id.et_auth_confirm)
         tvConfirmLabel = findViewById(R.id.tv_confirm_label)
@@ -97,10 +102,13 @@ class AuthActivity : AppCompatActivity() {
 
     private fun setMode(login: Boolean) {
         isLoginMode = login
+        forceLogin = false
         tabLogin.isSelected = login
         tabSignup.isSelected = !login
         tabLogin.alpha = if (login) 1f else 0.5f
         tabSignup.alpha = if (!login) 1f else 0.5f
+        etEmail.visibility = if (login) View.GONE else View.VISIBLE
+        tvEmailLabel.visibility = if (login) View.GONE else View.VISIBLE
         etConfirmPassword.visibility = if (login) View.GONE else View.VISIBLE
         tvConfirmLabel.visibility = if (login) View.GONE else View.VISIBLE
         btnSubmit.text = if (login) "Sign In" else "Create Account"
@@ -112,11 +120,24 @@ class AuthActivity : AppCompatActivity() {
         val username = etUsername.text.toString().trim()
         val password = etPassword.text.toString()
         val confirm = etConfirmPassword.text.toString()
+        val email = if (::etEmail.isInitialized) etEmail.text.toString().trim() else ""
 
         tvError.visibility = View.GONE
 
         if (username.isEmpty() || password.isEmpty()) {
             showError("All fields are required"); return
+        }
+        if (!isLoginMode && username.contains("@")) {
+            showError("Username cannot be an email. Use a short name like 'Aaris'"); return
+        }
+        if (!isLoginMode && !username.matches(Regex("^[a-zA-Z0-9_.\\-]+$"))) {
+            showError("Username can only contain letters, numbers, _ . -"); return
+        }
+        if (!isLoginMode && email.isEmpty()) {
+            showError("Email is required"); return
+        }
+        if (!isLoginMode && !android.util.Patterns.EMAIL_ADDRESS.matcher(email).matches()) {
+            showError("Enter a valid email address"); return
         }
         if (!isLoginMode && password != confirm) {
             showError("Passwords do not match"); return
@@ -138,9 +159,19 @@ class AuthActivity : AppCompatActivity() {
                     conn.doOutput = true
                     conn.connectTimeout = 10000
                     conn.readTimeout = 10000
-                    val body = JSONObject().apply {
-                        put("username", username)
-                        put("password", password)
+                    val body = if (isLoginMode) {
+                        JSONObject().apply {
+                            put("username", username)
+                            put("password", password)
+                            put("deviceType", "mobile")
+                            put("force", forceLogin)
+                        }
+                    } else {
+                        JSONObject().apply {
+                            put("username", username)
+                            put("email", email)
+                            put("password", password)
+                        }
                     }.toString()
                     conn.outputStream.write(body.toByteArray())
                     val code = conn.responseCode
@@ -155,13 +186,20 @@ class AuthActivity : AppCompatActivity() {
                     val uname = json.getString("username")
                     val role = json.optString("role", "user")
                     saveAuth(this@AuthActivity, token, uname, role)
-                    // Also save to SessionManager prefs for compatibility
                     getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
                         .putString("username", uname).apply()
                     startActivity(Intent(this@AuthActivity, MainActivity::class.java))
                     finish()
                 } else {
-                    showError(json.optString("error", "Authentication failed"))
+                    val errorMsg = json.optString("error", "Authentication failed")
+                    val alreadyLoggedIn = json.optBoolean("alreadyLoggedIn", false)
+                    if (alreadyLoggedIn && isLoginMode) {
+                        forceLogin = true
+                        showError("$errorMsg\n\nTap Sign In again to force login.")
+                        btnSubmit.text = "Force Sign In"
+                    } else {
+                        showError(errorMsg)
+                    }
                 }
             } catch (e: Exception) {
                 showError("Connection failed: ${e.message}")

@@ -155,3 +155,11 @@
 @media (max-width: 480px) {
   .auth-card { padding: 2rem 1.25rem 1.5rem; }
 }
+
+.auth-force-btn {
+  display: block; width: 100%; margin-top: 8px;
+  padding: 6px 12px; border-radius: 8px;
+  background: rgba(239,68,68,0.2); border: 1px solid rgba(239,68,68,0.4);
+  color: #fca5a5; font-size: 0.8rem; cursor: pointer;
+}
+.auth-force-btn:hover { background: rgba(239,68,68,0.3); }

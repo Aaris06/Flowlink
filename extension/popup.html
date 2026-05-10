@@ -18,21 +18,55 @@
       </div>
     </div>
 
-    <!-- Setup Screen (shown if not logged in) -->
+    <!-- Auth Screen (login/signup with real credentials) -->
+    <div id="authScreen" class="screen" style="display: none;">
+      <div class="auth-logo-row">
+        <span class="auth-icon">⚡</span>
+        <div>
+          <div class="auth-title">FlowLink</div>
+          <div class="auth-sub">Cross-Device Continuity</div>
+        </div>
+      </div>
+
+      <div class="auth-tabs-ext">
+        <button id="extTabLogin" class="ext-tab active" onclick="extSwitchTab('login')">Sign In</button>
+        <button id="extTabSignup" class="ext-tab" onclick="extSwitchTab('signup')">Sign Up</button>
+      </div>
+
+      <div class="form-group">
+        <label id="extIdentifierLabel">Username or Email</label>
+        <input type="text" id="extIdentifier" placeholder="Username or email" autocomplete="username" />
+      </div>
+
+      <div class="form-group" id="extEmailGroup" style="display:none;">
+        <label>Email</label>
+        <input type="email" id="extEmail" placeholder="your@email.com" />
+      </div>
+
+      <div class="form-group">
+        <label>Password</label>
+        <input type="password" id="extPassword" placeholder="Password" autocomplete="current-password" />
+      </div>
+
+      <div class="form-group" id="extConfirmGroup" style="display:none;">
+        <label>Confirm Password</label>
+        <input type="password" id="extConfirmPassword" placeholder="Confirm password" />
+      </div>
+
+      <div id="extAuthError" class="auth-error-ext" style="display:none;"></div>
+
+      <button id="extAuthBtn" class="btn btn-primary">Sign In</button>
+    </div>
+
+    <!-- Setup Screen (legacy - kept for compat) -->
     <div id="setupScreen" class="screen" style="display: none;">
       <h2>Welcome to FlowLink!</h2>
       <p>Enter your username to get started</p>
-      
       <div class="form-group">
         <label for="usernameInput">Username</label>
         <input type="text" id="usernameInput" placeholder="Enter your username" />
       </div>
-      
       <button id="setupBtn" class="btn btn-primary">Get Started</button>
-      
-      <div class="info">
-        <p>💡 Use the same username on all your devices to sync them together</p>
-      </div>
     </div>
 
     <!-- Main Screen (shown when logged in) -->

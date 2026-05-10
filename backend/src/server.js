@@ -689,28 +689,6 @@ function handleDeviceRegister(ws, message) {
     return;
   }
 
-  // Issue 2: Kick any existing connections for the same username on a DIFFERENT deviceId
-  // This enforces single-device login per username
-  for (const [existingDeviceId, entry] of globalDevices.entries()) {
-    if (existingDeviceId === deviceId) continue; // same device reconnecting - OK
-    if ((entry.device?.username || '').toLowerCase() === username.toLowerCase()) {
-      // Same username, different device - kick the old one
-      entry.connections.forEach(oldWs => {
-        try {
-          oldWs.send(JSON.stringify({
-            type: 'session_terminated',
-            payload: { reason: 'Your account was logged in from another device.' },
-            timestamp: Date.now()
-          }));
-          oldWs.close();
-        } catch (_) {}
-      });
-      globalDevices.delete(existingDeviceId);
-      deviceConnections.delete(existingDeviceId);
-      console.log(`Kicked old device ${existingDeviceId} for username ${username} (new login from ${deviceId})`);
-    }
-  }
-
   // Create or update device info
   const device = {
     id: deviceId,

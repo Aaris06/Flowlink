@@ -132,15 +132,17 @@ document.addEventListener('DOMContentLoaded', () => {
 
 // Load user data from storage
 function loadUserData() {
-  chrome.storage.local.get(['username', 'targetUsername', 'targetUsernames', 'settings'], (result) => {
-    if (result.username) {
-      // User is logged in
+  chrome.storage.local.get(['username', 'auth_token', 'targetUsername', 'targetUsernames', 'settings'], (result) => {
+    if (result.auth_token && result.username) {
+      // Logged in with real credentials
       currentUsername = result.username;
       userName.textContent = result.username;
       showMainScreen();
+    } else if (result.username) {
+      // Legacy username-only mode - show auth screen to upgrade
+      showAuthScreen();
     } else {
-      // Show setup screen
-      showSetupScreen();
+      showAuthScreen();
     }
 
     currentReceiverUsernames = Array.isArray(result.targetUsernames)
@@ -148,7 +150,6 @@ function loadUserData() {
       : parseReceiverUsernames(result.targetUsername || '');
     updateReceiverUI();
     
-    // Load settings
     if (result.settings) {
       smartHandoffToggle.checked = result.settings.smartHandoff !== false;
       clipboardToggle.checked = result.settings.universalClipboard !== false;
@@ -260,6 +261,84 @@ function renderTransferProgress(data) {
   }
 }
 
+// Extension auth tab switcher (global for onclick)
+window.extSwitchTab = function(tab) {
+  const isSignup = tab === 'signup';
+  document.getElementById('extTabLogin').className = 'ext-tab' + (isSignup ? '' : ' active');
+  document.getElementById('extTabSignup').className = 'ext-tab' + (isSignup ? ' active' : '');
+  document.getElementById('extEmailGroup').style.display = isSignup ? 'block' : 'none';
+  document.getElementById('extConfirmGroup').style.display = isSignup ? 'block' : 'none';
+  document.getElementById('extIdentifierLabel').textContent = isSignup ? 'Username' : 'Username or Email';
+  document.getElementById('extAuthBtn').textContent = isSignup ? 'Create Account' : 'Sign In';
+  document.getElementById('extAuthError').style.display = 'none';
+  window._extAuthMode = tab;
+};
+window._extAuthMode = 'login';
+
+async function handleExtAuth() {
+  const identifier = document.getElementById('extIdentifier').value.trim();
+  const password = document.getElementById('extPassword').value;
+  const errorEl = document.getElementById('extAuthError');
+  const btn = document.getElementById('extAuthBtn');
+  const isSignup = window._extAuthMode === 'signup';
+
+  errorEl.style.display = 'none';
+  if (!identifier || !password) { showExtError('All fields are required'); return; }
+
+  btn.textContent = 'Please wait…'; btn.disabled = true;
+
+  try {
+    const BACKEND = 'https://flowlink-1.onrender.com';
+    let res, data;
+
+    if (isSignup) {
+      const email = document.getElementById('extEmail').value.trim();
+      const confirm = document.getElementById('extConfirmPassword').value;
+      if (password !== confirm) { showExtError('Passwords do not match'); return; }
+      if (password.length < 6) { showExtError('Password must be at least 6 characters'); return; }
+      res = await fetch(`${BACKEND}/auth/signup`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: identifier, email, password })
+      });
+    } else {
+      res = await fetch(`${BACKEND}/auth/login`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: identifier, password, deviceType: 'extension', force: window._extForceLogin || false })
+      });
+    }
+
+    data = await res.json();
+    if (!res.ok) {
+      if (data.alreadyLoggedIn) {
+        window._extForceLogin = true;
+        showExtError(data.error + '\n\nClick Sign In again to force login.');
+      } else {
+        showExtError(data.error || 'Authentication failed');
+      }
+      return;
+    }
+
+    // Save auth
+    chrome.storage.local.set({ username: data.username, auth_token: data.token, user_role: data.role || 'user' });
+    currentUsername = data.username;
+    userName.textContent = data.username;
+
+    // Tell background to use this token
+    chrome.runtime.sendMessage({ type: 'set_username', username: data.username, token: data.token });
+    showMainScreen();
+  } catch (e) {
+    showExtError('Connection failed. Check your internet.');
+  } finally {
+    btn.textContent = isSignup ? 'Create Account' : 'Sign In';
+    btn.disabled = false;
+  }
+}
+
+function showExtError(msg) {
+  const el = document.getElementById('extAuthError');
+  el.textContent = msg; el.style.display = 'block';
+}
+
 // Handle setup/login
 function handleSetup() {
   const username = usernameInput.value.trim();
@@ -298,20 +377,13 @@ function handleSetup() {
 // Handle logout
 function handleLogout() {
   if (confirm('Are you sure you want to logout?')) {
-    // Disconnect
-    chrome.runtime.sendMessage({ type: 'disconnect' }, (response) => {
-      if (chrome.runtime.lastError) {
-        console.warn('Error disconnecting:', chrome.runtime.lastError.message);
-      }
-      
-      // Clear storage regardless of disconnect result
-      chrome.storage.local.remove(['username', 'deviceId', 'targetUsername', 'targetUsernames'], () => {
-        currentUsername = null;
-        currentReceiverUsernames = [];
-        targetStatuses = {};
-        usernameInput.value = '';
-        showSetupScreen();
-      });
+    chrome.runtime.sendMessage({ type: 'disconnect' }, () => {});
+    chrome.storage.local.remove(['username', 'auth_token', 'user_role', 'deviceId', 'targetUsername', 'targetUsernames'], () => {
+      currentUsername = null;
+      currentReceiverUsernames = [];
+      targetStatuses = {};
+      usernameInput.value = '';
+      showAuthScreen();
     });
   }
 }
@@ -435,6 +507,26 @@ function updateConnectionStatus(connected) {
     statusDot.className = 'status-dot disconnected';
     statusText.textContent = 'Disconnected';
     console.log('❌ Extension disconnected from backend');
+  }
+}
+
+// Show auth screen (login/signup)
+function showAuthScreen() {
+  const authScreen = document.getElementById('authScreen');
+  setupScreen.style.display = 'none';
+  mainScreen.style.display = 'none';
+  if (authScreen) {
+    authScreen.style.display = 'block';
+    // Wire up auth button
+    const btn = document.getElementById('extAuthBtn');
+    if (btn && !btn._wired) {
+      btn._wired = true;
+      btn.addEventListener('click', handleExtAuth);
+      document.getElementById('extIdentifier').addEventListener('keypress', e => { if (e.key === 'Enter') handleExtAuth(); });
+      document.getElementById('extPassword').addEventListener('keypress', e => { if (e.key === 'Enter') handleExtAuth(); });
+    }
+  } else {
+    showSetupScreen();
   }
 }
 
