@@ -40,14 +40,18 @@ class FriendService {
       return r.ok ? r.json() : null;
     } catch { return null; }
   }
-  private async apiPost(path: string, body: any): Promise<void> {
-    try {
-      await fetch(`${SIGNALING_HTTP_URL}${path}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${authService.getToken() || ''}` },
-        body: JSON.stringify(body),
-      });
-    } catch { /* ignore */ }
+  private async apiPost(path: string, body: any, retries = 2): Promise<void> {
+    for (let i = 0; i <= retries; i++) {
+      try {
+        const r = await fetch(`${SIGNALING_HTTP_URL}${path}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${authService.getToken() || ''}` },
+          body: JSON.stringify(body),
+        });
+        if (r.ok) return;
+      } catch { /* retry */ }
+      if (i < retries) await new Promise(res => setTimeout(res, 500 * (i + 1)));
+    }
   }
   private async apiPatch(path: string, body: any): Promise<void> {
     try {
@@ -68,13 +72,14 @@ class FriendService {
   }
 
   // ── Load from DB on login ─────────────────────────────────────────────
+  // DB is the single source of truth. Just load and replace local cache.
   async syncFromDb(): Promise<void> {
     const [friendsData, inboxData] = await Promise.all([
       this.apiGet('/user/friends'),
       this.apiGet('/user/inbox'),
     ]);
 
-    if (friendsData?.friends) {
+    if (friendsData !== null && Array.isArray(friendsData?.friends)) {
       const friends: Friend[] = friendsData.friends.map((r: any) => ({
         username: r.friend_username,
         deviceId: r.friend_device_id || '',
@@ -84,13 +89,14 @@ class FriendService {
       this.emit('friends_changed', friends);
     }
 
-    if (inboxData?.inbox) {
+    if (inboxData !== null && Array.isArray(inboxData?.inbox)) {
+      // Backend only returns pending requests now
       const inbox: FriendRequest[] = inboxData.inbox.map((r: any) => ({
         id: r.request_id,
         fromUsername: r.from_username,
         fromDeviceId: r.from_device_id || '',
         toUsername: r.to_username,
-        status: r.status as 'pending' | 'accepted' | 'rejected',
+        status: r.status as 'pending',
         sentAt: new Date(r.sent_at).getTime(),
       }));
       localStorage.setItem(this.key('inbox'), JSON.stringify(inbox));

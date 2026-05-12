@@ -79,7 +79,7 @@ document.addEventListener('DOMContentLoaded', () => {
   });
   
   openWebAppBtn.addEventListener('click', () => {
-    chrome.tabs.create({ url: 'https://flowlink-weld.vercel.app' });
+    chrome.tabs.create({ url: 'https://flowlink-1sta.onrender.com/' });
   });
   
   logoutBtn.addEventListener('click', handleLogout);

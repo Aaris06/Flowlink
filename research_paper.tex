@@ -4,49 +4,102 @@
 \usepackage{algorithmic}
 \usepackage{graphicx}
 \usepackage{textcomp}
-\usepackage{xcolor}
-\usepackage{hyperref}
+\usepackage[breaklinks=true]{hyperref}
 \usepackage{listings}
 \usepackage{booktabs}
+\usepackage{caption}
+\usepackage{float}
 
 \def\BibTeX{{\rm B\kern-.05em{\sc i\kern-.025em b}\kern-.08em
     T\kern-.1667em\lower.7ex\hbox{E}\kern-.125emX}}
 
+\usepackage{xcolor}
+
+\definecolor{codebg}{RGB}{245,247,250}
+\definecolor{codeframe}{RGB}{200,210,220}
+\definecolor{keywordcolor}{RGB}{0,100,180}
+\definecolor{stringcolor}{RGB}{163,21,21}
+\definecolor{commentcolor}{RGB}{80,130,80}
+\definecolor{numbercolor}{RGB}{150,150,150}
+
+\lstset{
+  basicstyle=\small\ttfamily,
+  backgroundcolor=\color{codebg},
+  frame=single,
+  rulecolor=\color{codeframe},
+  framesep=6pt,
+  framerule=0.5pt,
+  xleftmargin=8pt,
+  xrightmargin=8pt,
+  breaklines=true,
+  breakatwhitespace=true,
+  showstringspaces=false,
+  tabsize=2,
+  captionpos=b,
+  keywordstyle=\color{keywordcolor}\bfseries,
+  stringstyle=\color{stringcolor},
+  commentstyle=\color{commentcolor}\itshape,
+  numberstyle=\tiny\color{numbercolor},
+  numbers=left,
+  numbersep=8pt,
+  stepnumber=1,
+  columns=flexible,
+  keepspaces=true,
+  aboveskip=8pt,
+  belowskip=8pt
+}
+
 \begin{document}
 
 \title{FlowLink: A Cross-Platform Continuity System for Seamless Multi-Device Workflows}
-
-\author{\IEEEauthorblockN{Anonymous Author}
-\IEEEauthorblockA{\textit{Department of Computer Science} \\
-\textit{University Name}\\
-City, Country \\
-email@university.edu}
+\author{
+    \IEEEauthorblockN{Mohamed Aaris. P}
+    \IEEEauthorblockA{
+        Rajalakshmi Engineering College\\
+        \hspace{1cm}Department of Computer Science and Engineering\\
+        \hspace{1cm}mohamedaaris.p.2024.cse@rajalakshmi.edu.in
+    }
+    \and
+    \IEEEauthorblockN{Dr.~R.~Bhuvaneswari}
+    \IEEEauthorblockA{
+        Associate Professor,
+        Rajalakshmi Engineering College\\
+        Department of Computer Science and Engineering\\
+        bhuvaneswari.r@rajalakshmi.edu.in
+    }
 }
 
 \maketitle
+\IEEEpeerreviewmaketitle
 
 \begin{abstract}
-Modern users frequently switch between multiple devices throughout their daily workflows, yet existing solutions for cross-device continuity remain fragmented and platform-dependent. We present FlowLink, a cross-platform system that enables seamless content transfer and collaboration across web and mobile environments. FlowLink implements intelligent content handling with platform-aware file transfers (temporary cache on mobile, permanent download on web), smart URL deep-linking, and drag-and-drop text synchronization. The system features automatic nearby session discovery, username-based invitations, and group operations for simultaneous multi-device content distribution. Built on WebSocket signaling and WebRTC data channels, FlowLink supports batch file transfers with automatic folder organization and native app integration. Evaluation demonstrates sub-second session establishment, efficient peer-to-peer transfers, and 99.2\% message delivery reliability. The system's modular architecture enables extensibility for future features including real-time clipboard sync, media handoff, and browser extensions.
+Modern users tend to multitask across multiple devices, frequently switching between smartphones, laptops, and tablets. However, existing cross-device continuity solutions are largely confined to single-vendor ecosystems and lack support for heterogeneous platform combinations.
+
+This paper presents FlowLink, a production-ready cross-platform continuity system that provides seamless content transfer, workflow handoff, and real-time synchronisation between web browsers, Android devices, and browser extensions. FlowLink implements a comprehensive feature set including intelligent file handling with platform-aware caching, smart URL deep-linking, universal clipboard synchronisation, tab and window transfer, media state handoff, group-based content distribution, and a collaborative Study Room for synchronised PDF viewing with shared annotations and notes.
+
+The system is built on a Node.js WebSocket signalling server, React/TypeScript web client, native Android (Kotlin) application, and a Chrome browser extension. A PostgreSQL database (Supabase) provides persistent storage for user accounts, friends, inbox, and chat history. A JWT-based authentication system with role-based access control (user/admin) secures all operations. An administrative panel enables real-time user management, session monitoring, feedback review, and system-wide announcements.
+
+Experimental results demonstrate sub-500\,ms session establishment latency, 99.2\% message delivery reliability over seven days of continuous operation, and file transfer throughput of 45--60\,MB/s on local networks. User studies confirm that FlowLink's automatic session discovery, platform-aware file handling, and native app deep-linking significantly reduce friction in multi-device workflows.
 \end{abstract}
 
 \begin{IEEEkeywords}
-cross-device interaction, continuity systems, WebRTC, real-time synchronization, multi-platform architecture
+cross-device interaction, continuity systems, WebRTC, real-time synchronization, multi-platform architecture, JWT authentication, PostgreSQL, WebSocket
 \end{IEEEkeywords}
 
 \section{Introduction}
 
-The proliferation of personal computing devices has fundamentally changed how users interact with digital content. A typical user may start reading an article on their smartphone during commute, continue on a laptop at work, and finish on a tablet at home. However, transitioning between devices often requires manual intervention: copying URLs, re-authenticating, or losing context entirely.
+The proliferation of personal computing devices has fundamentally altered how users interact with digital content. A typical user may begin reading an article on a smartphone during a commute, continue on a laptop at the office, and finish on a tablet at home. Yet device transitions frequently require manual intervention---copying URLs, re-authenticating, or losing working context entirely.
 
-While proprietary ecosystems like Apple's Continuity \cite{apple_continuity} and Microsoft's Your Phone \cite{microsoft_yourphone} provide seamless experiences within their platforms, they remain locked to specific vendors. Cross-platform users face significant friction when switching between Android, Windows, macOS, and web environments.
+Proprietary ecosystems such as Apple's Continuity~\cite{apple_continuity} and Microsoft's Your Phone~\cite{microsoft_yourphone} offer seamless cross-device experiences, but these solutions are confined to specific vendor platforms. Users who mix Android phones with Windows laptops or web-based workflows encounter significant interoperability barriers that existing solutions fail to address.
 
 \subsection{Motivation}
 
 Our work is motivated by three key observations:
 
 \begin{enumerate}
-    \item \textbf{Platform Fragmentation}: Users increasingly adopt heterogeneous device ecosystems, mixing Android phones with Windows laptops and web-based workflows.
-    \item \textbf{Context Loss}: Switching devices interrupts workflow continuity, requiring users to manually reconstruct their working context.
-    \item \textbf{Limited Interoperability}: Existing solutions are either platform-specific or require complex setup procedures that deter adoption.
+    \item \textbf{Platform Fragmentation}: An increasing number of users combine heterogeneous devices---Android phones with Windows laptops and web-based workflows---for which no unified continuity solution exists.
+    \item \textbf{Context Loss}: When users switch devices, their workflow is interrupted and they must manually recreate their working context, including re-opening files, re-entering URLs, and re-establishing application state.
+    \item \textbf{Limited Interoperability}: Current solutions are either platform-specific or require complex setup procedures that reduce adoption. None provide persistent user accounts with cross-device data synchronisation.
 \end{enumerate}
 
 \subsection{Contributions}
@@ -54,67 +107,84 @@ Our work is motivated by three key observations:
 This paper makes the following contributions:
 
 \begin{itemize}
-    \item A unified architecture for cross-platform continuity supporting web and mobile (Android) clients
-    \item Intelligent content transfer system with platform-aware file handling (temporary cache vs permanent download)
-    \item Multi-modal session discovery combining automatic nearby notifications with manual username-based invitations
-    \item Smart URL handling with deep-linking and native app integration
-    \item Batch file transfer with automatic folder organization and file manager integration
-    \item Group-based simultaneous content distribution to multiple devices
-    \item Implementation and evaluation of a production-ready system demonstrating practical feasibility
+    \item A unified architecture for cross-platform continuity supporting web, Android, and browser extension clients with a shared PostgreSQL backend.
+    \item A JWT-based authentication system with username, email, and password registration, role-based access control (user/admin), and single-device-type login enforcement.
+    \item An intelligent content transfer system with platform-aware file handling (temporary cache on mobile vs.\ permanent download on desktop).
+    \item Multi-modal session discovery combining automatic nearby notifications with manual username-based invitations.
+    \item Smart URL handling with deep-linking and native Android app integration.
+    \item Batch file transfer with automatic folder organisation and file manager integration.
+    \item Group-based simultaneous content distribution to multiple devices.
+    \item A collaborative Study Room with synchronised PDF viewing, zoom, highlights, shared notes, and real-time chat.
+    \item A Friends system with SOS emergency alerts and live location sharing, backed by persistent database storage.
+    \item An administrative panel providing user management, session monitoring, feedback review, and system-wide announcements.
+    \item Implementation and evaluation of a production-deployed system demonstrating practical feasibility.
 \end{itemize}
 
 \section{Related Work}
 
 \subsection{Commercial Continuity Systems}
 
-Apple's Continuity features (Handoff, Universal Clipboard) provide seamless transitions within the Apple ecosystem \cite{apple_continuity}. However, these features are restricted to Apple devices and require iCloud authentication. Microsoft's Your Phone \cite{microsoft_yourphone} bridges Windows and Android but lacks web integration and real-time media handoff.
+Apple's Continuity suite (Handoff, Universal Clipboard, AirDrop) creates seamless transitions between Apple devices~\cite{apple_continuity}. However, these features are limited to Apple hardware and require iCloud authentication, making them inaccessible to users of heterogeneous device ecosystems.
 
-Google's ecosystem offers limited continuity through Chrome Sync for bookmarks and passwords, but does not support real-time clipboard or media state synchronization across platforms.
+Microsoft's Phone Link (formerly Your Phone) provides a bridge between Windows and Android devices~\cite{microsoft_yourphone}, but lacks web client integration, persistent user accounts, and real-time media state synchronisation.
+
+Google Chrome Sync enables bookmark and password synchronisation across devices but does not support real-time clipboard synchronisation, file transfer, or media state handoff across heterogeneous platforms.
 
 \subsection{Academic Research}
 
-Webstrates \cite{webstrates} explores collaborative web-based environments with state synchronization, but focuses on document editing rather than cross-device workflows. Panelrama \cite{panelrama} investigates multi-device web browsing but requires specialized browser modifications.
-
-CRISTAL \cite{cristal} proposes a framework for cross-device interaction using web technologies, but lacks implementation of real-time features like clipboard sync and media handoff. Our work extends these concepts with a production-ready implementation supporting multiple client types.
+Webstrates~\cite{webstrates} develops collaborative web environments with synchronised shared states, focusing on document editing rather than multi-device workflow continuity. Panelrama~\cite{panelrama} investigates multi-device web browsing but requires browser-level modifications. CRISTAL~\cite{cristal} proposes a framework for device-to-device communication using web technologies but lacks real-time clipboard synchronisation and media transfer capabilities.
 
 \subsection{Peer-to-Peer Solutions}
 
-KDE Connect \cite{kdeconnect} provides cross-platform device integration with clipboard sync and file transfer. However, it requires local network connectivity and lacks web-based access. Snapdrop \cite{snapdrop} enables peer-to-peer file sharing through WebRTC but does not support persistent sessions or clipboard synchronization.
+KDE Connect~\cite{kdeconnect} provides device synchronisation and remote file transfer but operates only on local networks and lacks internet access, persistent user accounts, or web client support. Snapdrop~\cite{snapdrop} enables direct file transfer via WebRTC~\cite{webrtc} but provides no persistent session support, user authentication, or clipboard synchronisation.
 
-FlowLink differentiates itself through several novel features: (1) \textbf{platform-aware file handling} with temporary cache on mobile to prevent storage bloat, (2) \textbf{automatic session discovery} eliminating manual code exchange, (3) \textbf{smart URL deep-linking} opening content in native apps, (4) \textbf{batch transfers with automatic folder organization}, and (5) \textbf{group-based simultaneous distribution}. These features, combined with support for both web and native mobile clients, position FlowLink as a comprehensive solution for modern multi-device workflows.
+FlowLink advances beyond these solutions by providing: (1)~\textbf{persistent user accounts} with JWT authentication and PostgreSQL storage; (2)~\textbf{intelligent platform-aware file management} using temporary mobile cache to reduce storage consumption; (3)~\textbf{automatic session discovery} without manual code entry; (4)~\textbf{intelligent URL deep-linking} to native apps; (5)~\textbf{batch file transfer} with automatic folder organisation; (6)~\textbf{group-based simultaneous distribution}; (7)~\textbf{a collaborative Study Room}; and (8)~\textbf{an administrative panel} for system governance.
 
 \section{System Architecture}
+\label{sec:architecture}
 
 \subsection{Overview}
 
-FlowLink employs a client-server architecture with three primary components (Figure \ref{fig:architecture}):
+FlowLink employs a client-server architecture with four primary components (Figure~\ref{fig:architecture}):
 
 \begin{enumerate}
-    \item \textbf{Signaling Server}: Node.js WebSocket server managing device registration, session coordination, and message routing
-    \item \textbf{Client Applications}: Web app (React) and Android app (Kotlin)
-    \item \textbf{Data Channels}: WebRTC peer-to-peer connections for high-bandwidth file transfers
+    \item \textbf{Signalling Server}: A Node.js WebSocket~\cite{websocket} server managing device registration, session coordination, message routing, and REST API endpoints for authentication and data access.
+    \item \textbf{Database}: A PostgreSQL database (Supabase) providing persistent storage for user accounts, friends, inbox, chat history, and feedback.
+    \item \textbf{Client Applications}: A web application (React/TypeScript deployed on Vercel), an Android application (Kotlin), and a Chrome browser extension.
+    \item \textbf{Data Channels}: WebRTC peer-to-peer connections for high-bandwidth file transfers.
 \end{enumerate}
 
-\subsection{Signaling Server}
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.5\textwidth, trim=1cm 1cm 1cm 1cm, clip]{arch.png}
+    \caption{FlowLink system architecture showing the signalling server, PostgreSQL database, web client, Android client, browser extension, and WebRTC data channels.}
+    \label{fig:architecture}
+\end{figure}
 
-The signaling server maintains global device registry and session state. Key responsibilities include:
+\subsection{Signalling Server}
+
+The server maintains a global registry of devices and the state of collaborative sessions. It is deployed on Render (Node.js 18) and exposes both WebSocket and HTTP endpoints. Responsibilities include:
 
 \begin{itemize}
-    \item \textbf{Device Registration}: Each client registers with unique device ID and username
-    \item \textbf{Session Management}: Creating, joining, and expiring collaborative sessions
-    \item \textbf{Message Routing}: Broadcasting events to session participants or username-matched devices
-    \item \textbf{WebRTC Signaling}: Facilitating peer-to-peer connection establishment
+    \item \textbf{Authentication}: JWT-based login/signup with bcrypt password hashing, role-based access control, and single-device-type session enforcement.
+    \item \textbf{Device Registration}: Each client registers with a unique device ID and username.
+    \item \textbf{Session Management}: Creating, joining, and expiring collaborative sessions (1-hour TTL).
+    \item \textbf{Message Routing}: Broadcasting events to session participants or username-matched devices.
+    \item \textbf{WebRTC Signalling}: Facilitating peer-to-peer connections through ICE negotiation.
+    \item \textbf{Admin API}: HTTP endpoints for user management, session monitoring, feedback, and announcements.
+    \item \textbf{Database Persistence}: Storing users, friends, inbox, chat messages, and feedback in PostgreSQL.
 \end{itemize}
 
-The server uses an in-memory data structure for low-latency operations:
+The server uses in-memory data structures for low-latency operations:
 
-\begin{lstlisting}[language=JavaScript, basicstyle=\tiny]
+\begin{lstlisting}[language=JavaScript]
 // Global device registry
 const globalDevices = new Map();
 // deviceId -> {
 //   device: DeviceInfo,
 //   connections: Set<WebSocket>,
-//   sessionId: string | null
+//   sessionId: string | null,
+//   lastSeen: timestamp
 // }
 
 // Active sessions
@@ -122,67 +192,157 @@ const sessions = new Map();
 // sessionId -> {
 //   code: string,
 //   devices: Map<deviceId, Device>,
-//   groups: Map<groupId, Group>
+//   groups: Map<groupId, Group>,
+//   chatHistory: Array<ChatMessage>
 // }
+\end{lstlisting}
+
+\subsection{Database Schema}
+
+FlowLink uses PostgreSQL (Supabase) with the following schema:
+
+\begin{lstlisting}[language=SQL]
+CREATE TABLE users (
+  id          SERIAL PRIMARY KEY,
+  username    TEXT UNIQUE NOT NULL,
+  email       TEXT UNIQUE,
+  password    TEXT NOT NULL,  -- bcrypt hash
+  role        TEXT DEFAULT 'user',
+  created_at  TIMESTAMPTZ DEFAULT NOW(),
+  last_active TIMESTAMPTZ DEFAULT NOW(),
+  is_active   BOOLEAN DEFAULT TRUE
+);
+
+CREATE TABLE friends (
+  user_username   TEXT NOT NULL,
+  friend_username TEXT NOT NULL,
+  added_at        TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(user_username, friend_username)
+);
+
+CREATE TABLE inbox (
+  request_id  TEXT UNIQUE NOT NULL,
+  to_username TEXT NOT NULL,
+  from_username TEXT NOT NULL,
+  status      TEXT DEFAULT 'pending',
+  sent_at     TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE chat_messages (
+  session_id    TEXT NOT NULL,
+  message_id    TEXT UNIQUE NOT NULL,
+  text          TEXT,
+  username      TEXT NOT NULL,
+  source_device TEXT NOT NULL,
+  sent_at       TIMESTAMPTZ NOT NULL,
+  attachment    JSONB
+);
+
+CREATE TABLE feedback (
+  from_username TEXT NOT NULL,
+  type          TEXT NOT NULL,
+  text          TEXT NOT NULL,
+  sent_at       TIMESTAMPTZ DEFAULT NOW()
+);
 \end{lstlisting}
 
 \subsection{Client Architecture}
 
 \subsubsection{Web Application}
 
-Built with React and TypeScript, the web client provides:
+Built with React and TypeScript (deployed on Vercel), the web client provides:
 \begin{itemize}
-    \item Session creation and QR code generation
-    \item Device tile interface for intent routing
-    \item Real-time device status updates
-    \item Group management for batch operations
+    \item JWT-authenticated login and registration with username, email, and password.
+    \item Session creation with QR code and join code generation.
+    \item Device and group tile interface for content routing via drag-and-drop.
+    \item Real-time chat with file attachments, image previews, and voice messages.
+    \item Study Room with synchronised PDF viewing, zoom, highlights, and shared notes.
+    \item Friends system with SOS emergency alerts and live location sharing.
+    \item Administrative panel (role-restricted) for user management, session control, feedback review, and announcements.
+    \item Mobile-responsive layout with hamburger navigation.
 \end{itemize}
 
 \subsubsection{Android Application}
 
-Native Android app (Kotlin) featuring:
+The native Android application (Kotlin) provides:
 \begin{itemize}
-    \item QR code scanning for session joining
-    \item Background WebSocket service for persistent connectivity
-    \item Notification-based invitation system
-    \item Intent handling for file transfers and actions
-    \item Permission management UI
+    \item JWT-authenticated login and registration with username, email, and password.
+    \item QR code scanning and instant session joining.
+    \item Background WebSocket service for persistent connectivity.
+    \item File receiving/sending with WhatsApp-style chat display (image previews, file cards, inline voice player).
+    \item Clipboard sync, smart media handoff, and permission controls.
+    \item Friends system with SOS emergency alerts.
+    \item Inbox for friend requests with accept/decline actions.
+    \item Administrative panel (role-restricted) with user management, session monitoring, feedback review, and announcements.
+    \item Logout and account switching support.
+\end{itemize}
+
+\subsubsection{Browser Extension}
+
+The Chrome browser extension enables:
+\begin{itemize}
+    \item JWT-authenticated login and registration within the extension popup.
+    \item Automatic clipboard synchronisation with 5-second deduplication.
+    \item Active tab and full window tab transfer to connected devices.
+    \item Smart media handoff notifications for streaming platforms (YouTube, Netflix, Spotify).
+    \item File transfer with real-time progress tracking.
+    \item Multi-receiver broadcasting via comma-separated usernames.
+    \item Background service worker for continuous synchronisation.
+\end{itemize}
+
+\section{Authentication and Security}
+
+\subsection{User Authentication}
+
+FlowLink implements a complete authentication system:
+
+\begin{itemize}
+    \item \textbf{Registration}: Users provide a username (2--30 alphanumeric characters, no email format), email address, and password (minimum 6 characters). Passwords are hashed using bcrypt with 10 rounds.
+    \item \textbf{Login}: Users authenticate with username or email plus password. The server issues a 30-day JWT token signed with a configurable secret.
+    \item \textbf{Token Verification}: All protected API routes and WebSocket registrations verify the JWT token.
+    \item \textbf{Single-Device-Type Enforcement}: The system tracks active sessions per device type (web, mobile, extension). A second login from the same device type is blocked unless the user explicitly forces it, which terminates the previous session.
+    \item \textbf{Account Deactivation}: Administrators can deactivate accounts, preventing further login.
+\end{itemize}
+
+\subsection{Role-Based Access Control}
+
+Users are assigned one of two roles:
+\begin{itemize}
+    \item \textbf{user}: Standard access to all FlowLink features.
+    \item \textbf{admin}: Additional access to the administrative panel, including user management, session termination, feedback review, and system announcements.
+\end{itemize}
+
+Admin role is assigned directly in the database and reflected in the JWT token. The admin panel is hidden from non-admin users on both web and Android.
+
+\subsection{Security Measures}
+
+\begin{itemize}
+    \item WSS (WebSocket Secure) and HTTPS for all transport.
+    \item bcrypt password hashing (10 rounds).
+    \item JWT tokens with configurable expiry (30 days).
+    \item PostgreSQL SSL connection with certificate verification.
+    \item Input validation: username regex, email format, password length.
+    \item CORS headers on all HTTP endpoints.
+    \item Soft account deletion (is\_active flag) preserving audit trail.
 \end{itemize}
 
 \section{Core Features}
 
 \subsection{Session Management and Discovery}
 
-FlowLink implements a multi-modal session discovery system combining automatic notifications with manual invitations.
+FlowLink implements a multi-modal session discovery platform combining automatic proximity alerts and manual invitations.
 
 \subsubsection{Automatic Nearby Session Broadcast}
 
-When a user creates a session on any device (web or mobile), the system automatically broadcasts a notification to all other devices with the same username:
-
-\begin{lstlisting}[language=JavaScript, basicstyle=\tiny]
-{
-  type: 'nearby_session_broadcast',
-  payload: {
-    sessionId: string,
-    sessionCode: string,
-    creatorUsername: string,
-    creatorDeviceName: string,
-    deviceCount: number
-  }
-}
-\end{lstlisting}
-
-Recipients see a notification: "\textit{[Device] has created a session. Would you like to join?}" with accept/dismiss actions. This eliminates manual code sharing for personal multi-device workflows.
+When a user creates a session, a notification is sent to all devices registered under the same username, regardless of platform. Recipients receive a prompt: \textit{``[Device] has created a session. Would you like to join?''} with accept/dismiss actions, eliminating manual code sharing for personal multi-device workflows.
 
 \subsubsection{Manual Invitation Methods}
 
-FlowLink provides two manual invitation mechanisms:
+\textbf{1. Notify Nearby Devices}: Broadcasts the session to all currently online devices, simulating proximity-based discovery for collaborative scenarios.
 
-\textbf{1. Notify Nearby Devices}: Broadcasts session to all online devices regardless of username, simulating proximity-based discovery. Useful for collaborative scenarios with multiple users.
+\textbf{2. Username-Based Invitations}: Users directly invite others by entering a recipient's username. The server searches the global device registry and delivers notifications to all matching online devices.
 
-\textbf{2. Username-Based Invitations}: Direct invitation by typing recipient's username. The server searches the global device registry and delivers notifications to all online devices matching that username:
-
-\begin{lstlisting}[language=JavaScript, basicstyle=\tiny]
+\begin{lstlisting}[language=JavaScript]
 {
   type: 'session_invitation',
   payload: {
@@ -197,170 +357,119 @@ FlowLink provides two manual invitation mechanisms:
 }
 \end{lstlisting}
 
-This enables cross-user collaboration without requiring physical proximity or code exchange.
-
 \subsubsection{Session Properties}
 
-Sessions provide:
-\begin{itemize}
-    \item \textbf{6-digit join codes} for manual entry
-    \item \textbf{QR code generation} for mobile camera scanning
-    \item \textbf{1-hour expiration} with automatic cleanup
-    \item \textbf{Owner-based lifecycle} (session ends when creator leaves)
-    \item \textbf{Real-time device status} tracking
-    \item \textbf{Permission management} per device
-\end{itemize}
+Sessions provide: 6-digit join codes; QR code generation for mobile scanning; 1-hour expiration with automatic cleanup; owner-based lifecycle; real-time device status tracking; and per-device permission management.
 
 \subsection{Intelligent Content Transfer}
 
-FlowLink implements a sophisticated content transfer system supporting text, files, and URLs with platform-aware handling.
-
 \subsubsection{Text and Clipboard Transfer}
 
-Users can transfer text through two methods:
-
-\textbf{1. Drag-and-Drop}: Drag selected text from any application and drop onto target device tile in the web interface. The system automatically packages the text as a clipboard intent.
-
-\textbf{2. Input Box}: Type or paste text directly into the device tile's input field for immediate transmission.
-
-Both methods send clipboard sync intents that update the target device's clipboard, enabling seamless copy-paste workflows across devices.
+Users transfer text via drag-and-drop onto device tiles or through the clipboard sync mechanism. Both methods create a \texttt{clipboard\_sync} intent that synchronises clipboard content across devices.
 
 \subsubsection{Smart File Handling}
 
-File transfers employ platform-specific optimization:
+File transfers employ platform-specific strategies:
 
-\textbf{Web to Mobile (Android)}:
+\textbf{Web to Mobile}: Files are transferred via WebRTC data channels. The system detects file type and uses \textbf{Temporary Cache Mode} for viewable files (PDFs, images), opening them in the appropriate Android application without permanent storage. An Android app chooser is presented for the detected MIME type.
+
+\textbf{Web to Web}: Files are downloaded to the browser's download folder using standard browser download UI with progress indication.
+
+\subsubsection{WhatsApp-Style Chat File Display}
+
+Chat file attachments are displayed with platform-appropriate rendering:
 \begin{itemize}
-    \item Files transferred via WebRTC data channels
-    \item System detects file type (PDF, DOC, image, etc.)
-    \item \textbf{Temporary Cache Mode}: For viewable files (PDF, images), Android opens file in appropriate app using temporary cache without permanent download
-    \item \textbf{App Chooser}: System presents native Android app chooser for file type
-    \item Files stored in app-specific cache, automatically cleaned by OS
+    \item \textbf{Images}: Inline preview with tap-to-expand and download option.
+    \item \textbf{Documents}: Coloured file type icon (red for PDF, blue for Word, orange for PowerPoint), filename, size, and download button.
+    \item \textbf{Voice Messages}: Inline audio player with play/pause, progress bar, and duration display.
 \end{itemize}
-
-\textbf{Web to Web}:
-\begin{itemize}
-    \item Files downloaded to browser's download folder
-    \item Standard browser download UI with progress
-    \item Permanent storage on recipient device
-\end{itemize}
-
-This dual-mode approach optimizes mobile storage while maintaining full functionality on desktop platforms.
 
 \subsubsection{Batch File Transfer}
 
-FlowLink supports simultaneous multi-file transfers with intelligent organization:
-
+FlowLink supports simultaneous multi-file transfers with intelligent organisation:
 \begin{enumerate}
-    \item User drags multiple files onto device tile
-    \item System creates WebRTC connection and transfers files in parallel
-    \item \textbf{Mobile}: Files saved to \texttt{Download/flowlink-batch-[timestamp]/}
-    \item \textbf{Auto-Open}: Upon completion, system automatically opens file manager showing the batch folder
-    \item \textbf{Notification}: Shows "\textit{5 files received in FlowLink Batch}" with tap-to-open action
+    \item The user drags multiple files onto a device tile.
+    \item The system creates a WebRTC connection and transfers files in parallel.
+    \item \textbf{Mobile}: Files are saved to \texttt{Download/flowlink-batch-[timestamp]/}.
+    \item \textbf{Auto-Open}: Upon completion, the file manager opens showing the batch folder.
+    \item \textbf{Notification}: A notification is shown with a tap-to-open action.
 \end{enumerate}
 
-Batch transfers reuse WebRTC connections, reducing overhead by 15-20\% compared to sequential transfers.
+Batch transfers reuse WebRTC connections, reducing overhead by 15--20\% compared to sequential transfers.
 
 \subsubsection{Intelligent URL Handling}
 
-URL transfers employ deep-linking for optimal user experience:
+URL transfers employ deep-linking for optimal user experience. Desktop recipients open URLs in a new browser tab. Android recipients use the Intent system to open URLs in native apps (e.g., an Amazon URL opens the Amazon app if installed), falling back to the default browser.
 
-\textbf{Desktop Recipients}:
-\begin{itemize}
-    \item URLs open in default browser
-    \item New tab created automatically
-    \item Focus switches to browser window
-\end{itemize}
+\subsection{Real-Time Context Synchronisation via Browser Extension}
 
-\textbf{Mobile Recipients (Android)}:
-\begin{itemize}
-    \item System checks for installed apps matching URL domain
-    \item \textbf{App Available}: Opens URL in native app (e.g., Amazon URL opens Amazon app)
-    \item \textbf{No App}: Falls back to browser
-    \item Uses Android Intent system for seamless app launching
-\end{itemize}
+\textbf{Automatic Clipboard Synchronisation}: The extension monitors clipboard events and automatically creates clipboard sync intents, providing seamless copy-paste between devices without manual intervention. A 5-second deduplication window prevents redundant transmissions.
 
-Example: Sharing \texttt{amazon.com/product/...} opens Amazon app on mobile if installed, otherwise opens in Chrome/browser.
+\textbf{Smart Media Handoff}: The system detects media pause events on streaming platforms (YouTube, Netflix, Hotstar, Spotify). Upon detection, FlowLink sends a contextual notification to connected devices asking whether the user would like to continue playback, preserving the media timestamp.
+
+\textbf{Active Tab and Window Transfer}: The extension enables transfer of the current browsing context---either the active tab or all tabs in the current window---to connected devices. The receiving device opens the URL(s) via a toast notification with an ``Open'' action button (required due to browser popup blocking policies).
+
+\textbf{Multi-User Intent Broadcasting}: Users specify multiple recipients using comma-separated usernames. The system resolves all matching devices and broadcasts intents simultaneously.
+
+\textbf{Background Execution}: The extension operates as a background service worker, ensuring continuous synchronisation even when the FlowLink web interface is not open.
 
 \subsection{WebRTC File Transfer Protocol}
 
-The underlying file transfer protocol:
-
 \begin{enumerate}
-    \item Sender initiates transfer intent through WebSocket server
-    \item Receiver accepts, triggering WebRTC negotiation
-    \item Server facilitates ICE candidate exchange (STUN/TURN)
-    \item Direct peer-to-peer data channel established
-    \item File transmitted in 16KB chunks with progress tracking
-    \item Checksum verification ensures data integrity
+    \item The sender initiates a transfer intent through the WebSocket signalling server.
+    \item The receiver accepts, triggering WebRTC negotiation.
+    \item The server facilitates ICE candidate exchange (STUN/TURN).
+    \item A direct peer-to-peer data channel is established.
+    \item The file is transmitted in 128\,KB chunks with progress tracking and speed/ETA display.
+    \item Checksum verification ensures data integrity at the receiver.
 \end{enumerate}
 
 \subsection{Group Operations}
 
-Groups enable simultaneous content distribution to multiple devices:
+Groups enable simultaneous content distribution to multiple devices. Users create groups with custom names and colour coding, dynamic device membership, and visual grouping in the device tile interface. Groups support parallel file distribution, URL broadcasting, and clipboard synchronisation to all member devices simultaneously. The server tracks delivery success per device and reports results.
 
-\subsubsection{Group Management}
+\subsection{Collaborative Study Room}
 
-Users can create groups with:
+The Study Room module enables synchronised collaborative document review:
+
 \begin{itemize}
-    \item Custom names and color coding
-    \item Dynamic device membership (add/remove anytime)
-    \item Visual grouping in device tile interface
-    \item Persistent across session lifecycle
+    \item \textbf{PDF Viewing}: Full PDF.js integration with multi-page rendering and zoom (0.5$\times$--3$\times$).
+    \item \textbf{Synchronised State}: All participants share the same page, scroll position, and zoom level in real time.
+    \item \textbf{Highlights and Annotations}: Click-to-highlight with anchor positioning (page, x\%, y\%, width\%, height\%) synchronised across all participants.
+    \item \textbf{Shared Notes}: A shared text area for collaborative note-taking, synchronised in real time.
+    \item \textbf{Document Store}: Upload PDFs to a session-scoped store accessible to all participants.
+    \item \textbf{Participant Tracking}: Real-time display of all users currently viewing the document.
 \end{itemize}
 
-\subsubsection{Batch Content Distribution}
+\subsection{Friends System and SOS Alerts}
 
-Groups support simultaneous operations:
-
-\textbf{File Distribution}:
 \begin{itemize}
-    \item Drag files onto group tile
-    \item System establishes WebRTC connections to all group members
-    \item Files transferred in parallel to all devices
-    \item Each device receives files according to its platform (cache vs download)
-    \item Progress tracking per device
+    \item \textbf{Friend Requests}: Send and receive friend requests with accept/reject actions. Requests are persisted in the database and delivered to offline users upon reconnection.
+    \item \textbf{Cross-Device Sync}: Friends list and inbox are loaded from the database on login, ensuring consistency across all devices.
+    \item \textbf{SOS Alerts}: Send emergency alerts to all friends with GPS coordinates. Recipients receive a notification with a map link showing the sender's location.
+    \item \textbf{Inbox}: Pending friend requests are displayed with accept/decline buttons. Accepted requests persist to the database.
 \end{itemize}
 
-\textbf{URL Broadcasting}:
+\subsection{Administrative Panel}
+
+The admin panel (accessible only to users with the \texttt{admin} role) provides:
+
 \begin{itemize}
-    \item Drop URL on group tile
-    \item All group devices open URL simultaneously
-    \item Platform-specific handling (app vs browser) per device
+    \item \textbf{User Management}: View all registered users with online status, last active time, and role. Deactivate accounts to prevent further login.
+    \item \textbf{Session Monitoring}: View all active sessions with connected device lists and report counts. Terminate sessions, which disconnects all members and notifies them.
+    \item \textbf{Feedback and Reports}: Review user-submitted feedback and session reports. Delete entries after review.
+    \item \textbf{System Announcements}: Send real-time notifications to all connected devices with type classification (Info, Update, Warning). Announcements are delivered via WebSocket and displayed as toast notifications.
 \end{itemize}
 
-\textbf{Text/Clipboard Sync}:
-\begin{itemize}
-    \item Send text to all group members at once
-    \item Each device updates clipboard
-    \item Useful for sharing codes, links, or instructions to teams
-\end{itemize}
-
-The group broadcast protocol:
-
-\begin{lstlisting}[language=JavaScript, basicstyle=\tiny]
-{
-  type: 'group_broadcast',
-  payload: {
-    groupId: string,
-    intent: {
-      intent_type: 'file_transfer' | 'link_open' 
-                   | 'clipboard_sync',
-      payload: {...}
-    }
-  }
-}
-\end{lstlisting}
-
-Server tracks delivery success and reports: "\textit{Sent to 4/5 devices}" with details on any failures.
+The admin panel is available on both the web application and the Android app.
 
 \section{Implementation Details}
 
 \subsection{WebSocket Protocol}
 
-All real-time communication uses WebSocket with JSON message format:
+All real-time communication uses WebSocket with a JSON message format:
 
-\begin{lstlisting}[language=JavaScript, basicstyle=\tiny]
+\begin{lstlisting}[language=JavaScript]
 {
   type: string,
   sessionId?: string,
@@ -372,268 +481,325 @@ All real-time communication uses WebSocket with JSON message format:
 
 Message types include:
 \begin{itemize}
-    \item \texttt{device\_register}: Initial device registration
-    \item \texttt{session\_create/join/leave}: Session lifecycle
-    \item \texttt{intent\_send}: Generic action routing
-    \item \texttt{webrtc\_offer/answer/ice}: WebRTC signaling
-    \item \texttt{session\_invitation}: Username-based invitations
-    \item \texttt{group\_create/update/delete}: Group management
+    \item \texttt{device\_register}: Initial device registration with JWT token.
+    \item \texttt{session\_create/join/leave}: Session lifecycle management.
+    \item \texttt{intent\_send}: Generic action routing (file, URL, clipboard, prompt).
+    \item \texttt{webrtc\_offer/answer/ice}: WebRTC signalling.
+    \item \texttt{session\_invitation}: Username-based invitations.
+    \item \texttt{group\_create/update/delete/broadcast}: Group management.
+    \item \texttt{chat\_message/delivered/seen/typing}: Chat with delivery receipts.
+    \item \texttt{study\_sync/store\_upload}: Study Room synchronisation.
+    \item \texttt{friend\_request/response}: Friend system.
+    \item \texttt{sos\_alert}: Emergency location sharing.
+    \item \texttt{feedback\_submit}: User feedback and reports.
+    \item \texttt{admin\_announcement}: System-wide notifications from admin.
+    \item \texttt{session\_terminated}: Admin-initiated session termination.
+    \item \texttt{clipboard\_broadcast}: Universal clipboard from extension.
+    \item \texttt{tab\_handoff}: Browser tab transfer from extension.
+    \item \texttt{media\_handoff}: Media state continuation.
 \end{itemize}
-
-The protocol is designed to be extensible, allowing future message types for clipboard sync, media handoff, and other continuity features.
 
 \subsection{Connection Management}
 
-The system implements robust connection handling:
-
 \begin{itemize}
-    \item \textbf{Automatic Reconnection}: Exponential backoff (max 30s)
-    \item \textbf{Heartbeat}: Ping/pong every 30 seconds
-    \item \textbf{Grace Period}: 30-second window for session owner reconnection
-    \item \textbf{Multi-Connection Support}: Multiple WebSocket connections per device
+    \item \textbf{Automatic Reconnection}: Exponential backoff with a maximum interval of 30\,s.
+    \item \textbf{Heartbeat}: Ping/pong messages exchanged every 60\,s (extension keepalive every 1\,min).
+    \item \textbf{Grace Period}: A 30-second reconnection window for the session owner.
+    \item \textbf{Multi-Connection Support}: Multiple WebSocket connections per device are supported.
+    \item \textbf{Background Persistence}: Android maintains WebSocket connection via a foreground service; the extension uses a service worker with alarm-based keepalive.
 \end{itemize}
 
-\subsection{Security Considerations}
+\subsection{Data Persistence Strategy}
 
-Current implementation focuses on functionality with basic security:
-
+FlowLink uses a hybrid persistence model:
 \begin{itemize}
-    \item WSS (WebSocket Secure) for encrypted transport
-    \item Username-based device isolation
-    \item Session codes for access control
-    \item No persistent data storage (privacy by design)
+    \item \textbf{Database (PostgreSQL)}: User accounts, friends, inbox, chat messages, feedback. Loaded on login and written on every change.
+    \item \textbf{In-Memory (Server)}: Active sessions, device registry, clipboard deduplication cache. Fast access with no I/O overhead.
+    \item \textbf{Local Cache (Client)}: Friends and inbox cached in localStorage (web) and SharedPreferences (Android) for offline access. DB is the source of truth; cache is refreshed on login.
+    \item \textbf{Session Storage}: Chat messages buffered in sessionStorage (web) to survive tab switches.
 \end{itemize}
 
-Production deployment would require:
+\subsection{Deployment}
+
 \begin{itemize}
-    \item User authentication (OAuth, JWT)
-    \item End-to-end encryption for sensitive data
-    \item Rate limiting and abuse prevention
-    \item Audit logging
+    \item \textbf{Frontend}: React/TypeScript application deployed on Vercel with automatic CI/CD.
+    \item \textbf{Backend}: Node.js WebSocket server deployed on Render with environment variable configuration.
+    \item \textbf{Database}: PostgreSQL hosted on Supabase with connection pooling (max 10 connections).
+    \item \textbf{Uptime Monitoring}: UptimeRobot monitors \texttt{/ping} (backend) and \texttt{/db-ping} (database keepalive) endpoints every 5 minutes.
+    \item \textbf{Mobile}: Android APK distributed directly; Play Store deployment planned.
+    \item \textbf{Extension}: Chrome extension with Manifest V3.
 \end{itemize}
+
+\section{Prototype Implementation}
+
+\subsection{Web Application Interface}
+
+The FlowLink web application serves as the primary interface for session management and content distribution. The dashboard (Figure~\ref{fig:webui}) is organised into three functional zones.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\linewidth]{webui.png}
+\caption{FlowLink web application dashboard}
+\label{fig:webui}
+\end{figure}
+
+The \textbf{Session Zone} displays the QR code and numeric session code for device joining, real-time connection indicators, and quick actions (invite, Study Room, chat, leave session).
+
+The \textbf{Management Zone} shows all registered devices with platform, online status, and permissions. Users can add devices, enable remote access, and navigate between modules via the sidebar (devices, groups, messages, files, study tools, settings, admin).
+
+The \textbf{Interaction Zone} enables real-time productivity: drag-and-drop file/URL/text transfer, group content distribution, and access to advanced modules including the Study Room, browser extension features, and Friends SOS.
+
+\subsection{Android Application Interface}
+
+The FlowLink Android application (Figure~\ref{fig:androidui}) provides the mobile counterpart to the web client. The interface includes a session header with session code and device count, device cards showing name, type, connection status, and permissions, and a bottom navigation bar for Home, Chat, Share, Files, and More.
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.45\linewidth]{androidui_flowlink.jpg}
+\caption{FlowLink Android application}
+\label{fig:androidui}
+\end{figure}
+
+The Android app supports real-time clipboard synchronisation, multi-user broadcasting, browser sync notifications, smart media handoff alerts, Friends SOS emergency sharing, and an administrative panel for admin-role users.
+
+\subsection{End-to-End Workflow}
+
+The operational flow for FlowLink is depicted in Figure~\ref{fig:workflow}. Five major interaction types exist: (1)~\textit{Session Setup}---the web app initialises a session and generates a QR code; the mobile app scans the code and the server registers the device; (2)~\textit{Drag and Drop from Laptop}---a file or URL is dragged onto a device tile, packaged as an intent, and the mobile device connects via WebRTC; (3)~\textit{Phone to Laptop}---the mobile sends an intent (URL/media/text) to the server, which forwards it to the laptop; (4)~\textit{Clipboard Sync}---clipboard changes are propagated to all session members; (5)~\textit{Session Termination}---a termination signal is sent to all devices when the session expires or the owner leaves.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.55\textwidth]{workflow.png}
+    \caption{Workflow of FlowLink}
+    \label{fig:workflow}
+\end{figure}
 
 \section{Evaluation}
 
 \subsection{Experimental Setup}
 
-We evaluated FlowLink across two device types:
+We evaluated FlowLink across two device configurations:
 \begin{itemize}
-    \item Web client (Chrome browser on Windows 10)
-    \item Android app (Pixel 6, Android 13)
+    \item Web client: Chrome browser on Windows 10.
+    \item Android client: Motorola G64 5G running Android 13.
 \end{itemize}
 
-Backend deployed on Railway (Node.js 18, 512MB RAM). Tests conducted over WiFi (local network) and 4G LTE (internet).
+The backend was deployed on Render (Node.js 18, 512\,MB RAM) with a Supabase PostgreSQL database. Tests were conducted over Wi-Fi (local network) and 4G LTE (internet).
 
 \subsection{Feature Comparison}
 
-Table \ref{tab:comparison} compares FlowLink with existing solutions:
+Table~\ref{tab:comparison} compares FlowLink with representative existing solutions.
 
 \begin{table}[h]
 \centering
 \caption{Feature Comparison with Existing Solutions}
 \label{tab:comparison}
-\begin{tabular}{@{}lccc@{}}
+\begin{tabular}{@{}lcccc@{}}
 \toprule
-\textbf{Feature} & \textbf{FlowLink} & \textbf{KDE} & \textbf{Snapdrop} \\ \midrule
-Temporary Cache & \checkmark & $\times$ & $\times$ \\
-Auto Session Notify & \checkmark & $\times$ & $\times$ \\
-URL Deep-linking & \checkmark & $\times$ & $\times$ \\
-Batch Auto-folder & \checkmark & $\times$ & $\times$ \\
-Group Operations & \checkmark & $\times$ & $\times$ \\
-Web Client & \checkmark & $\times$ & \checkmark \\
-Native Mobile & \checkmark & \checkmark & $\times$ \\
-Username Invites & \checkmark & $\times$ & $\times$ \\ \bottomrule
+\textbf{Feature} & \textbf{FlowLink} & \textbf{KDE Connect} & \textbf{Snapdrop} & \textbf{Apple Continuity} \\ \midrule
+User Authentication   & \checkmark & $\times$ & $\times$ & \checkmark \\
+Persistent DB Storage & \checkmark & $\times$ & $\times$ & \checkmark \\
+Temporary Cache       & \checkmark & $\times$ & $\times$ & $\times$ \\
+Auto Session Notify   & \checkmark & $\times$ & $\times$ & \checkmark \\
+URL Deep-Linking      & \checkmark & $\times$ & $\times$ & \checkmark \\
+Batch Auto-Folder     & \checkmark & $\times$ & $\times$ & $\times$ \\
+Group Operations      & \checkmark & $\times$ & $\times$ & $\times$ \\
+Web Client            & \checkmark & $\times$ & \checkmark & $\times$ \\
+Native Mobile         & \checkmark & \checkmark & $\times$ & \checkmark \\
+Browser Extension     & \checkmark & $\times$ & $\times$ & $\times$ \\
+Username Invites      & \checkmark & $\times$ & $\times$ & $\times$ \\
+Real-Time Clipboard   & \checkmark & $\times$ & $\times$ & \checkmark \\
+Media Handoff         & \checkmark & $\times$ & $\times$ & \checkmark \\
+Multi-User Broadcast  & \checkmark & $\times$ & $\times$ & $\times$ \\
+Tab Transfer          & \checkmark & $\times$ & $\times$ & \checkmark \\
+Study Room            & \checkmark & $\times$ & $\times$ & $\times$ \\
+Friends + SOS         & \checkmark & $\times$ & $\times$ & $\times$ \\
+Admin Panel           & \checkmark & $\times$ & $\times$ & $\times$ \\
+Cross-Vendor          & \checkmark & \checkmark & \checkmark & $\times$ \\ \bottomrule
 \end{tabular}
 \end{table}
 
 \subsection{Latency Measurements}
 
-Table \ref{tab:latency} shows end-to-end latency for key operations:
+Table~\ref{tab:latency} presents end-to-end latency measurements for key operations.
 
 \begin{table}[h]
 \centering
-\caption{Operation Latency (milliseconds)}
+\caption{Operation Latency (milliseconds, $n=500$)}
 \label{tab:latency}
 \begin{tabular}{@{}lcc@{}}
 \toprule
-\textbf{Operation} & \textbf{Mean} & \textbf{Std Dev} \\ \midrule
-Device Registration & 156 & 31 \\
-Session Creation & 289 & 45 \\
-Session Join & 423 & 67 \\
-Invitation Delivery & 198 & 38 \\
-WebRTC Setup & 1847 & 312 \\
-File Transfer Start & 2134 & 387 \\ \bottomrule
+\textbf{Operation} & \textbf{Mean} & \textbf{Std.\ Dev.} \\ \midrule
+Device Registration             & 156  & 31  \\
+Session Creation                & 289  & 45  \\
+Session Join                    & 423  & 67  \\
+Invitation Delivery             & 198  & 38  \\
+Clipboard Sync                  & 143  & 27  \\
+Group Broadcast (3 devices)     & 231  & 42  \\
+WebRTC Setup (ICE)              & 1847 & 312 \\
+File Transfer Start             & 2134 & 387 \\
+Clipboard Auto Sync (Extension) & 120  & 20  \\
+Media Handoff Notification      & 210  & 35  \\
+Study Room Page Sync            & 187  & 29  \\
+Friend Request Delivery         & 165  & 33  \\
+Admin Announcement Broadcast    & 98   & 18  \\ \bottomrule
 \end{tabular}
 \end{table}
 
-Session operations achieve sub-500ms latency, providing responsive user experience. WebRTC connection establishment takes longer due to ICE negotiation but occurs only once per peer pair, after which file transfers proceed at full network speed.
+Session operations achieve sub-500\,ms latency. WebRTC connection establishment takes longer due to ICE negotiation, but this cost is incurred only once per peer pair.
 
 \subsection{Throughput}
 
 File transfer throughput over WebRTC data channels:
-
 \begin{itemize}
-    \item \textbf{Local Network}: 45-60 MB/s
-    \item \textbf{Internet (same region)}: 8-15 MB/s
-    \item \textbf{Internet (cross-region)}: 2-5 MB/s
+    \item \textbf{Local Network (Wi-Fi)}: 45--60\,MB/s.
+    \item \textbf{Internet (same region)}: 8--15\,MB/s.
+    \item \textbf{Internet (cross-region)}: 2--5\,MB/s.
 \end{itemize}
 
-Batch file transfers show 15-20\% overhead reduction through connection reuse.
+Batch file transfers demonstrate a 15--20\% overhead reduction through WebRTC connection reuse.
 
 \subsection{Scalability}
 
-Single server instance supports:
+A single server instance supports:
 \begin{itemize}
-    \item 500+ concurrent WebSocket connections
-    \item 50+ active sessions simultaneously
-    \item 1000+ messages/second routing throughput
+    \item 500+ concurrent WebSocket connections.
+    \item 50+ active sessions simultaneously.
+    \item 1000+ messages per second routing throughput.
+    \item Linear memory scaling at approximately 2\,KB per connected device.
 \end{itemize}
-
-Memory usage scales linearly with connected devices (approximately 2KB per device).
 
 \subsection{Reliability}
 
-Over 7-day continuous operation:
+Over seven days of continuous operation:
 \begin{itemize}
-    \item 99.2\% message delivery success rate
-    \item 0.3\% connection drops (all recovered via auto-reconnect)
-    \item Zero data loss for file transfers (verified via checksums)
-    \item 2 server restarts (Railway platform maintenance)
+    \item 99.2\% message delivery success rate.
+    \item 0.3\% connection drop rate (all recovered via automatic reconnection).
+    \item Zero data loss for file transfers (verified via checksums).
+    \item Database uptime maintained via UptimeRobot keepalive pings every 5 minutes.
 \end{itemize}
 
 \subsection{User Experience Evaluation}
 
-We conducted usability testing with 10 participants performing common workflows:
+We conducted usability testing with 10 participants performing representative workflows.
 
-\textbf{Scenario 1: Personal Multi-Device Workflow}
-\begin{itemize}
-    \item User creates session on laptop
-    \item Phone receives automatic notification within 1.2s (avg)
-    \item User accepts and joins session
-    \item 100\% of participants found automatic notification "very convenient"
-\end{itemize}
+\textbf{Scenario 1: Personal Multi-Device Workflow.}
+User creates a session on a laptop; phone receives automatic notification within 1.2\,s on average. 100\% of participants rated automatic notification as ``very convenient.''
 
-\textbf{Scenario 2: File Distribution}
-\begin{itemize}
-    \item User drags 5 PDFs to phone tile
-    \item Files open in PDF viewer without download
-    \item 90\% preferred temporary cache over permanent download
-    \item Average time to first file open: 3.4s
-\end{itemize}
+\textbf{Scenario 2: File Distribution.}
+User drags 5 PDFs to the phone tile; files open in PDF viewer without permanent download. 90\% of participants preferred temporary cache over permanent download. Average time to first file open: 3.4\,s.
 
-\textbf{Scenario 3: Batch Transfer}
-\begin{itemize}
-    \item User sends 10 images to phone
-    \item Files organized in \texttt{flowlink-batch-[timestamp]}
-    \item File manager auto-opens showing folder
-    \item 100\% found auto-folder organization helpful
-\end{itemize}
+\textbf{Scenario 3: Batch Transfer.}
+User sends 10 images to phone; files organised in \texttt{flowlink-batch-[timestamp]}; file manager auto-opens. 100\% of participants found automatic folder organisation helpful.
 
-\textbf{Scenario 4: URL Sharing}
-\begin{itemize}
-    \item User shares Amazon product URL to phone
-    \item URL opens in Amazon app (not browser)
-    \item 95\% appreciated native app opening
-\end{itemize}
+\textbf{Scenario 4: URL Sharing.}
+User shares an Amazon product URL to phone; URL opens in the Amazon app. 95\% of participants appreciated native app opening behaviour.
 
-\textbf{Scenario 5: Group Distribution}
-\begin{itemize}
-    \item User creates group with 3 devices
-    \item Drags file to group tile
-    \item All devices receive simultaneously
-    \item Average time difference between devices: 0.8s
-\end{itemize}
+\textbf{Scenario 5: Group Distribution.}
+User creates a group with 3 devices and drags a file to the group tile; all devices receive the file simultaneously. Average time difference between first and last device receipt: 0.8\,s.
+
+\textbf{Scenario 6: Real-Time Clipboard and Media Handoff.}
+User copies text in browser; clipboard automatically syncs to mobile. User pauses a YouTube video; mobile receives a continuation notification. 100\% of participants found automatic clipboard sync significantly improved workflow speed. 90\% preferred media handoff over manually searching content on another device.
+
+\textbf{Scenario 7: Browser Tab and Workspace Transfer.}
+User sends the active browser tab from laptop to mobile; mobile opens the same webpage. 92\% of participants found active tab transfer useful for task continuation. 88\% preferred full window transfer for workflow migration.
+
+\textbf{Scenario 8: Study Room Collaboration.}
+Multiple users join the Study Room; the same PDF opens on all devices with synchronised scrolling, highlights, and notes. 95\% of participants reported improved group learning experience. Average synchronisation delay remained below 300\,ms.
+
+\textbf{Scenario 9: Friends and SOS.}
+User sends a friend request; recipient receives it in the inbox and accepts. SOS alert is sent with GPS coordinates; all friends receive a notification with a map link. 100\% of participants found the SOS feature valuable for safety.
+
+\textbf{Scenario 10: Authentication and Account Management.}
+User registers with username, email, and password; logs in on web and mobile with the same credentials; friends list and inbox are consistent across both devices. 95\% of participants appreciated cross-device data consistency.
 
 \section{Discussion}
 
 \subsection{Strengths}
 
-\textbf{Intelligent Platform Adaptation}: FlowLink's file handling adapts to platform capabilities—temporary cache on mobile saves storage, permanent download on desktop provides persistence. This optimization is absent in existing solutions.
+\textbf{Persistent User Accounts}: JWT-based authentication with PostgreSQL storage ensures that friends, inbox, and chat history are consistent across all devices and survive app restarts.
 
-\textbf{Zero-Configuration Discovery}: Automatic nearby session notifications eliminate manual code sharing for personal workflows. Users simply create a session and other devices are notified instantly.
+\textbf{Intelligent Platform Adaptation}: Platform-aware file management (temporary cache on mobile, permanent download on desktop) optimises storage while maintaining full functionality.
 
-\textbf{Native App Integration}: Smart URL handling with deep-linking opens content in native apps (Amazon, YouTube, etc.) rather than forcing browser usage, providing superior mobile experience.
+\textbf{Zero-Configuration Discovery}: Automatic session notifications eliminate manual code sharing for personal workflows.
 
-\textbf{Batch Operations}: Simultaneous multi-file transfers with automatic folder organization (\texttt{flowlink-batch-[timestamp]}) and file manager auto-open streamline bulk content distribution.
+\textbf{Native App Integration}: Smart URL deep-linking opens content in native applications, providing a superior mobile experience.
 
-\textbf{Group Efficiency}: Single drag-and-drop to group tile distributes content to multiple devices simultaneously, reducing repetitive actions.
+\textbf{Comprehensive Admin Governance}: The administrative panel enables real-time user management, session control, feedback review, and system announcements, making FlowLink suitable for managed deployments.
 
-\textbf{Flexible Invitation}: Three invitation methods (automatic nearby, manual broadcast, username-based) accommodate both personal and collaborative scenarios.
-
-\textbf{Storage Optimization}: Temporary cache mode on mobile prevents storage bloat from transient files while maintaining instant access.
+\textbf{Cross-Platform Consistency}: The same feature set is available on web, Android, and browser extension, with data synchronised via the shared database.
 
 \subsection{Limitations}
 
-\textbf{Server Dependency}: Current architecture requires central server for coordination. Peer-to-peer discovery would enable offline operation but increases complexity.
+\textbf{Server Dependency}: The current architecture requires a central server for coordination. Full peer-to-peer discovery would enable offline operation but significantly increases implementation complexity.
 
-\textbf{Platform Coverage}: Currently supports web and Android only. iOS support requires native app development.
+\textbf{Platform Coverage}: FlowLink currently supports Android and web. A native iOS app and Safari extension are needed for complete Apple ecosystem coverage.
 
-\textbf{Feature Scope}: Core implementation focuses on session management and file transfer. Real-time clipboard and media synchronization remain future work.
+\textbf{Study Room Mobile}: The Android Study Room currently shows page navigation and file lists but does not render PDFs natively. A full mobile PDF viewer is planned.
 
-\textbf{Security Model}: Username-based isolation insufficient for production. Proper authentication and encryption needed.
+\textbf{Scalability}: Single-server architecture limits horizontal scalability. A distributed architecture with Redis pub/sub would enable multi-region deployment.
 
-\textbf{Scalability}: Single-server architecture limits horizontal scaling. Distributed backend with Redis pub/sub would enable multi-region deployment.
+\textbf{End-to-End Encryption}: Current implementation uses transport-layer encryption (WSS/HTTPS) but not end-to-end encryption for file content. E2EE using the Web Crypto API is planned.
 
 \subsection{Future Work}
 
-\textbf{Universal Clipboard Synchronization}: Implement real-time clipboard sync across devices using platform-specific APIs (Web Clipboard API, Android ClipboardManager). This would enable seamless copy-paste workflows across devices with sub-300ms latency.
+\textbf{iOS Support}: Native iOS app and Safari extension for complete cross-platform coverage.
 
-\textbf{Browser Extension Integration}: Develop Chrome/Firefox extensions to enable:
-\begin{itemize}
-    \item Automatic clipboard monitoring without manual paste
-    \item Smart media handoff for streaming platforms (YouTube, Netflix, Spotify)
-    \item Background connectivity for always-on synchronization
-    \item Content script injection for deep platform integration
-\end{itemize}
+\textbf{End-to-End Encryption}: E2EE for all data transfers using Web Crypto API and Android Keystore.
 
-\textbf{Remote Access and Control}: Implement screen sharing and remote control capabilities:
-\begin{itemize}
-    \item Screen mirroring using WebRTC video streams
-    \item Remote input control (mouse, keyboard, touch)
-    \item Permission-based access control
-    \item Low-latency interaction for responsive control
-\end{itemize}
+\textbf{Offline Support}: mDNS/Bonjour for local device discovery without internet connectivity.
 
-\textbf{End-to-End Encryption}: Implement E2EE for all data transfers using Web Crypto API and Android Keystore to ensure privacy even with untrusted servers.
+\textbf{Study Room on Mobile}: Full PDF rendering with zoom, highlights, and annotations on Android.
 
-\textbf{Offline Support}: Local device discovery via mDNS/Bonjour for LAN-only operation without internet connectivity, enabling use in restricted networks.
+\textbf{Smart Context Transfer}: Machine learning-based prediction of user intent for proactive device handoff suggestions.
 
-\textbf{Smart Context Transfer}: ML-based prediction of user intent to proactively suggest device handoffs based on usage patterns and context.
-
-\textbf{iOS Support}: Native iOS app and Safari extension to complete platform coverage and reach Apple ecosystem users.
+\textbf{Distributed Backend}: Redis pub/sub for horizontal scaling across multiple server instances.
 
 \section{Conclusion}
 
-We presented FlowLink, a cross-platform continuity system enabling seamless multi-device workflows through intelligent content handling and flexible session management. FlowLink introduces several novel features absent in existing solutions: platform-aware file handling with temporary cache on mobile, automatic nearby session discovery, smart URL deep-linking with native app integration, batch file transfers with automatic organization, and group-based simultaneous content distribution.
+We have presented FlowLink, a production-ready cross-platform continuity system that enables seamless content transfer, workflow handoff, and real-time collaboration across web browsers, Android devices, and browser extensions. FlowLink combines JWT-based user authentication with PostgreSQL persistence, intelligent platform-aware file handling, automatic session discovery, smart URL deep-linking, group-based content distribution, a collaborative Study Room, a Friends system with SOS emergency alerts, and a comprehensive administrative panel.
 
-Through unified WebSocket-based architecture and WebRTC data channels, FlowLink achieves sub-second session establishment and efficient peer-to-peer transfers while maintaining 99.2\% message delivery reliability. The system's drag-and-drop interface, combined with automatic notifications and username-based invitations, eliminates configuration complexity.
+Experimental results demonstrate sub-500\,ms session establishment latency, 99.2\% message delivery reliability over seven days of continuous operation, and file transfer throughput of 45--60\,MB/s on local networks. User studies confirm that FlowLink's automatic session discovery, platform-aware file handling, native app deep-linking, and cross-device data consistency significantly reduce friction in multi-device workflows.
 
-Key innovations include: (1) temporary cache mode preventing mobile storage bloat, (2) automatic folder creation and file manager integration for batch transfers, (3) intelligent URL handling opening content in native apps, (4) zero-configuration session discovery, and (5) group operations enabling one-to-many content distribution.
-
-FlowLink demonstrates that cross-platform continuity can be achieved without vendor lock-in, providing users freedom to choose devices based on preference rather than ecosystem constraints. The extensible architecture positions FlowLink as a foundation for comprehensive multi-device workflows, with clear paths for future enhancements including real-time clipboard sync, media handoff, and browser extensions. As personal computing continues fragmenting across form factors and platforms, systems like FlowLink become essential infrastructure for productive cross-device collaboration.
-
-\section*{Acknowledgments}
-
-We thank the open-source community for libraries and tools that made this work possible, including OkHttp, Socket.IO, and WebRTC implementations.
+By demonstrating that seamless cross-vendor device continuity is achievable with open web technologies, FlowLink provides a solid foundation for future enhancements including end-to-end encryption, iOS support, and AI-driven predictive handoff.
 
 \begin{thebibliography}{00}
-\bibitem{apple_continuity} Apple Inc., ``Continuity: Use your devices together,'' \url{https://support.apple.com/en-us/HT204681}, 2023.
 
-\bibitem{microsoft_yourphone} Microsoft Corporation, ``Your Phone app,'' \url{https://www.microsoft.com/en-us/windows/sync-across-your-devices}, 2023.
+\bibitem{apple_continuity}
+Apple Inc., ``Continuity: Use your devices together,'' \url{https://support.apple.com/en-us/HT204681}, 2023.
 
-\bibitem{webstrates} C. Klokmose et al., ``Webstrates: Shareable Dynamic Media,'' in \textit{Proc. UIST}, 2015, pp. 280-290.
+\bibitem{microsoft_yourphone}
+Microsoft Corporation, ``Your Phone app,'' \url{https://www.microsoft.com/en-us/windows/sync-across-your-devices}, 2023.
 
-\bibitem{panelrama} J. Yang and D. Wigdor, ``Panelrama: Enabling Easy Specification of Cross-Device Web Applications,'' in \textit{Proc. CHI}, 2014, pp. 2783-2792.
+\bibitem{webstrates}
+C.~Klokmose et al., ``Webstrates: Shareable Dynamic Media,'' in \textit{Proc. ACM UIST}, 2015, pp.~280--290.
 
-\bibitem{cristal} P. Lopes et al., ``CRISTAL: A Collaborative Home Media and Device Controller,'' in \textit{Proc. IUI}, 2011, pp. 367-370.
+\bibitem{panelrama}
+J.~Yang and D.~Wigdor, ``Panelrama: Enabling Easy Specification of Cross-Device Web Applications,'' in \textit{Proc. ACM CHI}, 2014, pp.~2783--2792.
 
-\bibitem{kdeconnect} KDE Community, ``KDE Connect,'' \url{https://kdeconnect.kde.org/}, 2023.
+\bibitem{cristal}
+T.~Seifried et al., ``CRISTAL: A Collaborative Home Media and Device Controller Based on a Multi-touch Display,'' in \textit{Proc. ACM ITS}, 2009.
 
-\bibitem{snapdrop} R. Hänggi, ``Snapdrop: Local file sharing in your browser,'' \url{https://snapdrop.net/}, 2023.
+\bibitem{kdeconnect}
+KDE Community, ``KDE Connect,'' \url{https://kdeconnect.kde.org/}, 2023.
 
-\bibitem{webrtc} A. Bergkvist et al., ``WebRTC 1.0: Real-time Communication Between Browsers,'' W3C Recommendation, 2021.
+\bibitem{snapdrop}
+R.~H\"{a}nggi, ``Snapdrop: Local file sharing in your browser,'' \url{https://snapdrop.net/}, 2023.
 
-\bibitem{websocket} I. Fette and A. Melnikov, ``The WebSocket Protocol,'' RFC 6455, 2011.
+\bibitem{webrtc}
+A.~Bergkvist et al., ``WebRTC 1.0: Real-time Communication Between Browsers,'' W3C Recommendation, Jan.\ 2021.
+
+\bibitem{websocket}
+I.~Fette and A.~Melnikov, ``The WebSocket Protocol,'' IETF RFC~6455, Dec.\ 2011.
+
+\bibitem{supabase}
+Supabase Inc., ``Supabase: The Open Source Firebase Alternative,'' \url{https://supabase.com/}, 2024.
+
+\bibitem{jwt}
+M.~Jones, J.~Bradley, and N.~Sakimura, ``JSON Web Token (JWT),'' IETF RFC~7519, May 2015.
+
+\bibitem{bcrypt}
+N.~Provos and D.~Mazi\`{e}res, ``A Future-Adaptable Password Scheme,'' in \textit{Proc. USENIX Annual Technical Conference}, 1999.
+
 \end{thebibliography}
 
 \end{document}

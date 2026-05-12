@@ -180,7 +180,8 @@ export async function handleUserDataRoutes(req, res) {
     return json(res, 200, { success: true });
   }
   if (url === '/user/inbox' && method === 'GET') {
-    const r = await pool.query('SELECT * FROM inbox WHERE to_username = $1 ORDER BY sent_at DESC', [username]);
+    // Only return pending requests — accepted/rejected are already handled
+    const r = await pool.query("SELECT * FROM inbox WHERE to_username = $1 AND status = 'pending' ORDER BY sent_at DESC", [username]);
     return json(res, 200, { inbox: r.rows });
   }
   if (url === '/user/inbox' && method === 'POST') {
