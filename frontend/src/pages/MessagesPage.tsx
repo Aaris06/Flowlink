@@ -349,7 +349,7 @@ export default function MessagesPage({ ctx }: Props) {
     <div className="messages-page" onClick={closeCtxMenu}>
       <div className="messages-container card">
         <div className="msg-header">
-          <div className="msg-header-icon">💬</div>
+          <div className="msg-header-icon msg-header-icon-svg" />
           <div>
             <div className="msg-header-title">Session Chat</div>
             <div className="msg-header-sub">{session ? `Session ${session.code} · ${messages.length} messages` : 'No active session'}</div>
@@ -409,7 +409,7 @@ export default function MessagesPage({ ctx }: Props) {
         {/* Edit bar */}
         {editingId && (
           <div className="msg-edit-bar">
-            <span>✏️ Editing message</span>
+            <span>Editing message</span>
             <button onClick={() => { setEditingId(null); setInput(''); }}>Cancel</button>
           </div>
         )}
@@ -425,7 +425,7 @@ export default function MessagesPage({ ctx }: Props) {
                 </span>
                 <span className="msg-recording-label">Recording…</span>
               </div>
-              <button className="btn-primary msg-send-btn" onClick={stopRecording}>🚀</button>
+              <button className="btn-primary msg-send-btn" onClick={stopRecording}>Send</button>
             </>
           ) : (
             <>
@@ -442,7 +442,7 @@ export default function MessagesPage({ ctx }: Props) {
                 rows={1}
               />
               {input.trim() ? (
-                <button className="btn-primary msg-send-btn" onClick={() => sendMessage()} disabled={!session}>🚀</button>
+                <button className="btn-primary msg-send-btn" onClick={() => sendMessage()} disabled={!session}>Send</button>
               ) : (
                 <button className="msg-attach-btn msg-mic-btn" title="Hold to record voice" disabled={!session}
                   onMouseDown={startRecording} onTouchStart={startRecording}>🎙</button>
@@ -455,10 +455,10 @@ export default function MessagesPage({ ctx }: Props) {
       {/* Context menu */}
       {ctxMenu && (
         <div className="msg-ctx-menu" style={{ top: ctxMenu.y, left: ctxMenu.x }} onClick={e => e.stopPropagation()}>
-          <button onClick={() => ctxAction('reply')}>↩ Reply</button>
-          <button onClick={() => ctxAction('copy')}>📋 Copy</button>
-          {ctxMenu.own && <button onClick={() => ctxAction('edit')}>✏️ Edit</button>}
-          {ctxMenu.own && <button className="danger" onClick={() => ctxAction('delete')}>🗑 Delete</button>}
+          <button onClick={() => ctxAction('reply')}>Reply</button>
+          <button onClick={() => ctxAction('copy')}>Copy</button>
+          {ctxMenu.own && <button onClick={() => ctxAction('edit')}>Edit</button>}
+          {ctxMenu.own && <button className="danger" onClick={() => ctxAction('delete')}>Delete</button>}
         </div>
       )}
     </div>

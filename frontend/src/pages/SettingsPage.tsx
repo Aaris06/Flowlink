@@ -83,16 +83,16 @@ export default function SettingsPage({ ctx }: Props) {
   };
 
   const pendingInbox = inbox.filter(r => r.status === 'pending');
-  const tabs: { id: Tab; label: string; icon: string; badge?: number }[] = [
-    { id: 'session', label: 'Session Details', icon: '🔗' },
-    { id: 'chat', label: 'Chat', icon: '💬' },
-    { id: 'privacy', label: 'Privacy', icon: '🔒' },
-    { id: 'inbox', label: 'Inbox', icon: '📥', badge: pendingInbox.length + sosAlerts.length },
-    { id: 'browser', label: 'Browser', icon: '🌐' },
-    { id: 'friends', label: 'Friends', icon: '👥', badge: friends.length || undefined },
-    { id: 'permissions', label: 'Permissions', icon: '🛡️' },
-    { id: 'feedback', label: 'Feedback', icon: '📝' },
-    { id: 'about', label: 'About FlowLink', icon: 'ℹ️' },
+  const tabs: { id: Tab; label: string; badge?: number }[] = [
+    { id: 'session', label: 'Session Details' },
+    { id: 'chat', label: 'Chat' },
+    { id: 'privacy', label: 'Privacy' },
+    { id: 'inbox', label: 'Inbox', badge: pendingInbox.length + sosAlerts.length },
+    { id: 'browser', label: 'Browser' },
+    { id: 'friends', label: 'Friends', badge: friends.length || undefined },
+    { id: 'permissions', label: 'Permissions' },
+    { id: 'feedback', label: 'Feedback' },
+    { id: 'about', label: 'About FlowLink' },
   ];
 
   return (
@@ -110,14 +110,14 @@ export default function SettingsPage({ ctx }: Props) {
           title="Send SOS alert with your location to all friends"
           disabled={sosSending}
         >
-          {sosSending ? '📡 Sending…' : '🆘 SOS'}
+          {sosSending ? 'Sending…' : 'SOS'}
         </button>
         <button
           className="logout-btn"
           onClick={() => { if (confirm('Log out and change username?')) onLogout(); }}
           title="Log out to change username"
         >
-          🚪 Logout
+          Logout
         </button>
       </div>
 
@@ -130,7 +130,7 @@ export default function SettingsPage({ ctx }: Props) {
               className={`settings-tab${tab === t.id ? ' active' : ''}`}
               onClick={() => setTab(t.id)}
             >
-              <span>{t.icon}</span>
+              <span className={`st-icon st-icon-${t.id}`} />
               <span className="st-label">{t.label}</span>
               {t.badge ? <span className="st-badge">{t.badge}</span> : null}
             </button>
@@ -205,16 +205,16 @@ export default function SettingsPage({ ctx }: Props) {
               {/* SOS alerts */}
               {sosAlerts.length > 0 && (
                 <div className="inbox-section">
-                  <div className="inbox-section-label">🆘 SOS Alerts</div>
+                  <div className="inbox-section-label">SOS Alerts</div>
                   {sosAlerts.map((alert, i) => (
                     <div key={i} className="inbox-sos-card">
                       <div className="sos-card-header">
-                        <span className="sos-icon">🆘</span>
+                        <span className="sos-icon sos-icon-svg" />
                         <div>
                           <div className="sos-from">{alert.fromUsername} needs help!</div>
                           <div className="sos-time">{new Date(alert.sentAt).toLocaleTimeString()}</div>
                         </div>
-                        <button className="inbox-dismiss" onClick={() => setSosAlerts(p => p.filter((_, j) => j !== i))}>✕</button>
+                        <button className="inbox-dismiss" onClick={() => setSosAlerts(p => p.filter((_, j) => j !== i))}>×</button>
                       </div>
                       {(alert.lat != null && alert.lng != null) && (
                         <a
@@ -223,7 +223,7 @@ export default function SettingsPage({ ctx }: Props) {
                           target="_blank"
                           rel="noreferrer"
                         >
-                          📍 View location on map ({alert.lat.toFixed(4)}, {alert.lng.toFixed(4)})
+                          View location on map ({alert.lat.toFixed(4)}, {alert.lng.toFixed(4)})
                         </a>
                       )}
                       {!alert.lat && <div className="sos-no-location">Location not available</div>}
@@ -234,7 +234,7 @@ export default function SettingsPage({ ctx }: Props) {
 
               {/* Friend requests */}
               <div className="inbox-section">
-                <div className="inbox-section-label">👥 Friend Requests</div>
+                <div className="inbox-section-label">Friend Requests</div>
                 {pendingInbox.length === 0
                   ? <div className="ss-empty" style={{ padding: '1rem 0' }}>No pending friend requests.</div>
                   : pendingInbox.map(req => (
@@ -277,7 +277,7 @@ export default function SettingsPage({ ctx }: Props) {
                     <div key={req.id} className="inbox-history-row">
                       <span className="irc-avatar small">{req.fromUsername[0]?.toUpperCase()}</span>
                       <span className="irc-name">{req.fromUsername}</span>
-                      <span className={`irc-status ${req.status}`}>{req.status === 'accepted' ? '✓ Friends' : '✗ Rejected'}</span>
+                      <span className={`irc-status ${req.status}`}>{req.status === 'accepted' ? 'Friends' : 'Rejected'}</span>
                     </div>
                   ))}
                 </div>
@@ -362,11 +362,11 @@ export default function SettingsPage({ ctx }: Props) {
               {/* SOS button in friends tab too */}
               <div className="friends-sos-row">
                 <div>
-                  <div className="ss-label">🆘 SOS Alert</div>
+                  <div className="ss-label">SOS Alert</div>
                   <div className="ss-desc">Send your location to all friends as an emergency alert.</div>
                 </div>
                 <button className={`sos-btn${sosSending ? ' sending' : ''}`} onClick={handleSos} disabled={sosSending}>
-                  {sosSending ? '📡 Sending…' : '🆘 Send SOS'}
+                  {sosSending ? 'Sending…' : 'Send SOS'}
                 </button>
               </div>
             </div>
@@ -378,19 +378,19 @@ export default function SettingsPage({ ctx }: Props) {
               <div className="ss-title">App Permissions</div>
               <div className="ss-desc" style={{ marginBottom: '1rem' }}>System permissions required for FlowLink features. Disabling a permission will block that feature.</div>
               {[
-                { label: 'Notifications', desc: 'Receive alerts for invitations and messages.', icon: '🔔', key: 'notifications' as const },
-                { label: 'Camera', desc: 'For QR code scanning and video calls.', icon: '📷', key: 'camera' as const },
-                { label: 'Storage', desc: 'For file transfers and downloads.', icon: '📁', key: 'storage' as const },
-                { label: 'Microphone', desc: 'For voice chat and audio messages.', icon: '🎤', key: 'microphone' as const },
+                { label: 'Notifications', desc: 'Receive alerts for invitations and messages.', key: 'notifications' as const },
+                { label: 'Camera', desc: 'For QR code scanning and video calls.', key: 'camera' as const },
+                { label: 'Storage', desc: 'For file transfers and downloads.', key: 'storage' as const },
+                { label: 'Microphone', desc: 'For voice chat and audio messages.', key: 'microphone' as const },
               ].map(p => {
                 const permEngine = (window as any).permissionEngine;
                 const isGranted = permEngine?.hasSystemPermission(p.key) ?? true;
                 
                 return (
                   <div key={p.label} className="ss-toggle-row">
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
-                      <span style={{ fontSize: '1.2rem' }}>{p.icon}</span>
-                      <div><div className="ss-label">{p.label}</div><div className="ss-desc">{p.desc}</div></div>
+                    <div>
+                      <div className="ss-label">{p.label}</div>
+                      <div className="ss-desc">{p.desc}</div>
                     </div>
                     <label className="toggle">
                       <input 
@@ -401,7 +401,7 @@ export default function SettingsPage({ ctx }: Props) {
                           permEngine?.setSystemPermission(p.key, granted);
                           logActivity({ 
                             type: 'settings', 
-                            icon: '🛡️', 
+                            icon: 'shield', 
                             label: `Permission ${p.label}: ${granted ? 'enabled' : 'disabled'}`, 
                             sub: granted ? 'Feature enabled' : 'Feature blocked' 
                           });
@@ -431,7 +431,7 @@ export default function SettingsPage({ ctx }: Props) {
                         background: feedbackType === t ? 'var(--brand)' : 'transparent',
                         color: feedbackType === t ? '#fff' : 'var(--text-2)',
                         borderColor: feedbackType === t ? 'var(--brand)' : 'var(--border)' }}>
-                      {t === 'feedback' ? '💬 Feedback' : '🚨 Report'}
+                      {t === 'feedback' ? 'Feedback' : 'Report'}
                     </button>
                   ))}
                 </div>
@@ -442,7 +442,7 @@ export default function SettingsPage({ ctx }: Props) {
                 value={feedbackText}
                 onChange={e => setFeedbackText(e.target.value)}
               />
-              {feedbackSent && <div style={{ color: '#16a34a', fontSize: '0.82rem', marginTop: '0.5rem' }}>✅ Sent! Thank you.</div>}
+              {feedbackSent && <div style={{ color: '#16a34a', fontSize: '0.82rem', marginTop: '0.5rem' }}>Sent! Thank you.</div>}
               <button className="btn-primary" style={{ marginTop: '0.75rem' }}
                 disabled={!feedbackText.trim()}
                 onClick={() => {
@@ -461,7 +461,7 @@ export default function SettingsPage({ ctx }: Props) {
           {tab === 'about' && (
             <div className="settings-section">
               <div className="ss-title">About FlowLink</div>
-              <div className="ss-about-logo">⚡</div>
+              <img src="/logo.png" alt="FlowLink" className="ss-about-logo" />
               <div className="ss-about-name">FlowLink</div>
               <div className="ss-about-tagline">Cross-Device Continuity Platform</div>
               {[

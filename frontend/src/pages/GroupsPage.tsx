@@ -59,7 +59,7 @@ export default function GroupsPage({ ctx }: Props) {
 
   return (
     <div className="groups-page">
-      {!session && <div className="groups-no-session card"><div>🔒</div><div>Join a session to manage groups.</div></div>}
+      {!session && <div className="groups-no-session card"><div className="empty-icon empty-icon-lock" /><div>Join a session to manage groups.</div></div>}
 
       {session && (
         <>
@@ -73,7 +73,7 @@ export default function GroupsPage({ ctx }: Props) {
                 {devices.map(d => (
                   <label key={d.id} className={`cgc-device-check${selectedDevices.includes(d.id) ? ' selected' : ''}`}>
                     <input type="checkbox" checked={selectedDevices.includes(d.id)} onChange={() => toggleDevice(d.id)} />
-                    <span>{d.type === 'phone' ? '📱' : '💻'}</span>
+                    <span className={`device-type-icon device-type-${d.type === 'phone' ? 'phone' : 'laptop'}`} />
                     <span>{d.username || d.name}</span>
                   </label>
                 ))}
@@ -85,7 +85,7 @@ export default function GroupsPage({ ctx }: Props) {
           </div>
 
           {/* Groups List */}
-          {groups.length === 0 && <div className="groups-empty card"><div>👥</div><div>No groups yet. Create one above.</div></div>}
+          {groups.length === 0 && <div className="groups-empty card"><div className="empty-icon empty-icon-group" /><div>No groups yet. Create one above.</div></div>}
           <div className="groups-grid">
             {groups.map(g => (
               <div key={g.id} className="group-card card">

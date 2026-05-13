@@ -89,7 +89,7 @@ export default function StudyPage({ ctx }: Props) {
       {/* Header */}
       <div className="study-page-header card">
         <div className="sph-left">
-          <div className="sph-icon">📚</div>
+          <div className="sph-icon sph-icon-svg" />
           <div>
             <div className="sph-title">Study Store</div>
             <div className="sph-sub">Upload documents to share with all session participants.</div>
@@ -98,11 +98,11 @@ export default function StudyPage({ ctx }: Props) {
         <div className="sph-actions">
           {session && (
             <button className="btn-secondary" onClick={() => navigate('/study/room')}>
-              🖥️ Open Study Room
+              Open Study Room
             </button>
           )}
           <label className={`btn-primary${uploading ? ' disabled' : ''}`}>
-            {uploading ? '⏳ Uploading…' : '+ Upload Document'}
+            {uploading ? 'Uploading…' : '+ Upload Document'}
             <input
               type="file"
               accept=".pdf,.doc,.docx,.txt,.ppt,.pptx"
@@ -116,7 +116,7 @@ export default function StudyPage({ ctx }: Props) {
 
       {!session && (
         <div className="study-no-session card">
-          <div className="sns-icon">🔒</div>
+          <div className="sns-icon sns-icon-svg" />
           <div className="sns-title">No Active Session</div>
           <div className="sns-sub">Create or join a session from the Overview page to use the Study Store.</div>
           <button className="btn-primary" onClick={() => navigate('/')}>Go to Overview</button>
@@ -125,7 +125,7 @@ export default function StudyPage({ ctx }: Props) {
 
       {session && files.length === 0 && (
         <div className="study-empty card">
-          <div className="se-icon">📂</div>
+          <div className="se-icon se-icon-svg" />
           <div className="se-title">No documents yet</div>
           <div className="se-sub">Upload a PDF, Word doc, or presentation to get started.</div>
         </div>
@@ -135,7 +135,7 @@ export default function StudyPage({ ctx }: Props) {
         <div className="study-files-grid">
           {files.map(file => (
             <div key={file.id} className="study-file-card card">
-              <div className="sfc-icon">{fileIcon(file.type)}</div>
+              <div className="sfc-icon sfc-icon-file" />
               <div className="sfc-info">
                 <div className="sfc-name">{file.name}</div>
                 <div className="sfc-meta">

@@ -357,14 +357,14 @@ export default function StudyRoomPage({ ctx }: Props) {
         <div className="srp-viewer">
           {!session && (
             <div className="srp-no-session">
-              <div>🔒</div>
+            <div className="empty-icon empty-icon-lock" />
               <div>No active session. Go back and create one.</div>
               <button className="btn-primary" onClick={() => navigate('/')}>Go to Overview</button>
             </div>
           )}
           {session && !selectedFile && (
             <div className="srp-no-file">
-              <div>📂</div>
+            <div className="empty-icon empty-icon-folder" />
               <div>Select a document from the sidebar to open it here.</div>
               <div className="srp-nf-sub">Opening a file will sync it to all connected participants.</div>
             </div>

@@ -108,7 +108,7 @@ export default function SessionManager({
       <div className="session-manager-inner">
         {/* Brand */}
         <div className="session-brand">
-          <div className="session-brand-icon">⚡</div>
+          <img src="/logo.png" alt="FlowLink" className="session-brand-logo" />
           <h2>FlowLink</h2>
           <p>Cross-Device Continuity</p>
         </div>
@@ -117,7 +117,7 @@ export default function SessionManager({
         <div className="session-card">
           <div className="session-card-title">Start a session</div>
           <button className="btn-create" onClick={handleCreateSession} disabled={isCreating}>
-            {isCreating ? '⏳ Creating…' : '✦ Create Session'}
+            {isCreating ? 'Creating…' : 'Create Session'}
           </button>
         </div>
 
@@ -141,7 +141,7 @@ export default function SessionManager({
             onClick={() => joinSessionWithCode(sessionCode)}
             disabled={sessionCode.length !== 6 || isJoining}
           >
-            {isJoining ? '⏳ Joining…' : '→ Join Session'}
+            {isJoining ? 'Joining…' : 'Join Session'}
           </button>
           {error && <div className="session-error">{error}</div>}
         </div>

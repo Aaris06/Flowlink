@@ -71,6 +71,15 @@ function Shell() {
   const [invitationService, setInvitationService] = useState<InvitationService | null>(null);
   const [chatUnread, setChatUnread] = useState(0);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [darkMode, setDarkMode] = useState(() => localStorage.getItem('flowlink_theme') === 'dark');
+  const [showNotifPanel, setShowNotifPanel] = useState(false);
+  const [notifications, setNotifications] = useState<{ id: number; title: string; message: string; type: string; time: number }[]>([]);
+
+  // Apply theme on mount and change
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', darkMode ? 'dark' : 'light');
+    localStorage.setItem('flowlink_theme', darkMode ? 'dark' : 'light');
+  }, [darkMode]);
   const [inboxUnread, setInboxUnread] = useState(() => {
     const stored = localStorage.getItem('flowlink_inbox_unread');
     return stored ? parseInt(stored, 10) : friendService.getInbox().filter(r => r.status === 'pending').length;
@@ -124,6 +133,10 @@ function Shell() {
     ws.onerror = () => { setIsConnected(false); };
     wsRef.current = ws;
     return ws;
+  };
+
+  const addNotification = (title: string, message: string, type: string = 'info') => {
+    setNotifications(p => [{ id: Date.now(), title, message, type, time: Date.now() }, ...p].slice(0, 50));
   };
 
   const handleWebSocketMessage = (message: any) => {
@@ -334,6 +347,7 @@ function Shell() {
                 type: 'success', title: `File received: ${buf.fileName}`, message: '', duration: 4000,
               });
             }
+            addNotification('File Received', buf.fileName, 'success');
           } catch { /* ignore */ }
           delete (window as any)._ftBuffers[message.payload?.transferId];
         }
@@ -345,6 +359,7 @@ function Shell() {
         // Always read username from localStorage to avoid stale closure
         friendService.handleIncoming(message, localStorage.getItem('flowlink_username') || username || '', deviceId);
         if (message.type === 'friend_request') {
+          addNotification('Friend Request', `${message.payload?.fromUsername} sent you a friend request`, 'info');
           setInboxUnread(p => {
             const newCount = p + 1;
             localStorage.setItem('flowlink_inbox_unread', newCount.toString());
@@ -355,13 +370,13 @@ function Shell() {
       case 'admin_announcement': {
         const ann = message.payload;
         if (invitationServiceRef.current && ann?.title) {
-          const icon = ann.type === 'update' ? '🚀' : ann.type === 'warning' ? '⚠️' : 'ℹ️';
           invitationServiceRef.current.notificationService.showToast({
             type: ann.type === 'warning' ? 'warning' : ann.type === 'update' ? 'success' : 'info',
-            title: `${icon} ${ann.title}`,
+            title: ann.title,
             message: ann.message || '',
             duration: 12000,
           });
+          addNotification(ann.title, ann.message || '', ann.type || 'info');
         }
         break;
       }
@@ -369,7 +384,7 @@ function Shell() {
         if (invitationServiceRef.current) {
           invitationServiceRef.current.notificationService.showToast({
             type: 'warning',
-            title: '⚠️ Session Terminated',
+            title: 'Session Terminated',
             message: message.payload?.reason || 'This session was terminated by an admin.',
             duration: 8000,
           });
@@ -410,6 +425,20 @@ function Shell() {
     }
     setSidebarOpen(false); // close sidebar on navigation
   }, [location.pathname]);
+
+  // Close notification panel on outside click
+  useEffect(() => {
+    if (!showNotifPanel) return;
+    const close = (e: MouseEvent) => {
+      // Don't close if clicking the bell button itself (handled by toggle)
+      const target = e.target as HTMLElement;
+      if (target.closest('.header-notif-btn') || target.closest('.notif-panel')) return;
+      setShowNotifPanel(false);
+    };
+    // Use setTimeout to avoid the same click that opened it from closing it
+    const timer = setTimeout(() => document.addEventListener('click', close), 0);
+    return () => { clearTimeout(timer); document.removeEventListener('click', close); };
+  }, [showNotifPanel]);
 
   // Handle tab visibility - reconnect WebSocket when tab becomes visible
   useEffect(() => {
@@ -453,14 +482,14 @@ function Shell() {
   };
 
   const navItems: { to: string; icon: string; label: string; badge?: number }[] = [
-    { to: '/', icon: '🏠', label: 'Overview' },
-    { to: '/devices', icon: '📱', label: 'My Devices' },
-    { to: '/messages', icon: '💬', label: 'Messages', badge: chatUnread },
-    { to: '/files', icon: '📁', label: 'Files' },
-    { to: '/activity', icon: '⚡', label: 'Activity' },
-    { to: '/study', icon: '📚', label: 'Study' },
-    { to: '/settings', icon: '⚙️', label: 'Settings', badge: inboxUnread },
-    ...(isAdmin ? [{ to: '/admin', icon: '🛡️', label: 'Admin' }] : []),
+    { to: '/', icon: 'home', label: 'Overview' },
+    { to: '/devices', icon: 'devices', label: 'My Devices' },
+    { to: '/messages', icon: 'chat', label: 'Messages', badge: chatUnread },
+    { to: '/files', icon: 'files', label: 'Files' },
+    { to: '/activity', icon: 'activity', label: 'Activity' },
+    { to: '/study', icon: 'study', label: 'Study' },
+    { to: '/settings', icon: 'settings', label: 'Settings', badge: inboxUnread },
+    ...(isAdmin ? [{ to: '/admin', icon: 'admin', label: 'Admin' }] : []),
   ];
 
   const pageTitles: Record<string, { title: string; sub: string }> = {
@@ -519,7 +548,7 @@ function Shell() {
               end={item.to === '/'}
               className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`}
             >
-              <span className="nav-icon">{item.icon}</span>
+              <span className={`nav-icon nav-icon-${item.icon}`} />
               {item.label}
               {item.badge ? <span className="nav-badge">{item.badge}</span> : null}
             </NavLink>
@@ -527,11 +556,12 @@ function Shell() {
         </nav>
 
         <div className="sidebar-footer">
-          <NavLink to="/settings" className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`}>
-            <span className="nav-icon">🎨</span> Theme
-          </NavLink>
-          <a href="https://github.com" target="_blank" rel="noreferrer" className="nav-item">
-            <span className="nav-icon">❓</span> Help & Support
+          <button className="nav-item theme-toggle-btn" onClick={() => setDarkMode(d => !d)} title="Toggle dark/light mode">
+            <span className={`nav-icon ${darkMode ? 'nav-icon-sun' : 'nav-icon-moon'}`} />
+            {darkMode ? 'Light Mode' : 'Dark Mode'}
+          </button>
+          <a href="mailto:support@flowlink.app" className="nav-item">
+            <span className="nav-icon nav-icon-help" /> Help & Support
           </a>
         </div>
       </aside>
@@ -558,12 +588,38 @@ function Shell() {
                 }}
                 title="Reconnect to server"
               >
-                🔄 Reconnect
+                Reconnect
               </button>
             )}
-            <button className="header-notif-btn" title="Notifications">
-              🔔<span className="notif-dot" />
-            </button>
+            <div style={{ position: 'relative' }}>
+              <button
+                className={`header-notif-btn${notifications.length > 0 ? ' has-notif' : ''}`}
+                title="Notifications"
+                onClick={() => setShowNotifPanel(p => !p)}
+              >
+                {notifications.length > 0 && <span className="notif-dot" />}
+              </button>
+              {showNotifPanel && (
+                <div className="notif-panel">
+                  <div className="notif-panel-header">
+                    <span>Notifications</span>
+                    {notifications.length > 0 && (
+                      <button className="notif-clear-btn" onClick={() => setNotifications([])}>Clear all</button>
+                    )}
+                  </div>
+                  {notifications.length === 0
+                    ? <div className="notif-empty">No notifications yet.</div>
+                    : notifications.map(n => (
+                        <div key={n.id} className={`notif-item notif-item-${n.type}`}>
+                          <div className="notif-item-title">{n.title}</div>
+                          {n.message && <div className="notif-item-msg">{n.message}</div>}
+                          <div className="notif-item-time">{new Date(n.time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
+                        </div>
+                      ))
+                  }
+                </div>
+              )}
+            </div>
             {session && (
               <div className="session-badge-header" onClick={() => navigate('/')}>
                 <span className="dot" />

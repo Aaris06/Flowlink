@@ -79,6 +79,9 @@ const server = createServer(async (req, res) => {
 
   if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
 
+  // Strip query string from URL for clean route matching
+  req.url = req.url?.split('?')[0] || '/';
+
   // Auth routes (no token required)
   if (req.url?.startsWith('/auth/')) {
     const handled = await handleAuthRoutes(req, res);
@@ -103,18 +106,153 @@ const server = createServer(async (req, res) => {
   })();
   const isAdmin = adminSecret || adminToken;
 
+  // ── Admin routes — handled as a dedicated block ────────────────────────
+  if (req.url?.startsWith('/admin/')) {
+    if (!isAdmin) {
+      res.writeHead(403, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Forbidden' }));
+      return;
+    }
+
+    // GET /admin/devices
+    if (req.url === '/admin/devices' && req.method === 'GET') {
+      const now = Date.now();
+      const INACTIVE_MS = 7 * 24 * 60 * 60 * 1000;
+      try {
+        const dbResult = await pool.query('SELECT id, username, role, created_at, last_active, is_active FROM users ORDER BY last_active DESC');
+        const onlineByUsername = new Map();
+        for (const [, entry] of globalDevices.entries()) {
+          const uname = (entry.device?.username || '').toLowerCase();
+          if (!uname) continue;
+          const existing = onlineByUsername.get(uname);
+          if (!existing || entry.device.online || entry.lastSeen > (existing.lastSeen || 0)) {
+            onlineByUsername.set(uname, { online: entry.device.online && entry.connections.size > 0, deviceName: entry.device.name, lastSeen: entry.lastSeen });
+          }
+        }
+        const devices = dbResult.rows.map(user => {
+          const live = onlineByUsername.get(user.username.toLowerCase());
+          const lastActive = live?.lastSeen ? new Date(Math.max(live.lastSeen, new Date(user.last_active).getTime())).toISOString() : user.last_active;
+          return { id: String(user.id), username: user.username, name: live?.deviceName || 'Unknown', role: user.role, online: live?.online || false, isActive: user.is_active, lastSeen: lastActive, inactive: (now - new Date(user.last_active).getTime()) > INACTIVE_MS };
+        });
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ devices, total: devices.length }));
+      } catch (err) {
+        const devices = Array.from(globalDevices.entries()).map(([id, entry]) => ({ id, username: entry.device.username, name: entry.device.name, online: entry.device.online, lastSeen: new Date(entry.lastSeen).toISOString(), inactive: (now - entry.lastSeen) > INACTIVE_MS }));
+        const seen = new Set();
+        const deduped = devices.filter(d => { const key = d.username?.toLowerCase(); if (!key || seen.has(key)) return false; seen.add(key); return true; });
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ devices: deduped, total: deduped.length }));
+      }
+      return;
+    }
+
+    // DELETE /admin/devices/:id
+    if (req.url.startsWith('/admin/devices/') && req.method === 'DELETE') {
+      const targetId = req.url.replace('/admin/devices/', '');
+      try {
+        const isNumeric = /^\d+$/.test(targetId);
+        const query = isNumeric ? 'UPDATE users SET is_active = FALSE WHERE id = $1' : 'UPDATE users SET is_active = FALSE WHERE LOWER(username) = LOWER($1)';
+        await pool.query(query, [targetId]);
+      } catch (_) {}
+      for (const [devId, entry] of globalDevices.entries()) {
+        const uname = (entry.device?.username || '').toLowerCase();
+        if (uname === targetId.toLowerCase() || devId === targetId) {
+          entry.connections.forEach(ws => { try { ws.close(); } catch (_) {} });
+          globalDevices.delete(devId);
+          deviceConnections.delete(devId);
+        }
+      }
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: true, deactivated: targetId }));
+      return;
+    }
+
+    // GET /admin/sessions
+    if (req.url === '/admin/sessions' && req.method === 'GET') {
+      const activeSessions = Array.from(sessions.entries()).map(([id, session]) => ({
+        id, code: session.code, createdBy: session.createdBy,
+        deviceCount: session.devices ? session.devices.size : 0,
+        devices: session.devices ? Array.from(session.devices.values()).map(d => ({ id: d.id, username: d.username, name: d.name, online: d.online })) : [],
+        createdAt: session.createdAt ? new Date(session.createdAt).toISOString() : null,
+        expiresAt: session.expiresAt ? new Date(session.expiresAt).toISOString() : null,
+        reportCount: (session.reports || []).length,
+      }));
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ sessions: activeSessions, total: activeSessions.length }));
+      return;
+    }
+
+    // DELETE /admin/sessions/:id
+    if (req.url.startsWith('/admin/sessions/') && req.method === 'DELETE') {
+      const targetSessionId = req.url.replace('/admin/sessions/', '');
+      const session = sessions.get(targetSessionId);
+      if (!session) { res.writeHead(404, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ error: 'Session not found' })); return; }
+      broadcastToSession(targetSessionId, { type: 'session_terminated', payload: { reason: 'Session deactivated by admin' }, timestamp: Date.now() }, null);
+      sessions.delete(targetSessionId);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: true }));
+      return;
+    }
+
+    // POST /admin/announce
+    if (req.url === '/admin/announce' && req.method === 'POST') {
+      const body = await new Promise(resolve => { let d = ''; req.on('data', c => d += c); req.on('end', () => { try { resolve(JSON.parse(d)); } catch { resolve({}); } }); });
+      const { title, message, type = 'info' } = body;
+      if (!title || !message) { res.writeHead(400, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ error: 'title and message required' })); return; }
+      const announcement = { title, message, type, sentAt: Date.now() };
+      announcementStore.push(announcement);
+      announcementStore.splice(0, Math.max(0, announcementStore.length - 50));
+      for (const [, ws] of deviceConnections.entries()) {
+        if (ws.readyState === ws.OPEN) ws.send(JSON.stringify({ type: 'admin_announcement', payload: announcement, timestamp: Date.now() }));
+      }
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: true, reached: deviceConnections.size }));
+      return;
+    }
+
+    // GET /admin/announcements
+    if (req.url === '/admin/announcements' && req.method === 'GET') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ announcements: announcementStore }));
+      return;
+    }
+
+    // GET /admin/feedback
+    if (req.url === '/admin/feedback' && req.method === 'GET') {
+      try {
+        const r = await pool.query('SELECT id, from_username AS "fromUsername", type, text, EXTRACT(EPOCH FROM sent_at)*1000 AS "sentAt" FROM feedback ORDER BY sent_at DESC LIMIT 500');
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ feedback: r.rows, total: r.rows.length }));
+      } catch (err) {
+        console.error('Feedback query error:', err.message);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ feedback: feedbackStore, total: feedbackStore.length }));
+      }
+      return;
+    }
+
+    // DELETE /admin/feedback/:idx
+    if (req.url.startsWith('/admin/feedback/') && req.method === 'DELETE') {
+      const idx = parseInt(req.url.replace('/admin/feedback/', ''));
+      if (isNaN(idx) || idx < 0 || idx >= feedbackStore.length) {
+        res.writeHead(404, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ error: 'Not found' })); return;
+      }
+      feedbackStore.splice(idx, 1);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: true }));
+      return;
+    }
+
+    // Unknown admin route
+    res.writeHead(404, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'Admin route not found' }));
+    return;
+  }
+
   if (req.url === '/health' || req.url === '/ping') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ 
-      status: 'ok',
-      service: 'flowlink-backend',
-      sessions: sessions.size,
-      connections: deviceConnections.size,
-      uptime: Math.floor(process.uptime()),
-      timestamp: new Date().toISOString()
-    }));
+    res.end(JSON.stringify({ status: 'ok', service: 'flowlink-backend', sessions: sessions.size, connections: deviceConnections.size, uptime: Math.floor(process.uptime()), timestamp: new Date().toISOString() }));
 
-  // ── DB ping - keeps Supabase active ───────────────────────────────────
   } else if (req.url === '/db-ping' && req.method === 'GET') {
     try {
       const start = Date.now();
@@ -126,178 +264,6 @@ const server = createServer(async (req, res) => {
       res.writeHead(503, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ status: 'error', db: 'disconnected', error: err.message }));
     }
-
-  // ── Admin: list all users (from DB, deduplicated by username) ──────────
-  } else if (req.url === '/admin/devices' && req.method === 'GET') {
-    if (!isAdmin) { res.writeHead(403); res.end(JSON.stringify({ error: 'Forbidden' })); return; }
-    const now = Date.now();
-    const INACTIVE_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
-
-    try {
-      // Get all registered users from DB
-      const dbResult = await pool.query(
-        'SELECT id, username, role, created_at, last_active, is_active FROM users ORDER BY last_active DESC'
-      );
-
-      // Build a map of username -> online status from globalDevices (most recent connection)
-      const onlineByUsername = new Map();
-      for (const [, entry] of globalDevices.entries()) {
-        const uname = (entry.device?.username || '').toLowerCase();
-        if (!uname) continue;
-        const existing = onlineByUsername.get(uname);
-        // Keep the most recently seen / online entry
-        if (!existing || entry.device.online || entry.lastSeen > (existing.lastSeen || 0)) {
-          onlineByUsername.set(uname, {
-            online: entry.device.online && entry.connections.size > 0,
-            deviceName: entry.device.name,
-            lastSeen: entry.lastSeen,
-          });
-        }
-      }
-
-      const devices = dbResult.rows.map(user => {
-        const live = onlineByUsername.get(user.username.toLowerCase());
-        const lastActive = live?.lastSeen
-          ? new Date(Math.max(live.lastSeen, new Date(user.last_active).getTime())).toISOString()
-          : user.last_active;
-        return {
-          id: String(user.id),
-          username: user.username,
-          name: live?.deviceName || 'Unknown',
-          role: user.role,
-          online: live?.online || false,
-          isActive: user.is_active,
-          lastSeen: lastActive,
-          inactive: (now - new Date(user.last_active).getTime()) > INACTIVE_MS,
-        };
-      });
-
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ devices, total: devices.length }));
-    } catch (err) {
-      // Fallback to in-memory if DB fails
-      const devices = Array.from(globalDevices.entries()).map(([id, entry]) => ({
-        id, username: entry.device.username, name: entry.device.name,
-        online: entry.device.online, lastSeen: new Date(entry.lastSeen).toISOString(),
-        inactive: (now - entry.lastSeen) > INACTIVE_MS,
-      }));
-      // Deduplicate by username
-      const seen = new Set();
-      const deduped = devices.filter(d => {
-        const key = d.username?.toLowerCase();
-        if (!key || seen.has(key)) return false;
-        seen.add(key); return true;
-      });
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ devices: deduped, total: deduped.length }));
-    }
-
-  // ── Admin: deactivate user account ────────────────────────────────────
-  } else if (req.url.startsWith('/admin/devices/') && req.method === 'DELETE') {
-    if (!isAdmin) { res.writeHead(403); res.end(JSON.stringify({ error: 'Forbidden' })); return; }
-    const targetId = req.url.replace('/admin/devices/', '');
-
-    // Try DB deactivation first (targetId can be DB id or username)
-    try {
-      const isNumeric = /^\d+$/.test(targetId);
-      const query = isNumeric
-        ? 'UPDATE users SET is_active = FALSE WHERE id = $1'
-        : 'UPDATE users SET is_active = FALSE WHERE LOWER(username) = LOWER($1)';
-      await pool.query(query, [targetId]);
-    } catch (_) {}
-
-    // Also kick from in-memory connections
-    for (const [devId, entry] of globalDevices.entries()) {
-      const uname = (entry.device?.username || '').toLowerCase();
-      if (uname === targetId.toLowerCase() || devId === targetId) {
-        entry.connections.forEach(ws => { try { ws.close(); } catch (_) {} });
-        globalDevices.delete(devId);
-        deviceConnections.delete(devId);
-      }
-    }
-    res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ success: true, deactivated: targetId }));
-
-  // ── Admin: list active sessions ───────────────────────────────────────
-  } else if (req.url === '/admin/sessions' && req.method === 'GET') {
-    if (!isAdmin) { res.writeHead(403); res.end(JSON.stringify({ error: 'Forbidden' })); return; }
-    const activeSessions = Array.from(sessions.entries()).map(([id, session]) => ({
-      id,
-      code: session.code,
-      createdBy: session.createdBy,
-      deviceCount: session.devices ? session.devices.size : 0,
-      devices: session.devices ? Array.from(session.devices.values()).map(d => ({
-        id: d.id, username: d.username, name: d.name, online: d.online
-      })) : [],
-      createdAt: session.createdAt ? new Date(session.createdAt).toISOString() : null,
-      expiresAt: session.expiresAt ? new Date(session.expiresAt).toISOString() : null,
-      reportCount: (session.reports || []).length,
-    }));
-    res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ sessions: activeSessions, total: activeSessions.length }));
-
-  // ── Admin: deactivate a session ────────────────────────────────────────
-  } else if (req.url.startsWith('/admin/sessions/') && req.method === 'DELETE') {
-    if (!isAdmin) { res.writeHead(403); res.end(JSON.stringify({ error: 'Forbidden' })); return; }
-    const targetSessionId = req.url.replace('/admin/sessions/', '');
-    const session = sessions.get(targetSessionId);
-    if (!session) { res.writeHead(404); res.end(JSON.stringify({ error: 'Session not found' })); return; }
-    // Notify all devices in session
-    broadcastToSession(targetSessionId, {
-      type: 'session_terminated',
-      payload: { reason: 'Session deactivated by admin' },
-      timestamp: Date.now()
-    }, null);
-    sessions.delete(targetSessionId);
-    res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ success: true }));
-
-  // ── Admin: send announcement to all connected devices ─────────────────
-  } else if (req.url === '/admin/announce' && req.method === 'POST') {
-    if (!isAdmin) { res.writeHead(403); res.end(JSON.stringify({ error: 'Forbidden' })); return; }
-    const body = await new Promise(resolve => {
-      let d = ''; req.on('data', c => d += c); req.on('end', () => { try { resolve(JSON.parse(d)); } catch { resolve({}); } });
-    });
-    const { title, message, type = 'info' } = body;
-    if (!title || !message) { res.writeHead(400); res.end(JSON.stringify({ error: 'title and message required' })); return; }
-    const announcement = { title, message, type, sentAt: Date.now() };
-    // Store in memory
-    announcementStore.push(announcement);
-    announcementStore.splice(0, Math.max(0, announcementStore.length - 50));
-    // Broadcast to ALL connected devices
-    for (const [, ws] of deviceConnections.entries()) {
-      if (ws.readyState === ws.OPEN) {
-        ws.send(JSON.stringify({ type: 'admin_announcement', payload: announcement, timestamp: Date.now() }));
-      }
-    }
-    res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ success: true, reached: deviceConnections.size }));
-
-  // ── Admin: get announcements ───────────────────────────────────────────
-  } else if (req.url === '/admin/announcements' && req.method === 'GET') {
-    if (!isAdmin) { res.writeHead(403); res.end(JSON.stringify({ error: 'Forbidden' })); return; }
-    res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ announcements: announcementStore }));
-    if (!isAdmin) { res.writeHead(403); res.end(JSON.stringify({ error: 'Forbidden' })); return; }
-    try {
-      const r = await pool.query('SELECT * FROM feedback ORDER BY sent_at DESC LIMIT 500');
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ feedback: r.rows, total: r.rows.length }));
-    } catch {
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ feedback: feedbackStore, total: feedbackStore.length }));
-    }
-
-  // ── Admin: delete feedback entry ──────────────────────────────────────
-  } else if (req.url.startsWith('/admin/feedback/') && req.method === 'DELETE') {
-    if (!isAdmin) { res.writeHead(403); res.end(JSON.stringify({ error: 'Forbidden' })); return; }
-    const idx = parseInt(req.url.replace('/admin/feedback/', ''));
-    if (isNaN(idx) || idx < 0 || idx >= feedbackStore.length) {
-      res.writeHead(404); res.end(JSON.stringify({ error: 'Not found' })); return;
-    }
-    feedbackStore.splice(idx, 1);
-    res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ success: true }));
 
   } else if (req.url === '/debug') {
     // Debug endpoint to see device registry state

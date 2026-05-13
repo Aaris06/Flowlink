@@ -70,26 +70,26 @@ export default function FilesPage({ ctx }: Props) {
     <div className="files-page">
       <div className="files-header card">
         <div className="fh-left">
-          <div className="fh-icon">📁</div>
+          <div className="fh-icon fh-icon-svg" />
           <div>
             <div className="fh-title">Shared Files</div>
             <div className="fh-sub">All files uploaded to the session store. Available to all participants.</div>
           </div>
         </div>
         <label className={`btn-primary${uploading ? ' disabled' : ''}`} style={{ cursor: 'pointer' }}>
-          {uploading ? '⏳ Uploading…' : '+ Upload File'}
+          {uploading ? 'Uploading…' : '+ Upload File'}
           <input type="file" hidden disabled={!session || uploading} onChange={e => { const f = e.target.files?.[0]; if (f) uploadFile(f); e.currentTarget.value = ''; }} />
         </label>
       </div>
 
-      {!session && <div className="files-empty card"><div>🔒</div><div>Join a session to see shared files.</div></div>}
-      {session && files.length === 0 && <div className="files-empty card"><div>📂</div><div>No files uploaded yet. Upload one to share with all participants.</div></div>}
+      {!session && <div className="files-empty card"><div className="empty-icon empty-icon-lock" /><div>Join a session to see shared files.</div></div>}
+      {session && files.length === 0 && <div className="files-empty card"><div className="empty-icon empty-icon-folder" /><div>No files uploaded yet. Upload one to share with all participants.</div></div>}
 
       {session && files.length > 0 && (
         <div className="files-grid">
           {files.map(file => (
             <div key={file.id} className="file-card card">
-              <div className="fc-icon">{fileIcon(file.type)}</div>
+              <div className="fc-icon fc-icon-file" />
               <div className="fc-info">
                 <div className="fc-name">{file.name}</div>
                 <div className="fc-meta">
@@ -99,9 +99,9 @@ export default function FilesPage({ ctx }: Props) {
                 </div>
               </div>
               <div className="fc-actions">
-                <button className="btn-secondary fc-btn" onClick={() => downloadFile(file)}>⬇ Download</button>
+                <button className="btn-secondary fc-btn" onClick={() => downloadFile(file)}>Download</button>
                 {session.createdBy === deviceId && (
-                  <button className="btn-danger fc-btn" onClick={() => deleteFile(file.id)}>🗑</button>
+                  <button className="btn-danger fc-btn" onClick={() => deleteFile(file.id)}>Delete</button>
                 )}
               </div>
             </div>

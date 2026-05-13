@@ -301,7 +301,7 @@ export default function MyDevicesPage({ ctx }: Props) {
     return (
       <div className="md-no-session-wrap">
         <div className="card md-no-session">
-          <div>🔒</div>
+          <div className="empty-icon empty-icon-lock" />
           <div>Create or join a session from the Overview page to see connected devices.</div>
         </div>
       </div>
@@ -320,7 +320,7 @@ export default function MyDevicesPage({ ctx }: Props) {
 
       {deviceArr.length === 0 ? (
         <div className="card md-waiting">
-          <div className="md-waiting-icon">📱</div>
+          <div className="md-waiting-icon md-waiting-icon-svg" />
           <div className="md-waiting-title">Waiting for devices…</div>
           <div className="md-waiting-sub">Share code <strong>{session.code}</strong> with another device to connect.</div>
         </div>

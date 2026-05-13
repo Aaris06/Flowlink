@@ -44,15 +44,19 @@ export default function AdminPage({ ctx }: Props) {
     try {
       if (t === 'devices') {
         const r = await fetch(`${SIGNALING_HTTP_URL}/admin/devices`, { headers });
+        if (!r.ok) { setMsg(`Error ${r.status}: ${r.statusText}`); setLoading(false); return; }
         setDevices((await r.json()).devices || []);
       } else if (t === 'sessions') {
         const r = await fetch(`${SIGNALING_HTTP_URL}/admin/sessions`, { headers });
+        if (!r.ok) { setMsg(`Error ${r.status}: ${r.statusText}`); setLoading(false); return; }
         setSessions((await r.json()).sessions || []);
       } else if (t === 'feedback') {
         const r = await fetch(`${SIGNALING_HTTP_URL}/admin/feedback`, { headers });
-        setFeedback((await r.json()).feedback || []);
+        if (!r.ok) { setMsg(`Error ${r.status}: ${r.statusText}`); setLoading(false); return; }
+        const data = await r.json();
+        setFeedback(data.feedback || []);
       }
-    } catch { setMsg('Failed to load data'); }
+    } catch (err) { setMsg(`Failed to load data: ${err instanceof Error ? err.message : String(err)}`); }
     setLoading(false);
   };
 
@@ -98,30 +102,30 @@ export default function AdminPage({ ctx }: Props) {
     const data = await r.json();
     if (data.success) {
       setAnnounceSent(true);
-      setMsg(`✅ Announcement sent to ${data.reached} connected devices`);
+      setMsg(`Announcement sent to ${data.reached} connected devices`);
       setAnnounceTitle(''); setAnnounceMsg('');
       setTimeout(() => setAnnounceSent(false), 4000);
     }
   };
 
-  const tabs: { id: Tab; label: string; icon: string }[] = [
-    { id: 'devices', label: 'Users', icon: '👤' },
-    { id: 'sessions', label: 'Sessions', icon: '🔗' },
-    { id: 'feedback', label: 'Reports', icon: '📝' },
-    { id: 'announce', label: 'Announce', icon: '📢' },
+  const tabs: { id: Tab; label: string }[] = [
+    { id: 'devices', label: 'Users' },
+    { id: 'sessions', label: 'Sessions' },
+    { id: 'feedback', label: 'Reports' },
+    { id: 'announce', label: 'Announce' },
   ];
 
   return (
     <div className="admin-page">
       <div className="admin-header card">
-        <span className="admin-badge">🛡️ Admin Panel</span>
+        <span className="admin-badge">Admin Panel</span>
         <span className="admin-user">Logged in as <strong>{ctx.username}</strong></span>
       </div>
 
       <div className="admin-tabs">
         {tabs.map(t => (
           <button key={t.id} className={`admin-tab${tab === t.id ? ' active' : ''}`} onClick={() => setTab(t.id)}>
-            {t.icon} {t.label}
+            {t.label}
           </button>
         ))}
       </div>
@@ -134,7 +138,7 @@ export default function AdminPage({ ctx }: Props) {
         <div className="admin-section card">
           <div className="admin-section-header">
             <span>Registered Users ({devices.length})</span>
-            <button className="btn-secondary" onClick={() => load('devices')}>↻ Refresh</button>
+            <button className="btn-secondary" onClick={() => load('devices')}>Refresh</button>
           </div>
           {devices.length === 0 && <div className="admin-empty">No users yet.</div>}
           {devices.map(d => (
@@ -143,7 +147,7 @@ export default function AdminPage({ ctx }: Props) {
               <div className="admin-device-info">
                 <div className="admin-device-name">
                   {d.username}
-                  {d.role === 'admin' && <span className="admin-role-badge">👑 admin</span>}
+                  {d.role === 'admin' && <span className="admin-role-badge">admin</span>}
                   {!d.isActive && <span className="admin-deactivated-badge"> · Deactivated</span>}
                 </div>
                 <div className="admin-device-meta">
@@ -153,7 +157,7 @@ export default function AdminPage({ ctx }: Props) {
               </div>
               <button className="btn-danger admin-kick-btn" onClick={() => deleteDevice(d.id)}
                 disabled={!d.isActive}>
-                {d.isActive ? '🚫 Deactivate' : '✓ Inactive'}
+                {d.isActive ? 'Deactivate' : 'Inactive'}
               </button>
             </div>
           ))}
@@ -165,7 +169,7 @@ export default function AdminPage({ ctx }: Props) {
         <div className="admin-section card">
           <div className="admin-section-header">
             <span>Active Sessions ({sessions.length})</span>
-            <button className="btn-secondary" onClick={() => load('sessions')}>↻ Refresh</button>
+            <button className="btn-secondary" onClick={() => load('sessions')}>Refresh</button>
           </div>
           {sessions.length === 0 && <div className="admin-empty">No active sessions.</div>}
           {sessions.map(s => (
@@ -173,7 +177,7 @@ export default function AdminPage({ ctx }: Props) {
               <div className="admin-session-info">
                 <div className="admin-session-code">
                   Session <strong>{s.code}</strong>
-                  {s.reportCount > 0 && <span className="admin-report-badge">⚠ {s.reportCount} report{s.reportCount > 1 ? 's' : ''}</span>}
+                  {s.reportCount > 0 && <span className="admin-report-badge">{s.reportCount} report{s.reportCount > 1 ? 's' : ''}</span>}
                 </div>
                 <div className="admin-session-meta">
                   Created by: {s.createdBy} · {s.deviceCount} device{s.deviceCount !== 1 ? 's' : ''}
@@ -182,13 +186,13 @@ export default function AdminPage({ ctx }: Props) {
                 <div className="admin-session-devices">
                   {s.devices.map(d => (
                     <span key={d.id} className={`admin-session-device${d.online ? ' online' : ''}`}>
-                      {d.online ? '🟢' : '⚫'} {d.username || d.name}
+                      {d.username || d.name}
                     </span>
                   ))}
                 </div>
               </div>
               <button className="btn-danger admin-kick-btn" onClick={() => deleteSession(s.id)}>
-                🗑 Terminate
+                Terminate
               </button>
             </div>
           ))}
@@ -200,18 +204,18 @@ export default function AdminPage({ ctx }: Props) {
         <div className="admin-section card">
           <div className="admin-section-header">
             <span>Feedback & Reports ({feedback.length})</span>
-            <button className="btn-secondary" onClick={() => load('feedback')}>↻ Refresh</button>
+            <button className="btn-secondary" onClick={() => load('feedback')}>Refresh</button>
           </div>
           {feedback.length === 0 && <div className="admin-empty">No feedback yet.</div>}
           {feedback.map((f, i) => (
             <div key={i} className="admin-feedback-row">
               <div className="admin-feedback-header">
                 <span className={`admin-fb-type ${f.type}`}>
-                  {f.type === 'report' ? '🚨 Report' : f.type === 'session_report' ? '⚠ Session Report' : '💬 Feedback'}
+                  {f.type === 'report' ? 'Report' : f.type === 'session_report' ? 'Session Report' : 'Feedback'}
                 </span>
                 <span className="admin-fb-user">from <strong>{f.fromUsername}</strong></span>
                 <span className="admin-fb-time">{new Date(f.sentAt).toLocaleString()}</span>
-                <button className="admin-fb-delete" onClick={() => deleteFeedback(i)}>✕</button>
+                <button className="admin-fb-delete" onClick={() => deleteFeedback(i)}>×</button>
               </div>
               <div className="admin-fb-text">{f.text}</div>
             </div>
@@ -230,7 +234,7 @@ export default function AdminPage({ ctx }: Props) {
               {(['info', 'update', 'warning'] as const).map(t => (
                 <button key={t} onClick={() => setAnnounceType(t)}
                   className={`admin-type-btn${announceType === t ? ' active' : ''}`}>
-                  {t === 'info' ? 'ℹ Info' : t === 'update' ? '🚀 Update' : '⚠ Warning'}
+                  {t === 'info' ? 'Info' : t === 'update' ? 'Update' : 'Warning'}
                 </button>
               ))}
             </div>
@@ -242,14 +246,14 @@ export default function AdminPage({ ctx }: Props) {
             />
             <textarea
               className="admin-announce-textarea"
-              placeholder="Message body… (e.g. We've added voice messages, file previews, and more!)"
+              placeholder="Message body…"
               value={announceMsg}
               onChange={e => setAnnounceMsg(e.target.value)}
               rows={4}
             />
             <button className="btn-primary" onClick={sendAnnouncement}
               disabled={!announceTitle.trim() || !announceMsg.trim() || announceSent}>
-              {announceSent ? '✅ Sent!' : '📢 Send to All Users'}
+              {announceSent ? 'Sent!' : 'Send to All Users'}
             </button>
             <div className="admin-announce-note">
               This will show a notification to all currently connected users instantly.

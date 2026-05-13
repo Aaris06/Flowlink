@@ -151,14 +151,14 @@ export default function OverviewPage({ ctx }: Props) {
       <div className="session-gate">
         <div className="sg-card card">
           <div className="sg-brand">
-            <div className="sg-logo">⚡</div>
+            <img src="/logo.png" alt="FlowLink" className="sg-logo-img" />
             <h2>FlowLink</h2>
             <p>Cross-Device Continuity</p>
           </div>
           <div className="sg-section">
             <div className="sg-section-label">Start a session</div>
             <button className="btn-primary sg-btn" onClick={createSession} disabled={isCreating}>
-              {isCreating ? '⏳ Creating…' : '✦ Create Session'}
+              {isCreating ? 'Creating…' : 'Create Session'}
             </button>
           </div>
           <div className="sg-divider">OR</div>
@@ -174,7 +174,7 @@ export default function OverviewPage({ ctx }: Props) {
               onChange={e => { setSessionCode(e.target.value.replace(/\D/g, '').slice(0, 6)); setError(null); }}
             />
             <button className="btn-primary sg-btn" onClick={() => joinWithCode(sessionCode)} disabled={sessionCode.length !== 6 || isJoining}>
-              {isJoining ? '⏳ Joining…' : '→ Join Session'}
+              {isJoining ? 'Joining…' : 'Join Session'}
             </button>
             {error && <div className="sg-error">{error}</div>}
           </div>
@@ -193,28 +193,26 @@ export default function OverviewPage({ ctx }: Props) {
             <div className="osc-sub">Collaborate and connect seamlessly across all your devices.</div>
           </div>
           <div className="osc-actions">
-            <button className="osc-action-btn code-btn" onClick={() => navigator.clipboard.writeText(session.code)}>🔑 {session.code}</button>
-            <button className="osc-action-btn" onClick={() => setShowInvite(true)}>👥 Invite</button>
-            <button className="osc-action-btn" onClick={() => navigate('/study')}>📚 Study</button>
-            <button className="osc-action-btn" onClick={() => navigate('/messages')}>💬 Chat</button>
-            <button className="osc-action-btn danger" onClick={leaveSession}>🚪 Leave</button>
+            <button className="osc-action-btn code-btn" onClick={() => navigator.clipboard.writeText(session.code)}>{session.code}</button>
+            <button className="osc-action-btn" onClick={() => setShowInvite(true)}>Invite</button>
+            <button className="osc-action-btn" onClick={() => navigate('/study')}>Study</button>
+            <button className="osc-action-btn" onClick={() => navigate('/messages')}>Chat</button>
+            <button className="osc-action-btn danger" onClick={leaveSession}>Leave</button>
           </div>
         </div>
         <div className="overview-stats">
           {[
-            { icon: '📶', num: onlineCount, lbl: 'Online', sub: '● Active now', color: '#16a34a', bg: 'rgba(34,197,94,0.12)', onClick: undefined },
-            { icon: '📁', num: studyFileCount, lbl: 'Files', sub: 'Shared files', color: '#d97706', bg: 'rgba(245,158,11,0.12)', onClick: () => navigate('/files') },
-            { icon: '💬', num: msgCount, lbl: 'Messages', sub: 'Unread messages', color: '#2563eb', bg: 'rgba(59,130,246,0.12)', onClick: () => navigate('/messages') },
-            { icon: '👥', num: groupCount, lbl: 'Groups', sub: 'Active groups', color: '#7c3aed', bg: 'rgba(139,92,246,0.12)', onClick: () => navigate('/groups') },
+            { label: 'Online', num: onlineCount, sub: 'Active now', color: '#16a34a', bg: 'rgba(34,197,94,0.12)', onClick: undefined },
+            { label: 'Files', num: studyFileCount, sub: 'Shared files', color: '#d97706', bg: 'rgba(245,158,11,0.12)', onClick: () => navigate('/files') },
+            { label: 'Messages', num: msgCount, sub: 'Unread', color: '#2563eb', bg: 'rgba(59,130,246,0.12)', onClick: () => navigate('/messages') },
+            { label: 'Groups', num: groupCount, sub: 'Active groups', color: '#7c3aed', bg: 'rgba(139,92,246,0.12)', onClick: () => navigate('/groups') },
           ].map(s => (
-            <div key={s.lbl} className="stat-tile" onClick={s.onClick} style={{ cursor: s.onClick ? 'pointer' : 'default' }}>
-              <div className="stat-icon" style={{ background: s.bg, color: s.color }}>{s.icon}</div>
+            <div key={s.label} className="stat-tile" onClick={s.onClick} style={{ cursor: s.onClick ? 'pointer' : 'default' }}>
               <div className="stat-body">
                 <div className="stat-num" style={{ color: s.color }}>{s.num}</div>
-                <div className="stat-lbl">{s.lbl}</div>
+                <div className="stat-lbl">{s.label}</div>
                 <div className="stat-sub" style={{ color: s.color }}>{s.sub}</div>
               </div>
-              <div className="stat-arrow">»</div>
             </div>
           ))}
         </div>
@@ -231,7 +229,7 @@ export default function OverviewPage({ ctx }: Props) {
             <div className="connect-right">
               <div className="connect-code-label">Your Connection Code</div>
               <div className="connect-code">{session.code}</div>
-              <div className="connect-secure">🔒 Secure connection · End-to-end encrypted</div>
+              <div className="connect-secure">Secure connection · End-to-end encrypted</div>
             </div>
           </div>
         </div>
@@ -246,19 +244,19 @@ export default function OverviewPage({ ctx }: Props) {
           </div>
           <div className="yd-list">
             <div className="yd-item">
-              <div className="yd-icon">💻</div>
+              <div className="yd-icon yd-icon-laptop" />
               <div className="yd-info">
                 <div className="yd-name">{username}</div>
-                <div className="yd-sub">{deviceName} · <span style={{ color: '#16a34a' }}>● Online</span></div>
+                <div className="yd-sub">{deviceName} · <span style={{ color: '#16a34a' }}>Online</span></div>
               </div>
               <div className="yd-perms"><span className="perm-badge">Permissions</span><span className="perm-none">None</span></div>
             </div>
             {deviceArr.map(d => (
               <div key={d.id} className="yd-item">
-                <div className="yd-icon">{d.type === 'phone' ? '📱' : d.type === 'tablet' ? '📟' : '💻'}</div>
+                <div className={`yd-icon yd-icon-${d.type === 'phone' ? 'phone' : 'laptop'}`} />
                 <div className="yd-info">
                   <div className="yd-name">{d.username || d.name}</div>
-                  <div className="yd-sub">{d.name} · <span style={{ color: d.online ? '#16a34a' : '#94a3b8' }}>{d.online ? '● Online' : '○ Offline'}</span></div>
+                  <div className="yd-sub">{d.name} · <span style={{ color: d.online ? '#16a34a' : '#94a3b8' }}>{d.online ? 'Online' : 'Offline'}</span></div>
                 </div>
                 <div className="yd-perms">
                   <span className="perm-badge">Permissions</span>
@@ -278,7 +276,7 @@ export default function OverviewPage({ ctx }: Props) {
           {remoteEnabled && (
             <div className="ra-send-row">
               <input className="ra-input" placeholder="Type or paste text to send" value={remoteText} onChange={e => setRemoteText(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') sendRemoteText(); }} />
-              <button className="btn-primary" onClick={sendRemoteText} style={{ fontSize: '0.8rem' }}>Send 🚀</button>
+              <button className="btn-primary" onClick={sendRemoteText} style={{ fontSize: '0.8rem' }}>Send</button>
             </div>
           )}
         </div>
