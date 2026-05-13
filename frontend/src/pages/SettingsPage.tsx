@@ -89,7 +89,7 @@ export default function SettingsPage({ ctx }: Props) {
     { id: 'privacy', label: 'Privacy' },
     { id: 'inbox', label: 'Inbox', badge: pendingInbox.length + sosAlerts.length },
     { id: 'browser', label: 'Browser' },
-    { id: 'friends', label: 'Friends', badge: friends.length || undefined },
+    { id: 'friends', label: 'Friends' },
     { id: 'permissions', label: 'Permissions' },
     { id: 'feedback', label: 'Feedback' },
     { id: 'about', label: 'About FlowLink' },

@@ -41,7 +41,7 @@ class MoreFragment : Fragment() {
             // Clear unread count when opening inbox
             requireContext().getSharedPreferences("flowlink_inbox", android.content.Context.MODE_PRIVATE)
                 .edit().putBoolean("all_read", true).apply()
-            binding.moreInbox.text = "📬   Inbox"
+            binding.moreInbox.text = "Inbox"
             navigateTo(InboxFragment.newInstance())
         }
         binding.moreBrowser.setOnClickListener { navigateTo(BrowserFragment.newInstance()) }
@@ -92,7 +92,7 @@ class MoreFragment : Fragment() {
     override fun onResume() {
         super.onResume()
         val unread = InboxFragment.unreadCount(requireContext())
-        binding.moreInbox.text = if (unread > 0) "📬   Inbox  ($unread)" else "📬   Inbox"
+        binding.moreInbox.text = if (unread > 0) "Inbox  ($unread)" else "Inbox"
     }
 
     override fun onDestroyView() {

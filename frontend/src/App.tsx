@@ -82,7 +82,7 @@ function Shell() {
   }, [darkMode]);
   const [inboxUnread, setInboxUnread] = useState(() => {
     const stored = localStorage.getItem('flowlink_inbox_unread');
-    return stored ? parseInt(stored, 10) : friendService.getInbox().filter(r => r.status === 'pending').length;
+    return stored ? parseInt(stored, 10) : 0;
   });
 
   // Verify token on mount and sync DB data
@@ -92,6 +92,10 @@ function Shell() {
         setUsername(u);
         // Sync friends and inbox from DB
         await friendService.syncFromDb();
+        // Update badge to match actual pending count from DB
+        const pending = friendService.getInbox().filter(r => r.status === 'pending').length;
+        setInboxUnread(pending);
+        localStorage.setItem('flowlink_inbox_unread', pending.toString());
       } else {
         setUsername(null);
       }

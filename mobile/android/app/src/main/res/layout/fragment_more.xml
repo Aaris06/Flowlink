@@ -46,22 +46,26 @@
             android:id="@+id/more_groups"
             android:layout_width="match_parent"
             android:layout_height="56dp"
-            android:text="👥   Device Groups"
+            android:text="Device Groups"
             android:textColor="#FFFFFF"
             android:textSize="15sp"
             android:gravity="center_vertical"
             android:paddingHorizontal="18dp"
+            android:drawableStart="@drawable/ic_groups"
+            android:drawablePadding="14dp"
             android:background="@drawable/glass_card_bg_dark"
             android:layout_marginBottom="8dp" />
         <TextView
             android:id="@+id/more_session_details"
             android:layout_width="match_parent"
             android:layout_height="56dp"
-            android:text="📋   Session Details"
+            android:text="Session Details"
             android:textColor="#FFFFFF"
             android:textSize="15sp"
             android:gravity="center_vertical"
             android:paddingHorizontal="18dp"
+            android:drawableStart="@drawable/ic_session"
+            android:drawablePadding="14dp"
             android:background="@drawable/glass_card_bg_dark"
             android:layout_marginBottom="8dp" />
 
@@ -69,11 +73,13 @@
             android:id="@+id/more_inbox"
             android:layout_width="match_parent"
             android:layout_height="56dp"
-            android:text="📬   Inbox"
+            android:text="Inbox"
             android:textColor="#FFFFFF"
             android:textSize="15sp"
             android:gravity="center_vertical"
             android:paddingHorizontal="18dp"
+            android:drawableStart="@drawable/ic_inbox"
+            android:drawablePadding="14dp"
             android:background="@drawable/glass_card_bg_dark"
             android:layout_marginBottom="8dp" />
 
@@ -81,11 +87,13 @@
             android:id="@+id/more_browser"
             android:layout_width="match_parent"
             android:layout_height="56dp"
-            android:text="🌐   Browser"
+            android:text="Browser"
             android:textColor="#FFFFFF"
             android:textSize="15sp"
             android:gravity="center_vertical"
             android:paddingHorizontal="18dp"
+            android:drawableStart="@drawable/ic_browser"
+            android:drawablePadding="14dp"
             android:background="@drawable/glass_card_bg_dark"
             android:layout_marginBottom="8dp" />
 
@@ -93,11 +101,13 @@
             android:id="@+id/more_friends"
             android:layout_width="match_parent"
             android:layout_height="56dp"
-            android:text="👥   Friends"
+            android:text="Friends"
             android:textColor="#FFFFFF"
             android:textSize="15sp"
             android:gravity="center_vertical"
             android:paddingHorizontal="18dp"
+            android:drawableStart="@drawable/ic_friends"
+            android:drawablePadding="14dp"
             android:background="@drawable/glass_card_bg_dark"
             android:layout_marginBottom="8dp" />
 
@@ -105,11 +115,13 @@
             android:id="@+id/more_permissions"
             android:layout_width="match_parent"
             android:layout_height="56dp"
-            android:text="🔒   Permissions"
+            android:text="Permissions"
             android:textColor="#FFFFFF"
             android:textSize="15sp"
             android:gravity="center_vertical"
             android:paddingHorizontal="18dp"
+            android:drawableStart="@drawable/ic_lock"
+            android:drawablePadding="14dp"
             android:background="@drawable/glass_card_bg_dark"
             android:layout_marginBottom="8dp" />
 
@@ -117,11 +129,13 @@
             android:id="@+id/more_settings"
             android:layout_width="match_parent"
             android:layout_height="56dp"
-            android:text="⚙️   Settings"
+            android:text="Settings"
             android:textColor="#FFFFFF"
             android:textSize="15sp"
             android:gravity="center_vertical"
             android:paddingHorizontal="18dp"
+            android:drawableStart="@drawable/ic_settings"
+            android:drawablePadding="14dp"
             android:background="@drawable/glass_card_bg_dark"
             android:layout_marginBottom="8dp" />
 
@@ -129,11 +143,13 @@
             android:id="@+id/more_help"
             android:layout_width="match_parent"
             android:layout_height="56dp"
-            android:text="❓   Help &amp; Support"
+            android:text="Help &amp; Support"
             android:textColor="#FFFFFF"
             android:textSize="15sp"
             android:gravity="center_vertical"
             android:paddingHorizontal="18dp"
+            android:drawableStart="@drawable/ic_help"
+            android:drawablePadding="14dp"
             android:background="@drawable/glass_card_bg_dark"
             android:layout_marginBottom="8dp" />
 
@@ -141,11 +157,13 @@
             android:id="@+id/more_about"
             android:layout_width="match_parent"
             android:layout_height="56dp"
-            android:text="ℹ️   About FlowLink"
+            android:text="About FlowLink"
             android:textColor="#FFFFFF"
             android:textSize="15sp"
             android:gravity="center_vertical"
             android:paddingHorizontal="18dp"
+            android:drawableStart="@drawable/ic_info"
+            android:drawablePadding="14dp"
             android:background="@drawable/glass_card_bg_dark"
             android:layout_marginBottom="20dp" />
 
@@ -153,11 +171,13 @@
             android:id="@+id/more_leave_session"
             android:layout_width="match_parent"
             android:layout_height="56dp"
-            android:text="🚪   Leave Session"
+            android:text="Leave Session"
             android:textColor="#EF4444"
             android:textSize="15sp"
             android:gravity="center_vertical"
             android:paddingHorizontal="18dp"
+            android:drawableStart="@drawable/ic_leave"
+            android:drawablePadding="14dp"
             android:background="@drawable/btn_danger_bg"
             android:layout_marginBottom="10dp" />
 
@@ -165,11 +185,13 @@
             android:id="@+id/more_logout"
             android:layout_width="match_parent"
             android:layout_height="56dp"
-            android:text="👤   Logout / Change Username"
+            android:text="Logout / Change Username"
             android:textColor="#94A3B8"
             android:textSize="15sp"
             android:gravity="center_vertical"
             android:paddingHorizontal="18dp"
+            android:drawableStart="@drawable/ic_logout"
+            android:drawablePadding="14dp"
             android:background="@drawable/glass_card_bg_dark"
             android:layout_marginBottom="10dp" />
 
@@ -177,11 +199,13 @@
             android:id="@+id/more_admin"
             android:layout_width="match_parent"
             android:layout_height="56dp"
-            android:text="🛡️   Admin Panel"
+            android:text="Admin Panel"
             android:textColor="#A78BFA"
             android:textSize="15sp"
             android:gravity="center_vertical"
             android:paddingHorizontal="18dp"
+            android:drawableStart="@drawable/ic_shield"
+            android:drawablePadding="14dp"
             android:background="@drawable/glass_card_bg_dark"
             android:visibility="gone" />
 

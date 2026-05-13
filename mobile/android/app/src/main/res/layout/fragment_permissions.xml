@@ -76,10 +76,12 @@
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="🔔  Notifications"
+                        android:text="Notifications"
                         android:textColor="#FFFFFF"
                         android:textSize="14sp"
-                        android:textStyle="bold" />
+                        android:textStyle="bold"
+                        android:drawableStart="@drawable/ic_bell"
+                        android:drawablePadding="8dp" />
 
                     <TextView
                         android:id="@+id/tv_notif_status"
@@ -129,10 +131,12 @@
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="📷  Camera"
+                        android:text="Camera"
                         android:textColor="#FFFFFF"
                         android:textSize="14sp"
-                        android:textStyle="bold" />
+                        android:textStyle="bold"
+                        android:drawableStart="@drawable/ic_camera"
+                        android:drawablePadding="8dp" />
 
                     <TextView
                         android:id="@+id/tv_camera_status"
@@ -182,10 +186,12 @@
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="📁  Storage"
+                        android:text="Storage"
                         android:textColor="#FFFFFF"
                         android:textSize="14sp"
-                        android:textStyle="bold" />
+                        android:textStyle="bold"
+                        android:drawableStart="@drawable/ic_storage"
+                        android:drawablePadding="8dp" />
 
                     <TextView
                         android:id="@+id/tv_storage_status"
@@ -234,10 +240,12 @@
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="🎤  Microphone"
+                        android:text="Microphone"
                         android:textColor="#FFFFFF"
                         android:textSize="14sp"
-                        android:textStyle="bold" />
+                        android:textStyle="bold"
+                        android:drawableStart="@drawable/ic_mic"
+                        android:drawablePadding="8dp" />
 
                     <TextView
                         android:id="@+id/tv_mic_status"
