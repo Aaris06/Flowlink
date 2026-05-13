@@ -76,14 +76,6 @@ export default function StudyPage({ ctx }: Props) {
     setTimeout(() => URL.revokeObjectURL(url), 1200);
   };
 
-  const fileIcon = (type: string) => {
-    if (type === 'application/pdf') return '📄';
-    if (type.includes('word') || type.includes('doc')) return '📝';
-    if (type.includes('presentation') || type.includes('ppt')) return '📊';
-    if (type.includes('text')) return '📃';
-    return '📎';
-  };
-
   return (
     <div className="study-page">
       {/* Header */}
