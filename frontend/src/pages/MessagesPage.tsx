@@ -354,6 +354,28 @@ export default function MessagesPage({ ctx }: Props) {
             <div className="msg-header-title">Session Chat</div>
             <div className="msg-header-sub">{session ? `Session ${session.code} · ${messages.length} messages` : 'No active session'}</div>
           </div>
+          {session && ctx.callService && (
+            <div className="msg-header-actions">
+              <button
+                className="msg-call-btn"
+                title="Audio call"
+                onClick={() => {
+                  const peers = (window as any)._sessionDevices as { id: string; username: string }[] | undefined;
+                  const target = peers?.find(d => d.id !== deviceId);
+                  if (target) ctx.callService!.startCall(target.username, target.id, false);
+                }}
+              >📞</button>
+              <button
+                className="msg-call-btn"
+                title="Video call"
+                onClick={() => {
+                  const peers = (window as any)._sessionDevices as { id: string; username: string }[] | undefined;
+                  const target = peers?.find(d => d.id !== deviceId);
+                  if (target) ctx.callService!.startCall(target.username, target.id, true);
+                }}
+              >🎥</button>
+            </div>
+          )}
         </div>
 
         <div className="msg-body" ref={bodyRef}>

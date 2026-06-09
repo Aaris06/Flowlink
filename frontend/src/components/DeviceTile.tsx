@@ -14,6 +14,8 @@ interface DeviceTileProps {
   myUsername?: string;
   myDeviceId?: string;
   sessionId?: string;
+  onCallAudio?: (device: Device) => void;
+  onCallVideo?: (device: Device) => void;
 }
 
 function DeviceTileComponent({
@@ -23,6 +25,8 @@ function DeviceTileComponent({
   myUsername = '',
   myDeviceId = '',
   sessionId,
+  onCallAudio,
+  onCallVideo,
 }: DeviceTileProps) {
   const [isDragOver, setIsDragOver] = useState(false);
   const [clipboardText, setClipboardText] = useState('');
@@ -426,6 +430,21 @@ function DeviceTileComponent({
           >
             {friendState === 'friend' ? '✓' : friendState === 'pending' ? '⏳' : '+'}
           </button>
+        )}
+        {/* Call buttons */}
+        {device.online && onCallAudio && (device.username || device.name) !== myUsername && (
+          <button
+            className="dt-call-btn"
+            title="Audio call"
+            onClick={(e) => { e.stopPropagation(); onCallAudio(device); }}
+          >📞</button>
+        )}
+        {device.online && onCallVideo && (device.username || device.name) !== myUsername && (
+          <button
+            className="dt-call-btn"
+            title="Video call"
+            onClick={(e) => { e.stopPropagation(); onCallVideo(device); }}
+          >🎥</button>
         )}
       </div>
 

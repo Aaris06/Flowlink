@@ -48,6 +48,17 @@
             android:textAllCaps="false"
             android:background="@drawable/glass_card_bg_dark"
             android:paddingHorizontal="14dp" />
+
+        <!-- Audio call button -->
+        <ImageButton
+            android:id="@+id/btn_audio_call"
+            android:layout_width="36dp"
+            android:layout_height="36dp"
+            android:layout_marginStart="8dp"
+            android:background="@drawable/call_btn_bg_neutral"
+            android:src="@android:drawable/ic_menu_call"
+            android:contentDescription="Audio call"
+            android:padding="6dp" />
     </LinearLayout>
 
     <!-- Messages List -->

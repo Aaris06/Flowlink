@@ -858,6 +858,24 @@ function handleMessage(message) {
         // Popup not open, ignore
       }
       break;
+
+    case 'call_invite': {
+      const { callId, fromUsername, isVideo } = message.payload || {};
+      console.log('📞 Incoming call from:', fromUsername);
+      // Show a notification with action buttons to open the web app
+      chrome.notifications.create(`call_${callId}`, {
+        type: 'basic',
+        iconUrl: 'icons/icon128.png',
+        title: `Incoming ${isVideo ? 'Video' : 'Audio'} Call`,
+        message: `${fromUsername} is calling you`,
+        buttons: [{ title: 'Answer in App' }, { title: 'Decline' }],
+        requireInteraction: true,
+        priority: 2,
+      });
+      // Store call info for button handler
+      chrome.storage.local.set({ [`call_${callId}`]: message.payload });
+      break;
+    }
       
     case 'pong':
       // Keepalive response - no action needed
@@ -1262,6 +1280,33 @@ if (chrome.alarms) {
   });
 } else {
   console.warn('chrome.alarms API not available');
+}
+
+// Handle call notification button clicks
+if (chrome.notifications?.onButtonClicked) {
+  chrome.notifications.onButtonClicked.addListener((notificationId, buttonIndex) => {
+    if (!notificationId.startsWith('call_')) return;
+    const callId = notificationId.slice(5); // strip "call_"
+    chrome.storage.local.get([`call_${callId}`], (result) => {
+      const callData = result[`call_${callId}`];
+      chrome.storage.local.remove([`call_${callId}`]);
+      chrome.notifications.clear(notificationId);
+      if (buttonIndex === 0) {
+        // "Answer in App" — open the web app so CallModal can handle it
+        chrome.tabs.create({ url: 'https://flowlink-1sta.onrender.com/' });
+      } else if (buttonIndex === 1 && callData) {
+        // "Decline" — send call_reject back via websocket
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({
+            type: 'call_reject',
+            deviceId,
+            payload: { callId: callData.callId, toDevice: callData.fromDevice, reason: 'rejected' },
+            timestamp: Date.now(),
+          }));
+        }
+      }
+    });
+  });
 }
 
 console.log('FlowLink background service worker loaded');

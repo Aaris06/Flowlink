@@ -169,6 +169,11 @@ class DeviceTilesFragment : Fragment() {
             devices = mutableListOf(),
             onDeviceClick = { device -> handleDeviceTileClick(device) },
             onBrowseFilesClick = { device -> handleBrowseFilesClick(device) },
+            onCallDevice = { device ->
+                (activity as? MainActivity)?.startOutgoingCall(
+                    device.name, device.id, false
+                )
+            },
             transferStatuses = transferStatuses
         )
         binding.rvDevices.adapter = deviceAdapter
@@ -363,6 +368,11 @@ class DeviceTilesFragment : Fragment() {
                 devices = connectedDevices.values.toMutableList(),
                 onDeviceClick = { device -> handleDeviceTileClick(device) },
                 onBrowseFilesClick = { device -> handleBrowseFilesClick(device) },
+                onCallDevice = { device ->
+                    (activity as? MainActivity)?.startOutgoingCall(
+                        device.name, device.id, false
+                    )
+                },
                 transferStatuses = transferStatuses
             )
             binding.rvDevices.adapter = deviceAdapter

@@ -346,6 +346,8 @@ export default function MyDevicesPage({ ctx }: Props) {
                 myUsername={username}
                 myDeviceId={deviceId}
                 sessionId={session.id}
+                onCallAudio={ctx.callService ? (d) => ctx.callService!.startCall(d.username || d.name, d.id, false) : undefined}
+                onCallVideo={ctx.callService ? (d) => ctx.callService!.startCall(d.username || d.name, d.id, true) : undefined}
               />
             ))}
           </div>

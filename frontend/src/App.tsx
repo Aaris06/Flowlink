@@ -19,6 +19,8 @@ import AdminPage from './pages/AdminPage';
 import AuthPage from './pages/AuthPage';
 import RemoteAccess from './components/RemoteAccess';
 import DownloadPage from './components/DownloadPage';
+import CallModal from './components/CallModal';
+import { CallService, CallState, CallInfo } from './services/CallService';
 import './App.css';
 
 export interface AppContext {
@@ -27,6 +29,7 @@ export interface AppContext {
   deviceName: string;
   username: string;
   invitationService: InvitationService | null;
+  callService: CallService | null;
   onSessionCreated: (s: Session) => void;
   onSessionJoined: (s: Session) => void;
   onLeaveSession: () => void;
@@ -113,6 +116,18 @@ function Shell() {
   const location = useLocation();
   const navigate = useNavigate();
 
+  // ── Call state ──────────────────────────────────────────────────────────
+  const [callState, setCallState] = useState<CallState>('idle');
+  const [callInfo, setCallInfo] = useState<CallInfo | null>(null);
+  const callServiceRef = useRef<CallService | null>(null);
+  if (!callServiceRef.current) {
+    callServiceRef.current = new CallService(
+      '', // deviceId not available yet – updated below
+      '',
+      (state, info) => { setCallState(state); setCallInfo(info); }
+    );
+  }
+
   const connectWebSocket = () => {
     if (wsRef.current?.readyState === WebSocket.OPEN) return wsRef.current;
     const ws = new WebSocket(SIGNALING_WS_URL);
@@ -126,6 +141,12 @@ function Shell() {
       (window as any).appWebSocket = ws;
       setIsConnected(true);
       if (invitationServiceRef.current) invitationServiceRef.current.setWebSocket(ws);
+      // Give CallService the live websocket and identity
+      if (callServiceRef.current) {
+        (callServiceRef.current as any).deviceId = deviceId;
+        (callServiceRef.current as any).username = username || '';
+        callServiceRef.current.setWebSocket(ws);
+      }
     };
     ws.onmessage = (e) => handleWebSocketMessage(JSON.parse(e.data));
     ws.onclose = () => { 
@@ -148,6 +169,10 @@ function Shell() {
       case 'session_created':
       case 'session_joined':
         window.dispatchEvent(new CustomEvent('sessionMessage', { detail: { message } }));
+        // Keep a global snapshot of session devices for call routing
+        if (message.payload?.devices) {
+          (window as any)._sessionDevices = message.payload.devices;
+        }
         break;
       case 'chat_message':
       case 'chat_delivered':
@@ -396,6 +421,18 @@ function Shell() {
         setSession(null);
         break;
       }
+      // ── Call signaling ──────────────────────────────────────────────────
+      case 'call_invite':
+      case 'call_accept':
+      case 'call_reject':
+      case 'call_end':
+      case 'call_offer':
+      case 'call_answer':
+      case 'call_ice':
+        if (callServiceRef.current) {
+          callServiceRef.current.handleMessage(message);
+        }
+        break;
     }
   };
 
@@ -479,6 +516,7 @@ function Shell() {
   const ctx: AppContext = {
     session, deviceId, deviceName, username: username || '',
     invitationService,
+    callService: callServiceRef.current,
     onSessionCreated: setSession,
     onSessionJoined: setSession,
     onLeaveSession: () => setSession(null),
@@ -656,6 +694,15 @@ function Shell() {
           </Routes>
         </main>
       </div>
+
+      {/* Global call overlay — visible on top of everything */}
+      {callServiceRef.current && (
+        <CallModal
+          callService={callServiceRef.current}
+          state={callState}
+          callInfo={callInfo}
+        />
+      )}
     </div>
   );
 }

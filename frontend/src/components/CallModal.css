@@ -1,0 +1,195 @@
+/* ── Call Modal ── */
+.call-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.72);
+  backdrop-filter: blur(6px);
+  animation: callFadeIn 0.2s ease;
+}
+
+@keyframes callFadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+.call-modal {
+  position: relative;
+  width: min(380px, 94vw);
+  background: linear-gradient(145deg, #1e1b4b, #312e81);
+  border-radius: 24px;
+  padding: 2rem 1.5rem 1.5rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1.25rem;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.6);
+  overflow: hidden;
+}
+
+/* Video call: modal stretches to fill more of the screen */
+.call-modal-video-mode .call-modal {
+  width: min(640px, 96vw);
+  height: min(520px, 90vh);
+  padding: 0;
+  border-radius: 20px;
+}
+
+/* Remote video - fills the card */
+.call-video-remote {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 20px;
+  background: #0f0c29;
+}
+
+/* Local video - PiP bottom-right */
+.call-video-local {
+  position: absolute;
+  bottom: 5rem;
+  right: 1rem;
+  width: 100px;
+  height: 140px;
+  object-fit: cover;
+  border-radius: 12px;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  z-index: 2;
+  background: #1e1b4b;
+}
+
+/* ── Avatar / info ── */
+.call-modal-info {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  pointer-events: none;
+  padding: 1.5rem 1rem 0;
+}
+
+.call-modal-video-mode .call-modal-info {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  padding: 1rem;
+  background: linear-gradient(to bottom, rgba(0,0,0,0.55), transparent);
+  border-radius: 20px 20px 0 0;
+}
+
+.call-avatar {
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #6366f1, #8b5cf6);
+  color: #fff;
+  font-size: 2rem;
+  font-weight: 700;
+  display: grid;
+  place-items: center;
+  box-shadow: 0 0 0 4px rgba(99, 102, 241, 0.3);
+  animation: callPulse 1.8s ease-in-out infinite;
+}
+
+@keyframes callPulse {
+  0%, 100% { box-shadow: 0 0 0 4px rgba(99, 102, 241, 0.3); }
+  50%       { box-shadow: 0 0 0 10px rgba(99, 102, 241, 0.1); }
+}
+
+.call-username {
+  font-size: 1.2rem;
+  font-weight: 700;
+  color: #fff;
+}
+
+.call-status {
+  font-size: 0.85rem;
+  color: rgba(255, 255, 255, 0.7);
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.call-status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #22c55e;
+  display: inline-block;
+}
+
+.call-status-dot.ringing {
+  animation: callRing 0.8s ease-in-out infinite alternate;
+}
+
+@keyframes callRing {
+  from { opacity: 1; }
+  to   { opacity: 0.2; }
+}
+
+/* ── Controls ── */
+.call-controls {
+  position: relative;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1.25rem;
+  padding: 0.5rem 1rem 0.75rem;
+  width: 100%;
+}
+
+.call-modal-video-mode .call-controls {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: linear-gradient(to top, rgba(0,0,0,0.6), transparent);
+  border-radius: 0 0 20px 20px;
+  padding: 1rem 1.5rem;
+}
+
+.call-btn {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  border: none;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  font-size: 1.4rem;
+  transition: transform 0.15s, opacity 0.15s;
+  background: rgba(255, 255, 255, 0.15);
+  color: #fff;
+}
+
+.call-btn:hover { transform: scale(1.08); }
+.call-btn:active { transform: scale(0.95); }
+
+.call-btn-accept {
+  background: #22c55e;
+  box-shadow: 0 4px 16px rgba(34, 197, 94, 0.45);
+}
+
+.call-btn-end {
+  background: #ef4444;
+  box-shadow: 0 4px 16px rgba(239, 68, 68, 0.45);
+}
+
+.call-btn-mute.active,
+.call-btn-camera.active {
+  background: rgba(255, 255, 255, 0.35);
+}
+
+.call-icon {
+  line-height: 1;
+  user-select: none;
+}

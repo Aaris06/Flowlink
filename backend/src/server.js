@@ -514,6 +514,17 @@ wss.on('connection', (ws, req) => {
           }
           break;
 
+        // ── Call signaling ──────────────────────────────────────────────
+        case 'call_invite':
+        case 'call_accept':
+        case 'call_reject':
+        case 'call_end':
+        case 'call_offer':
+        case 'call_answer':
+        case 'call_ice':
+          handleCallSignal(ws, message);
+          break;
+
         case 'session_report': {
           // User reports a session - flag it for admin review
           const { reason, sessionIdToReport } = message.payload || {};
@@ -1223,6 +1234,52 @@ function handleWebRTCSignal(ws, message) {
     },
     timestamp: Date.now()
   }));
+}
+
+/**
+ * Handle call signaling (invite/accept/reject/end/offer/answer/ice)
+ * Routes call messages between devices via global registry (works outside sessions too)
+ */
+function handleCallSignal(ws, message) {
+  const fromDeviceId = message.deviceId || ws.deviceId;
+  const toDeviceId = message.payload?.toDevice || message.payload?.toDeviceId;
+  const toUsername = message.payload?.toUsername;
+
+  // Try routing by deviceId first, then by username
+  let targetWs = null;
+  if (toDeviceId) {
+    targetWs = deviceConnections.get(toDeviceId);
+  }
+  if (!targetWs && toUsername) {
+    const normalizedTarget = toUsername.trim().toLowerCase();
+    for (const [devId, entry] of globalDevices.entries()) {
+      if (devId === fromDeviceId) continue;
+      if ((entry.device?.username || '').toLowerCase() === normalizedTarget) {
+        targetWs = deviceConnections.get(devId);
+        if (targetWs) break;
+      }
+    }
+  }
+
+  if (!targetWs || targetWs.readyState !== targetWs.OPEN) {
+    // For invite, send busy/unavailable back to caller
+    if (message.type === 'call_invite') {
+      ws.send(JSON.stringify({
+        type: 'call_reject',
+        payload: { reason: 'unavailable', callId: message.payload?.callId },
+        timestamp: Date.now()
+      }));
+    }
+    return;
+  }
+
+  targetWs.send(JSON.stringify({
+    ...message,
+    payload: { ...message.payload, fromDevice: fromDeviceId },
+    timestamp: Date.now()
+  }));
+
+  console.log(`Call signal [${message.type}] routed from ${fromDeviceId} to ${toDeviceId || toUsername}`);
 }
 
 /**

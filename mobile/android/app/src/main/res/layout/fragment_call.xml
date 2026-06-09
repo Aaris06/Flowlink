@@ -1,0 +1,118 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#CC0F0C29">
+
+    <!-- Remote video surface (full screen) -->
+    <org.webrtc.SurfaceViewRenderer
+        android:id="@+id/remote_video"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:visibility="gone" />
+
+    <!-- Local video (PiP bottom-right) -->
+    <org.webrtc.SurfaceViewRenderer
+        android:id="@+id/local_video"
+        android:layout_width="120dp"
+        android:layout_height="160dp"
+        android:layout_gravity="bottom|end"
+        android:layout_marginEnd="16dp"
+        android:layout_marginBottom="96dp"
+        android:visibility="gone" />
+
+    <!-- Call info overlay -->
+    <LinearLayout
+        android:id="@+id/call_info"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top|center_horizontal"
+        android:orientation="vertical"
+        android:gravity="center"
+        android:padding="32dp">
+
+        <!-- Avatar -->
+        <TextView
+            android:id="@+id/avatar_text"
+            android:layout_width="80dp"
+            android:layout_height="80dp"
+            android:gravity="center"
+            android:textSize="32sp"
+            android:textColor="#FFFFFF"
+            android:textStyle="bold"
+            android:background="@drawable/call_avatar_bg" />
+
+        <TextView
+            android:id="@+id/remote_username"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:textSize="22sp"
+            android:textColor="#FFFFFF"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/call_status"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:textSize="14sp"
+            android:textColor="#CCFFFFFF" />
+    </LinearLayout>
+
+    <!-- Controls -->
+    <LinearLayout
+        android:id="@+id/controls_layout"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom|center_horizontal"
+        android:orientation="horizontal"
+        android:gravity="center"
+        android:padding="24dp"
+        android:spacing="20dp">
+
+        <!-- Mute button (visible during active call) -->
+        <ImageButton
+            android:id="@+id/btn_mute"
+            android:layout_width="60dp"
+            android:layout_height="60dp"
+            android:layout_marginHorizontal="12dp"
+            android:background="@drawable/call_btn_bg_neutral"
+            android:src="@android:drawable/ic_lock_silent_mode_off"
+            android:contentDescription="Mute"
+            android:visibility="gone" />
+
+        <!-- Accept call -->
+        <ImageButton
+            android:id="@+id/btn_accept"
+            android:layout_width="68dp"
+            android:layout_height="68dp"
+            android:layout_marginHorizontal="16dp"
+            android:background="@drawable/call_btn_bg_green"
+            android:src="@android:drawable/ic_menu_call"
+            android:contentDescription="Accept call"
+            android:visibility="gone" />
+
+        <!-- End / reject call -->
+        <ImageButton
+            android:id="@+id/btn_end"
+            android:layout_width="68dp"
+            android:layout_height="68dp"
+            android:layout_marginHorizontal="16dp"
+            android:background="@drawable/call_btn_bg_red"
+            android:src="@android:drawable/ic_menu_close_clear_cancel"
+            android:contentDescription="End call" />
+
+        <!-- Speaker button (visible during active call) -->
+        <ImageButton
+            android:id="@+id/btn_speaker"
+            android:layout_width="60dp"
+            android:layout_height="60dp"
+            android:layout_marginHorizontal="12dp"
+            android:background="@drawable/call_btn_bg_neutral"
+            android:src="@android:drawable/ic_lock_silent_mode"
+            android:contentDescription="Speaker"
+            android:visibility="gone" />
+    </LinearLayout>
+
+</FrameLayout>

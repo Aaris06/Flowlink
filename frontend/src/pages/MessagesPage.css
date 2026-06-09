@@ -193,3 +193,28 @@
 .msg-ctx-menu button:hover { background: rgba(108,99,255,0.08); color: var(--brand); }
 .msg-ctx-menu button.danger { color: var(--red); }
 .msg-ctx-menu button.danger:hover { background: rgba(220,38,38,0.08); }
+
+/* ── Call buttons in chat header ── */
+.msg-header-actions {
+  margin-left: auto;
+  display: flex;
+  gap: 0.5rem;
+}
+
+.msg-call-btn {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: var(--bg-2);
+  cursor: pointer;
+  font-size: 1rem;
+  display: grid;
+  place-items: center;
+  transition: background 0.15s, transform 0.1s;
+}
+
+.msg-call-btn:hover {
+  background: var(--primary-light, rgba(99,102,241,0.12));
+  transform: scale(1.08);
+}

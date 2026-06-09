@@ -403,6 +403,9 @@ class MainActivity : AppCompatActivity(), UsernameDialogFragment.UsernameDialogL
 
         // Handle incoming intents (file shares, etc.)
         handleIntent(intent)
+
+        // Start listening for incoming calls
+        listenForIncomingCalls()
     }
 
     override fun onResume() {
@@ -1496,6 +1499,41 @@ class MainActivity : AppCompatActivity(), UsernameDialogFragment.UsernameDialogL
                 android.util.Log.d("FlowLink", "Sent invitation response: $accepted to $inviterUsername")
             } catch (e: Exception) {
                 android.util.Log.e("FlowLink", "Failed to send invitation response", e)
+            }
+        }
+    }
+
+    // ── Call handling ──────────────────────────────────────────────────────
+
+    /** Start an outgoing call to a remote device */
+    fun startOutgoingCall(toUsername: String, toDeviceId: String, isVideo: Boolean) {
+        val callId = "call_${System.currentTimeMillis()}_${(1000..9999).random()}"
+        val fragment = com.flowlink.app.ui.CallFragment.newOutgoing(callId, toUsername, toDeviceId, isVideo)
+        runOnUiThread {
+            supportFragmentManager.beginTransaction()
+                .add(R.id.fragment_container, fragment, "call")
+                .addToBackStack("call")
+                .commitAllowingStateLoss()
+        }
+    }
+
+    /** Called from WebSocketManager call event collector — shows incoming call UI */
+    private fun showIncomingCall(callId: String, fromUsername: String, fromDevice: String, isVideo: Boolean) {
+        val fragment = com.flowlink.app.ui.CallFragment.newIncoming(callId, fromUsername, fromDevice, isVideo)
+        runOnUiThread {
+            supportFragmentManager.beginTransaction()
+                .add(R.id.fragment_container, fragment, "call")
+                .addToBackStack("call")
+                .commitAllowingStateLoss()
+        }
+    }
+
+    private fun listenForIncomingCalls() {
+        lifecycleScope.launch {
+            webSocketManager.callEvents.collect { event ->
+                if (event is com.flowlink.app.service.WebSocketManager.CallEvent.Incoming) {
+                    showIncomingCall(event.callId, event.fromUsername, event.fromDevice, event.isVideo)
+                }
             }
         }
     }

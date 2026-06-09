@@ -358,3 +358,23 @@
   cursor: default; font-size: 0.9rem;
 }
 .dt-friend-btn:disabled { opacity: 0.8; }
+
+/* ── Call buttons on device tile ── */
+.dt-call-btn {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: var(--bg-2);
+  cursor: pointer;
+  font-size: 0.85rem;
+  display: grid;
+  place-items: center;
+  transition: background 0.15s, transform 0.1s;
+  margin-left: 4px;
+}
+
+.dt-call-btn:hover {
+  background: var(--primary-light, rgba(99,102,241,0.15));
+  transform: scale(1.1);
+}

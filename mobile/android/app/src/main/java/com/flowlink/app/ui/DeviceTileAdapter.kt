@@ -4,6 +4,7 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Button
+import android.widget.ImageButton
 import android.widget.ProgressBar
 import android.widget.TextView
 import androidx.recyclerview.widget.RecyclerView
@@ -16,6 +17,7 @@ class DeviceTileAdapter(
     private val onDeviceClick: (Device) -> Unit,
     private val onBrowseFilesClick: (Device) -> Unit,
     private val onAddFriend: ((Device) -> Unit)? = null,
+    private val onCallDevice: ((Device) -> Unit)? = null,
     private val transferStatuses: MutableMap<String, TransferStatus> = mutableMapOf()
 ) : RecyclerView.Adapter<DeviceTileAdapter.DeviceViewHolder>() {
 
@@ -32,7 +34,8 @@ class DeviceTileAdapter(
         val transferMeta: TextView = itemView.findViewById(R.id.tv_transfer_meta)
         val btnBrowseFiles: Button = itemView.findViewById(R.id.btn_browse_files)
         val tvTapHint: TextView = itemView.findViewById(R.id.tv_tap_hint)
-        val btnAddFriend: android.widget.ImageButton = itemView.findViewById(R.id.btn_add_friend)
+        val btnAddFriend: ImageButton = itemView.findViewById(R.id.btn_add_friend)
+        val btnCall: ImageButton = itemView.findViewById(R.id.btn_call)
     }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): DeviceViewHolder {
@@ -94,6 +97,14 @@ class DeviceTileAdapter(
             }
         } else {
             holder.btnAddFriend.visibility = View.GONE
+        }
+
+        // Call button — only show when device is online and callback provided
+        if (onCallDevice != null && device.online) {
+            holder.btnCall.visibility = View.VISIBLE
+            holder.btnCall.setOnClickListener { onCallDevice.invoke(device) }
+        } else {
+            holder.btnCall.visibility = View.GONE
         }
     }
 

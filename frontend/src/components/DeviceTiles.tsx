@@ -14,6 +14,7 @@ import MediaDetector from '../services/MediaDetector';
 import { groupService } from '../services/GroupService';
 import InvitationService from '../services/InvitationService';
 import InvitationPanel from './InvitationPanel';
+import { CallService } from '../services/CallService';
 import './DeviceTiles.css';
 
 interface DeviceTilesProps {
@@ -23,6 +24,7 @@ interface DeviceTilesProps {
   deviceType: 'phone' | 'laptop' | 'desktop' | 'tablet';
   username: string;
   invitationService: InvitationService | null;
+  callService?: CallService | null;
   onLeaveSession: () => void;
 }
 
@@ -74,6 +76,7 @@ export default function DeviceTiles({
   deviceType,
   username,
   invitationService,
+  callService,
   onLeaveSession,
 }: DeviceTilesProps) {
   const [devices, setDevices] = useState<Map<string, Device>>(() => {
@@ -2521,6 +2524,8 @@ export default function DeviceTiles({
                       alert('Failed to send: ' + error);
                     }
                   }}
+                  onCallAudio={callService ? (d) => callService.startCall(d.username || d.name, d.id, false) : undefined}
+                  onCallVideo={callService ? (d) => callService.startCall(d.username || d.name, d.id, true) : undefined}
                 />
               ))}
             </div>

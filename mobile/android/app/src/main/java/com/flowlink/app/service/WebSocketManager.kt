@@ -80,6 +80,10 @@ class WebSocketManager(private val mainActivity: MainActivity) {
     private val _friendRequestEvents = MutableSharedFlow<FriendRequestEvent>(extraBufferCapacity = 16)
     val friendRequestEvents: SharedFlow<FriendRequestEvent> = _friendRequestEvents
 
+    // Call signaling events
+    private val _callEvents = MutableSharedFlow<CallEvent>(extraBufferCapacity = 32)
+    val callEvents: SharedFlow<CallEvent> = _callEvents
+
     // Emits info about devices that connect to the current session
     private val _deviceConnected = MutableStateFlow<DeviceInfo?>(null)
     val deviceConnected: StateFlow<DeviceInfo?> = _deviceConnected
@@ -1477,6 +1481,64 @@ class WebSocketManager(private val mainActivity: MainActivity) {
                         mainActivity.leaveSession()
                     }
                 }
+                // ── Call signaling ────────────────────────────────────────────
+                "call_invite" -> {
+                    val payload = json.optJSONObject("payload") ?: return
+                    val callId = payload.optString("callId", "")
+                    val fromUsername = payload.optString("fromUsername", "Unknown")
+                    val fromDevice = payload.optString("fromDevice", "")
+                    val isVideo = payload.optBoolean("isVideo", false)
+                    Log.d("FlowLink", "📞 Incoming ${if (isVideo) "video" else "audio"} call from $fromUsername")
+                    _callEvents.tryEmit(CallEvent.Incoming(callId, fromUsername, fromDevice, isVideo))
+                    mainActivity.notificationService.showNotification(
+                        "📞 Incoming ${if (isVideo) "Video" else "Audio"} Call",
+                        "$fromUsername is calling you"
+                    )
+                }
+                "call_accept" -> {
+                    val payload = json.optJSONObject("payload") ?: return
+                    val callId = payload.optString("callId", "")
+                    val fromDevice = payload.optString("fromDevice", "")
+                    Log.d("FlowLink", "✅ Call accepted by $fromDevice")
+                    _callEvents.tryEmit(CallEvent.Accepted(callId, fromDevice))
+                }
+                "call_reject" -> {
+                    val payload = json.optJSONObject("payload") ?: return
+                    val callId = payload.optString("callId", "")
+                    val reason = payload.optString("reason", "rejected")
+                    Log.d("FlowLink", "❌ Call rejected: $reason")
+                    _callEvents.tryEmit(CallEvent.Rejected(callId, reason))
+                }
+                "call_end" -> {
+                    val payload = json.optJSONObject("payload") ?: return
+                    val callId = payload.optString("callId", "")
+                    Log.d("FlowLink", "📵 Call ended")
+                    _callEvents.tryEmit(CallEvent.Ended(callId))
+                }
+                "call_offer" -> {
+                    val payload = json.optJSONObject("payload") ?: return
+                    _callEvents.tryEmit(CallEvent.Offer(
+                        callId = payload.optString("callId", ""),
+                        fromDevice = payload.optString("fromDevice", ""),
+                        sdp = payload.optJSONObject("data")?.toString() ?: ""
+                    ))
+                }
+                "call_answer" -> {
+                    val payload = json.optJSONObject("payload") ?: return
+                    _callEvents.tryEmit(CallEvent.Answer(
+                        callId = payload.optString("callId", ""),
+                        fromDevice = payload.optString("fromDevice", ""),
+                        sdp = payload.optJSONObject("data")?.toString() ?: ""
+                    ))
+                }
+                "call_ice" -> {
+                    val payload = json.optJSONObject("payload") ?: return
+                    _callEvents.tryEmit(CallEvent.IceCandidate(
+                        callId = payload.optString("callId", ""),
+                        fromDevice = payload.optString("fromDevice", ""),
+                        candidate = payload.optJSONObject("data")?.toString() ?: ""
+                    ))
+                }
             }
         } catch (e: Exception) {
             Log.e("FlowLink", "Error handling message", e)
@@ -1585,6 +1647,33 @@ class WebSocketManager(private val mainActivity: MainActivity) {
         val fromDeviceName: String,
         val accepted: Boolean
     )
+
+    // ── Call signaling events ──────────────────────────────────────────────
+    sealed class CallEvent {
+        data class Incoming(val callId: String, val fromUsername: String, val fromDevice: String, val isVideo: Boolean) : CallEvent()
+        data class Accepted(val callId: String, val fromDevice: String) : CallEvent()
+        data class Rejected(val callId: String, val reason: String) : CallEvent()
+        data class Ended(val callId: String) : CallEvent()
+        data class Offer(val callId: String, val fromDevice: String, val sdp: String) : CallEvent()
+        data class Answer(val callId: String, val fromDevice: String, val sdp: String) : CallEvent()
+        data class IceCandidate(val callId: String, val fromDevice: String, val candidate: String) : CallEvent()
+    }
+
+    /** Send a call signaling message to a target device */
+    fun sendCallSignal(type: String, callId: String, toDevice: String, extraPayload: JSONObject = JSONObject()) {
+        val payload = JSONObject().apply {
+            put("callId", callId)
+            put("toDevice", toDevice)
+            put("fromUsername", sessionManager.getUsername())
+            extraPayload.keys().forEach { key -> put(key, extraPayload[key]) }
+        }
+        sendMessage(JSONObject().apply {
+            put("type", type)
+            put("deviceId", sessionManager.getDeviceId())
+            put("payload", payload)
+            put("timestamp", System.currentTimeMillis())
+        }.toString())
+    }
 
     private fun parseGroupInfo(json: JSONObject): GroupInfo {
         val ids = mutableListOf<String>()
