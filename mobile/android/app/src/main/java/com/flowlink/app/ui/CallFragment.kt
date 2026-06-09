@@ -1,6 +1,7 @@
-package com.flowlink.app.ui
+﻿package com.flowlink.app.ui
 
 import android.Manifest
+import android.annotation.SuppressLint
 import android.content.pm.PackageManager
 import android.media.AudioManager
 import android.os.Bundle
@@ -8,8 +9,10 @@ import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import android.view.LayoutInflater
+import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
+import android.widget.FrameLayout
 import android.widget.ImageButton
 import android.widget.TextView
 import android.widget.Toast
@@ -23,8 +26,35 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
-import org.webrtc.*
+import org.webrtc.AudioTrack
+import org.webrtc.Camera2Enumerator
+import org.webrtc.CameraVideoCapturer
+import org.webrtc.DataChannel
+import org.webrtc.DefaultVideoDecoderFactory
+import org.webrtc.DefaultVideoEncoderFactory
+import org.webrtc.EglBase
+import org.webrtc.IceCandidate
+import org.webrtc.MediaConstraints
+import org.webrtc.MediaStream
+import org.webrtc.PeerConnection
+import org.webrtc.PeerConnectionFactory
+import org.webrtc.RtpReceiver
+import org.webrtc.SdpObserver
+import org.webrtc.SessionDescription
+import org.webrtc.SurfaceTextureHelper
+import org.webrtc.SurfaceViewRenderer
+import org.webrtc.VideoTrack
 
+/**
+ * CallFragment — WhatsApp-style WebRTC audio/video call UI
+ *
+ * Features:
+ * - Tap local PiP to swap local ↔ remote video (WhatsApp style)
+ * - Minimize button → floating draggable bubble overlay so user can use the app mid-call
+ * - Restore by tapping the bubble
+ * - End call from bubble
+ * - Full video call with camera switch, mute, speaker
+ */
 class CallFragment : Fragment() {
 
     enum class CallState { RINGING_IN, RINGING_OUT, CONNECTING, ACTIVE, ENDED }
@@ -60,6 +90,8 @@ class CallFragment : Fragment() {
             }
     }
 
+    // ── State ─────────────────────────────────────────────────────────────
+
     private lateinit var mainActivity: MainActivity
     private lateinit var wsManager: WebSocketManager
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -71,12 +103,13 @@ class CallFragment : Fragment() {
     private var direction      = "inbound"
     @Volatile private var callState = CallState.RINGING_IN
 
-    // WebRTC objects
+    // WebRTC
     private var eglBase               : EglBase? = null
     private var peerConnectionFactory : PeerConnectionFactory? = null
     private var peerConnection        : PeerConnection? = null
     private var localAudioTrack       : AudioTrack? = null
     private var localVideoTrack       : VideoTrack? = null
+    private var remoteVideoTrack      : VideoTrack? = null
     private var videoCapturer         : CameraVideoCapturer? = null
     private var surfaceTextureHelper  : SurfaceTextureHelper? = null
 
@@ -85,11 +118,21 @@ class CallFragment : Fragment() {
     private val pendingCandidates = mutableListOf<String>()
     @Volatile private var remoteDescSet = false
 
-    // Camera state
+    // Camera / controls state
     private var usingFrontCamera = true
     private var cameraEnabled    = true
+    private var isMuted          = false
+    private var isSpeakerOn      = false
 
-    // Views (nullable — safe after onDestroyView)
+    // Video swap state — tracks which surface is currently showing remote vs local
+    private var isSwapped = false   // false = remote full-screen, local PiP
+
+    // Minimize state
+    private var isMinimized = false
+    private var minimizedOverlay: View? = null
+
+    // Views — nullable safe after onDestroyView
+    private var callRootView    : FrameLayout? = null
     private var remoteVideoView : SurfaceViewRenderer? = null
     private var localVideoView  : SurfaceViewRenderer? = null
     private var btnAccept       : ImageButton? = null
@@ -102,16 +145,18 @@ class CallFragment : Fragment() {
     private var tvUsername      : TextView? = null
     private var tvStatus        : TextView? = null
     private var tvAvatar        : TextView? = null
+    private var tvSwapHint      : TextView? = null
 
-    private var isMuted     = false
-    private var isSpeakerOn = false
-
+    // Duration counter
     private var durationSec = 0
     private val durationTick = object : Runnable {
         override fun run() {
             if (callState == CallState.ACTIVE && isAdded) {
                 durationSec++
-                tvStatus?.text = formatDuration(durationSec)
+                val formatted = formatDuration(durationSec)
+                tvStatus?.text = formatted
+                // Update minimized timer too
+                minimizedOverlay?.findViewById<TextView>(R.id.minimized_timer)?.text = formatted
                 mainHandler.postDelayed(this, 1000)
             }
         }
@@ -133,12 +178,13 @@ class CallFragment : Fragment() {
         callState = if (direction == "inbound") CallState.RINGING_IN else CallState.RINGING_OUT
     }
 
-    override fun onCreateView(i: LayoutInflater, c: ViewGroup?, s: Bundle?): View? =
-        i.inflate(R.layout.fragment_call, c, false)
+    override fun onCreateView(inf: LayoutInflater, c: ViewGroup?, s: Bundle?): View? =
+        inf.inflate(R.layout.fragment_call, c, false)
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
 
+        callRootView    = view.findViewById(R.id.call_root)
         remoteVideoView = view.findViewById(R.id.remote_video)
         localVideoView  = view.findViewById(R.id.local_video)
         btnAccept       = view.findViewById(R.id.btn_accept)
@@ -151,6 +197,7 @@ class CallFragment : Fragment() {
         tvUsername      = view.findViewById(R.id.remote_username)
         tvStatus        = view.findViewById(R.id.call_status)
         tvAvatar        = view.findViewById(R.id.avatar_text)
+        tvSwapHint      = view.findViewById(R.id.tv_swap_hint)
 
         tvUsername?.text = remoteUsername
         tvAvatar?.text   = remoteUsername.firstOrNull()?.uppercaseChar()?.toString() ?: "?"
@@ -164,16 +211,18 @@ class CallFragment : Fragment() {
         btnSwitchCamera?.setOnClickListener { switchCamera() }
         btnMinimize?.setOnClickListener     { minimizeCall() }
 
-        // Tap remote/local video to swap which is large vs PiP
-        remoteVideoView?.setOnClickListener { swapVideoViews() }
+        // Tap local PiP to swap local ↔ remote video streams (WhatsApp style)
         localVideoView?.setOnClickListener  { swapVideoViews() }
+
+        // Also tap remote video to reveal controls briefly (WhatsApp style)
+        remoteVideoView?.setOnClickListener { flashControls() }
 
         lifecycleScope.launch { wsManager.callEvents.collect { handleCallEvent(it) } }
 
         if (direction == "outbound") {
+            activity?.volumeControlStream = AudioManager.STREAM_VOICE_CALL
             wsManager.sendCallSignal("call_invite", callId, remoteDevice,
                 JSONObject().apply { put("isVideo", isVideo) })
-            // Show local preview immediately for outbound video
             if (isVideo) lifecycleScope.launch { startLocalPreviewOnly() }
         }
     }
@@ -181,14 +230,16 @@ class CallFragment : Fragment() {
     override fun onDestroyView() {
         super.onDestroyView()
         mainHandler.removeCallbacksAndMessages(null)
-        // Hide minimized bar if showing
-        (activity as? MainActivity)?.hideCallMinimizedBar()
+        removeMinimizedOverlay()
         cleanup()
+        callRootView    = null
         remoteVideoView = null
         localVideoView  = null
+        btnMinimize     = null
+        tvSwapHint      = null
     }
 
-    // ── Call signaling events ─────────────────────────────────────────────
+    // ── Signaling event dispatch ──────────────────────────────────────────
 
     private fun handleCallEvent(event: WebSocketManager.CallEvent) {
         if (!isAdded) return
@@ -199,7 +250,7 @@ class CallFragment : Fragment() {
                     if (event.callId == callId && callState == CallState.RINGING_OUT) {
                         callState = CallState.CONNECTING
                         tvStatus?.text = "Connecting…"
-                        setAudioModeForCall()
+                        updateMinimizedUI()
                         lifecycleScope.launch { initWebRTCAndSendOffer() }
                     }
                 }
@@ -210,11 +261,14 @@ class CallFragment : Fragment() {
                     }
                 }
                 is WebSocketManager.CallEvent.Ended -> {
-                    if (event.callId == callId) { tvStatus?.text = "Call ended"; scheduleClose(1500) }
+                    if (event.callId == callId) {
+                        tvStatus?.text = "Call ended"
+                        scheduleClose(1500)
+                    }
                 }
-                is WebSocketManager.CallEvent.Offer        -> { if (event.callId == callId) handleRemoteOffer(event.sdp) }
-                is WebSocketManager.CallEvent.Answer       -> { if (event.callId == callId) handleRemoteAnswer(event.sdp) }
-                is WebSocketManager.CallEvent.IceCandidate -> { if (event.callId == callId) handleRemoteIce(event.candidate) }
+                is WebSocketManager.CallEvent.Offer        -> if (event.callId == callId) handleRemoteOffer(event.sdp)
+                is WebSocketManager.CallEvent.Answer       -> if (event.callId == callId) handleRemoteAnswer(event.sdp)
+                is WebSocketManager.CallEvent.IceCandidate -> if (event.callId == callId) handleRemoteIce(event.candidate)
                 else -> {}
             }
         }
@@ -228,8 +282,7 @@ class CallFragment : Fragment() {
         tvStatus?.text = "Connecting…"
         btnAccept?.visibility = View.GONE
         updateUI()
-        // Set audio mode BEFORE WebRTC init so AudioRecord gets the right session
-        setAudioModeForCall()
+        activity?.volumeControlStream = AudioManager.STREAM_VOICE_CALL
         wsManager.sendCallSignal("call_accept", callId, remoteDevice)
         lifecycleScope.launch { initWebRTCAsync() }
     }
@@ -245,30 +298,198 @@ class CallFragment : Fragment() {
         safeCleanupAndClose()
     }
 
-    /** Set AudioManager to call mode — must be called on main thread before WebRTC init */
-    private fun setAudioModeForCall() {
-        try {
-            val am = requireContext().getSystemService(android.content.Context.AUDIO_SERVICE) as AudioManager
-            am.mode = AudioManager.MODE_IN_COMMUNICATION
-            am.isSpeakerphoneOn = false
-            // Request audio focus so other apps duck/stop
-            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
-                val focusRequest = android.media.AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)
-                    .setAudioAttributes(
-                        android.media.AudioAttributes.Builder()
-                            .setUsage(android.media.AudioAttributes.USAGE_VOICE_COMMUNICATION)
-                            .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SPEECH)
-                            .build()
-                    )
-                    .build()
-                am.requestAudioFocus(focusRequest)
-            } else {
-                @Suppress("DEPRECATION")
-                am.requestAudioFocus(null, AudioManager.STREAM_VOICE_CALL, AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)
+    // ── Minimize / restore ────────────────────────────────────────────────
+
+    private fun minimizeCall() {
+        if (isMinimized) return
+        isMinimized = true
+
+        // Hide the full call UI but keep fragment alive
+        callRootView?.visibility = View.GONE
+
+        // Inflate and attach minimized overlay to the activity's root window
+        attachMinimizedOverlay()
+    }
+
+    private fun restoreCall() {
+        if (!isMinimized) return
+        isMinimized = false
+        callRootView?.visibility = View.VISIBLE
+        removeMinimizedOverlay()
+
+        // Re-attach video sinks since they may have been detached
+        reattachVideoSinks()
+    }
+
+    @SuppressLint("ClickableViewAccessibility")
+    private fun attachMinimizedOverlay() {
+        val activity = activity ?: return
+        val decor = activity.window.decorView as? FrameLayout ?: return
+
+        val overlay = LayoutInflater.from(activity)
+            .inflate(R.layout.overlay_call_minimized, decor, false)
+
+        // Set content
+        val avatarTv = overlay.findViewById<TextView>(R.id.minimized_avatar)
+        val nameTv   = overlay.findViewById<TextView>(R.id.minimized_username)
+        val timerTv  = overlay.findViewById<TextView>(R.id.minimized_timer)
+        val endBtn   = overlay.findViewById<ImageButton>(R.id.minimized_btn_end)
+        val localVid = overlay.findViewById<SurfaceViewRenderer?>(R.id.minimized_local_video)
+
+        avatarTv.text = remoteUsername.firstOrNull()?.uppercaseChar()?.toString() ?: "?"
+        nameTv.text   = remoteUsername
+        timerTv.text  = if (callState == CallState.ACTIVE) formatDuration(durationSec) else "Calling…"
+
+        // Attach local video to minimized bubble for video calls
+        if (isVideo) {
+            val egl = eglBase
+            val vTrack = localVideoTrack
+            if (egl != null && vTrack != null && localVid != null) {
+                try {
+                    localVid.init(egl.eglBaseContext, null)
+                    localVid.setMirror(usingFrontCamera)
+                    localVid.setEnableHardwareScaler(true)
+                    vTrack.addSink(localVid)
+                    localVid.visibility = View.VISIBLE
+                    overlay.findViewById<View>(R.id.minimized_audio_bg)?.visibility = View.GONE
+                } catch (e: Exception) {
+                    Log.w(TAG, "minimized video init failed: ${e.message}")
+                }
             }
-        } catch (e: Exception) {
-            Log.w(TAG, "setAudioModeForCall: ${e.message}")
         }
+
+        // End call from bubble
+        endBtn.setOnClickListener { endCall() }
+
+        // Tap bubble to restore full call UI
+        overlay.setOnClickListener { restoreCall() }
+
+        // Draggable bubble
+        var startX = 0f; var startY = 0f
+        var origX = 0f;  var origY = 0f
+        overlay.setOnTouchListener { v, event ->
+            when (event.action) {
+                MotionEvent.ACTION_DOWN -> {
+                    startX = event.rawX; startY = event.rawY
+                    origX = v.x;         origY = v.y
+                    false // pass through so click also works
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    val dx = event.rawX - startX
+                    val dy = event.rawY - startY
+                    v.x = origX + dx
+                    v.y = origY + dy
+                    true
+                }
+                else -> false
+            }
+        }
+
+        // Position bottom-left initially
+        val params = FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.WRAP_CONTENT,
+            FrameLayout.LayoutParams.WRAP_CONTENT
+        ).apply {
+            // Will be positioned after first layout
+        }
+        decor.addView(overlay, params)
+
+        // Position after view is measured
+        overlay.post {
+            val parentH = decor.height
+            overlay.y = (parentH - overlay.height - 120).toFloat().coerceAtLeast(0f)
+            overlay.x = 16f
+        }
+
+        minimizedOverlay = overlay
+    }
+
+    private fun removeMinimizedOverlay() {
+        val overlay = minimizedOverlay ?: return
+        minimizedOverlay = null
+        // Release minimized local video sink before removing
+        try {
+            val localVid = overlay.findViewById<SurfaceViewRenderer?>(R.id.minimized_local_video)
+            if (localVid?.visibility == View.VISIBLE) {
+                localVideoTrack?.removeSink(localVid)
+                localVid.release()
+            }
+        } catch (e: Exception) { Log.w(TAG, "minimized video release: ${e.message}") }
+        (overlay.parent as? ViewGroup)?.removeView(overlay)
+    }
+
+    private fun updateMinimizedUI() {
+        val overlay = minimizedOverlay ?: return
+        overlay.findViewById<TextView>(R.id.minimized_timer)?.text =
+            if (callState == CallState.ACTIVE) formatDuration(durationSec) else "Calling…"
+    }
+
+    // ── Tap-to-swap video (WhatsApp style) ────────────────────────────────
+
+    /**
+     * Swaps which surface shows the remote vs local stream.
+     * Remote becomes PiP, local becomes full-screen — then swap back on next tap.
+     */
+    private fun swapVideoViews() {
+        if (!isVideo || callState != CallState.ACTIVE) return
+        val egl     = eglBase ?: return
+        val remote  = remoteVideoView ?: return
+        val local   = localVideoView  ?: return
+        val rTrack  = remoteVideoTrack
+        val lTrack  = localVideoTrack
+
+        isSwapped = !isSwapped
+
+        if (isSwapped) {
+            // Remote → PiP (local_video position), Local → full screen (remote_video)
+            rTrack?.removeSink(remote)
+            lTrack?.removeSink(local)
+            lTrack?.addSink(remote)   // local stream on the big surface
+            rTrack?.addSink(local)    // remote stream on the small surface
+            local.setMirror(false)    // remote stream shouldn't mirror
+            remote.setMirror(usingFrontCamera)
+        } else {
+            // Restore: Remote → full screen, Local → PiP
+            rTrack?.removeSink(local)
+            lTrack?.removeSink(remote)
+            rTrack?.addSink(remote)
+            lTrack?.addSink(local)
+            local.setMirror(usingFrontCamera)
+            remote.setMirror(false)
+        }
+        Toast.makeText(requireContext(),
+            if (isSwapped) "Your camera is full screen" else "Remote video is full screen",
+            Toast.LENGTH_SHORT).show()
+    }
+
+    private fun reattachVideoSinks() {
+        val egl    = eglBase ?: return
+        val remote = remoteVideoView ?: return
+        val local  = localVideoView  ?: return
+        if (!isVideo) return
+
+        if (isSwapped) {
+            localVideoTrack?.addSink(remote)
+            remoteVideoTrack?.addSink(local)
+        } else {
+            remoteVideoTrack?.addSink(remote)
+            localVideoTrack?.addSink(local)
+        }
+    }
+
+    /** Briefly show controls overlay when tapping the remote video during active call */
+    private fun flashControls() {
+        if (callState != CallState.ACTIVE) return
+        val controls = view?.findViewById<View>(R.id.controls_layout) ?: return
+        controls.visibility = View.VISIBLE
+        controls.alpha = 1f
+        mainHandler.removeCallbacksAndMessages("hide_controls")
+        mainHandler.postDelayed({
+            controls.animate().alpha(0f).setDuration(400).withEndAction {
+                controls.visibility = View.VISIBLE // keep visible but transparent
+                controls.alpha = 1f               // reset for next show
+            }.start()
+        }, 3000)
     }
 
     // ── WebRTC init ───────────────────────────────────────────────────────
@@ -303,10 +524,20 @@ class CallFragment : Fragment() {
 
     private suspend fun initWebRTCAsync() = withContext(Dispatchers.IO) {
         if (!hasMicPermission()) {
-            withContext(Dispatchers.Main) { if (isAdded) { tvStatus?.text = "Mic permission required"; scheduleClose(1500) } }
+            withContext(Dispatchers.Main) {
+                if (isAdded) { tvStatus?.text = "Mic permission required"; scheduleClose(1500) }
+            }
             return@withContext
         }
         val ctx = requireContext().applicationContext
+
+        withContext(Dispatchers.Main) {
+            val am = ctx.getSystemService(android.content.Context.AUDIO_SERVICE) as AudioManager
+            am.mode = AudioManager.MODE_IN_COMMUNICATION
+            am.isSpeakerphoneOn = false
+            activity?.volumeControlStream = AudioManager.STREAM_VOICE_CALL
+        }
+
         try {
             val egl = EglBase.create()
             PeerConnectionFactory.initialize(
@@ -322,7 +553,7 @@ class CallFragment : Fragment() {
                 PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer(),
                 PeerConnection.IceServer.builder("stun:stun1.l.google.com:19302").createIceServer(),
                 PeerConnection.IceServer.builder("turn:openrelay.metered.ca:80")
-                    .setUsername("openrelayproject").setPassword("openrelayproject").createIceServer(),
+                    .setUsername("openrelayproject").setPassword("openrelayproject").createIceServer()
             )
             val rtcConfig = PeerConnection.RTCConfiguration(iceServers).apply {
                 sdpSemantics             = PeerConnection.SdpSemantics.UNIFIED_PLAN
@@ -335,18 +566,21 @@ class CallFragment : Fragment() {
             val pc = factory.createPeerConnection(rtcConfig, makePcObserver())
                 ?: run { Log.e(TAG, "createPeerConnection returned null"); return@withContext }
 
+            // Audio with echo cancellation
             val audioConstraints = MediaConstraints().apply {
                 mandatory.add(MediaConstraints.KeyValuePair("googEchoCancellation", "true"))
-                mandatory.add(MediaConstraints.KeyValuePair("googNoiseSuppression", "true"))
                 mandatory.add(MediaConstraints.KeyValuePair("googAutoGainControl", "true"))
+                mandatory.add(MediaConstraints.KeyValuePair("googNoiseSuppression", "true"))
                 mandatory.add(MediaConstraints.KeyValuePair("googHighpassFilter", "true"))
             }
-            val audioTrack = factory.createAudioTrack("audio0", factory.createAudioSource(audioConstraints))
+            val audioTrack = factory.createAudioTrack(
+                "audio0", factory.createAudioSource(audioConstraints))
             pc.addTrack(audioTrack)
 
-            var videoTrack  : VideoTrack? = null
-            var capturer    : CameraVideoCapturer? = null
-            var stHelper    : SurfaceTextureHelper? = null
+            // Video
+            var videoTrack : VideoTrack? = null
+            var capturer   : CameraVideoCapturer? = null
+            var stHelper   : SurfaceTextureHelper? = null
 
             if (isVideo && hasCameraPermission()) {
                 capturer = makeCameraCapturer(usingFrontCamera)
@@ -363,7 +597,7 @@ class CallFragment : Fragment() {
             withContext(Dispatchers.Main) {
                 if (!isAdded) return@withContext
 
-                // If a preview capturer was already started, stop it cleanly
+                // Clean up any preview capturer
                 if (videoCapturer != null && videoCapturer !== capturer) {
                     runCatching { videoCapturer?.stopCapture(); videoCapturer?.dispose() }
                     runCatching { surfaceTextureHelper?.dispose() }
@@ -378,10 +612,8 @@ class CallFragment : Fragment() {
                 videoCapturer         = capturer
                 surfaceTextureHelper  = stHelper
 
-                // AudioManager already configured by setAudioModeForCall() before init
                 if (isVideo && videoTrack != null) {
                     localVideoView?.apply {
-                        // Re-init if needed (preview may have already initialised it)
                         runCatching { release() }
                         init(egl.eglBaseContext, null)
                         setMirror(usingFrontCamera)
@@ -407,7 +639,6 @@ class CallFragment : Fragment() {
         }
     }
 
-    /** Lightweight local preview before full PeerConnection is ready (outbound video) */
     private suspend fun startLocalPreviewOnly() = withContext(Dispatchers.IO) {
         if (!isVideo || !hasCameraPermission()) return@withContext
         val ctx = requireContext().applicationContext
@@ -431,10 +662,8 @@ class CallFragment : Fragment() {
 
             withContext(Dispatchers.Main) {
                 if (!isAdded || peerConnectionFactory != null) {
-                    // Full init already happened — discard preview resources
                     runCatching { capturer.stopCapture(); capturer.dispose() }
-                    runCatching { stHelper.dispose(); videoTrack.dispose() }
-                    runCatching { factory.dispose(); egl.release() }
+                    runCatching { stHelper.dispose(); videoTrack.dispose(); factory.dispose(); egl.release() }
                     return@withContext
                 }
                 eglBase               = egl
@@ -444,6 +673,7 @@ class CallFragment : Fragment() {
                 localVideoTrack       = videoTrack
 
                 localVideoView?.apply {
+                    runCatching { release() }
                     init(egl.eglBaseContext, null)
                     setMirror(usingFrontCamera)
                     setEnableHardwareScaler(true)
@@ -452,7 +682,7 @@ class CallFragment : Fragment() {
                 }
             }
         } catch (e: Exception) {
-            Log.w(TAG, "Preview failed: ${e.message}")
+            Log.w(TAG, "startLocalPreviewOnly failed: ${e.message}")
         }
     }
 
@@ -475,15 +705,25 @@ class CallFragment : Fragment() {
             mainHandler.post {
                 if (!isAdded) return@post
                 if (track is VideoTrack) {
-                    remoteVideoView?.let { rv ->
-                        track.addSink(rv)
-                        rv.visibility = View.VISIBLE
+                    remoteVideoTrack = track
+                    if (!isSwapped) {
+                        remoteVideoView?.let { rv ->
+                            track.addSink(rv)
+                            rv.visibility = View.VISIBLE
+                        }
+                    } else {
+                        // Swapped — put remote on local PiP surface
+                        localVideoView?.let { lv ->
+                            track.addSink(lv)
+                        }
                     }
                 }
                 if (callState != CallState.ACTIVE) {
                     callState = CallState.ACTIVE
                     updateUI()
                     mainHandler.post(durationTick)
+                    // Show swap hint briefly for video calls
+                    if (isVideo) showSwapHint()
                 }
             }
         }
@@ -502,7 +742,8 @@ class CallFragment : Fragment() {
                         }
                     }
                     PeerConnection.IceConnectionState.FAILED -> {
-                        tvStatus?.text = "Connection failed"; scheduleClose(2000)
+                        tvStatus?.text = "Connection failed"
+                        scheduleClose(2000)
                     }
                     PeerConnection.IceConnectionState.DISCONNECTED -> {
                         if (callState == CallState.ACTIVE) tvStatus?.text = "Reconnecting…"
@@ -614,49 +855,36 @@ class CallFragment : Fragment() {
     }
 
     private fun switchCamera() {
-        (videoCapturer as? CameraVideoCapturer)?.switchCamera(object : CameraVideoCapturer.CameraSwitchHandler {
+        videoCapturer?.switchCamera(object : CameraVideoCapturer.CameraSwitchHandler {
             override fun onCameraSwitchDone(isFront: Boolean) {
                 usingFrontCamera = isFront
-                mainHandler.post { localVideoView?.setMirror(isFront) }
+                mainHandler.post {
+                    // Update mirror on whichever surface is showing local stream
+                    if (!isSwapped) {
+                        localVideoView?.setMirror(isFront)
+                    } else {
+                        remoteVideoView?.setMirror(isFront)
+                    }
+                }
             }
             override fun onCameraSwitchError(e: String?) { Log.e(TAG, "switchCamera: $e") }
         })
     }
 
-    /** Minimize the call — hide this fragment and show floating bar in MainActivity */
-    private fun minimizeCall() {
-        view?.visibility = View.GONE
-        (activity as? MainActivity)?.showCallMinimizedBar(
-            name = remoteUsername,
-            durationProvider = { durationSec },
-            onRestore = { view?.visibility = View.VISIBLE },
-            onEnd = { endCall() }
-        )
+    // ── Swap hint ─────────────────────────────────────────────────────────
+
+    private fun showSwapHint() {
+        val hint = tvSwapHint ?: return
+        hint.visibility = View.VISIBLE
+        hint.alpha = 1f
+        mainHandler.postDelayed({
+            hint.animate().alpha(0f).setDuration(600).withEndAction {
+                hint.visibility = View.GONE
+            }.start()
+        }, 2500)
     }
 
-    /** Swap remote (fullscreen) and local (PiP) video surfaces */
-    private var videoSwapped = false
-    private fun swapVideoViews() {
-        if (!isVideo || remoteVideoView == null || localVideoView == null) return
-        videoSwapped = !videoSwapped
-
-        // Swap layout params: make local full-screen and remote PiP (or vice-versa)
-        val remoteParams = remoteVideoView!!.layoutParams
-        val localParams  = localVideoView!!.layoutParams
-        remoteVideoView!!.layoutParams = localParams
-        localVideoView!!.layoutParams  = remoteParams
-
-        // Swap z-order so whichever is "main" is behind the PiP
-        if (videoSwapped) {
-            remoteVideoView!!.setZOrderMediaOverlay(false)
-            localVideoView!!.setZOrderMediaOverlay(true)
-        } else {
-            remoteVideoView!!.setZOrderMediaOverlay(false)
-            localVideoView!!.setZOrderMediaOverlay(false)
-        }
-    }
-
-    // ── UI update ─────────────────────────────────────────────────────────
+    // ── UI ────────────────────────────────────────────────────────────────
 
     private fun updateUI() {
         when (callState) {
@@ -667,6 +895,7 @@ class CallFragment : Fragment() {
                 btnSpeaker?.visibility = View.GONE
                 btnCameraOff?.visibility = View.GONE
                 btnSwitchCamera?.visibility = View.GONE
+                btnMinimize?.visibility = View.GONE
             }
             CallState.RINGING_OUT, CallState.CONNECTING -> {
                 tvStatus?.text = if (callState == CallState.CONNECTING) "Connecting…" else "Calling…"
@@ -675,6 +904,7 @@ class CallFragment : Fragment() {
                 btnSpeaker?.visibility = View.GONE
                 btnCameraOff?.visibility = View.GONE
                 btnSwitchCamera?.visibility = View.GONE
+                btnMinimize?.visibility = View.VISIBLE
             }
             CallState.ACTIVE -> {
                 btnAccept?.visibility = View.GONE
@@ -682,6 +912,12 @@ class CallFragment : Fragment() {
                 btnSpeaker?.visibility = View.VISIBLE
                 btnCameraOff?.visibility = if (isVideo) View.VISIBLE else View.GONE
                 btnSwitchCamera?.visibility = if (isVideo) View.VISIBLE else View.GONE
+                btnMinimize?.visibility = View.VISIBLE
+                // Hide avatar/name card in active video calls (remote video fills screen)
+                if (isVideo) {
+                    (view as? ViewGroup)?.getChildAt(2)
+                        ?.animate()?.alpha(0f)?.setDuration(400)?.start()
+                }
             }
             CallState.ENDED -> {
                 btnAccept?.visibility = View.GONE
@@ -689,13 +925,15 @@ class CallFragment : Fragment() {
                 btnSpeaker?.visibility = View.GONE
                 btnCameraOff?.visibility = View.GONE
                 btnSwitchCamera?.visibility = View.GONE
+                btnMinimize?.visibility = View.GONE
+                removeMinimizedOverlay()
             }
         }
     }
 
     private fun formatDuration(s: Int) = "%02d:%02d".format(s / 60, s % 60)
 
-    // ── Lifecycle / cleanup ───────────────────────────────────────────────
+    // ── Cleanup ───────────────────────────────────────────────────────────
 
     private fun scheduleClose(delayMs: Long = 1500) {
         callState = CallState.ENDED
@@ -720,13 +958,15 @@ class CallFragment : Fragment() {
         runCatching { videoCapturer?.stopCapture() }
         runCatching { videoCapturer?.dispose() }
         runCatching { surfaceTextureHelper?.dispose() }
-        videoCapturer       = null
-        surfaceTextureHelper= null
+        videoCapturer        = null
+        surfaceTextureHelper = null
 
         runCatching { localAudioTrack?.dispose() }
         runCatching { localVideoTrack?.dispose() }
-        localAudioTrack = null
-        localVideoTrack = null
+        runCatching { remoteVideoTrack?.dispose() }
+        localAudioTrack  = null
+        localVideoTrack  = null
+        remoteVideoTrack = null
 
         runCatching { peerConnection?.close() }
         peerConnection = null
@@ -740,14 +980,14 @@ class CallFragment : Fragment() {
         runCatching { eglBase?.release() }
         eglBase = null
 
+        // Restore audio
         runCatching {
             val am = requireContext().getSystemService(android.content.Context.AUDIO_SERVICE) as AudioManager
-            am.mode = AudioManager.MODE_NORMAL
+            am.mode             = AudioManager.MODE_NORMAL
             am.isSpeakerphoneOn = false
-            if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.O) {
-                @Suppress("DEPRECATION")
-                am.abandonAudioFocus(null)
-            }
+        }
+        runCatching {
+            requireActivity().volumeControlStream = AudioManager.USE_DEFAULT_STREAM_TYPE
         }
     }
 
@@ -763,16 +1003,17 @@ class CallFragment : Fragment() {
 
     private fun makeCameraCapturer(useFront: Boolean): CameraVideoCapturer? = try {
         val e = Camera2Enumerator(requireContext())
-        e.deviceNames.firstOrNull { if (useFront) e.isFrontFacing(it) else e.isBackFacing(it) }
+        e.deviceNames
+            .firstOrNull { if (useFront) e.isFrontFacing(it) else e.isBackFacing(it) }
             ?.let { e.createCapturer(it, null) }
             ?: e.deviceNames.firstOrNull()?.let { e.createCapturer(it, null) }
     } catch (e: Exception) { Log.e(TAG, "makeCameraCapturer: ${e.message}"); null }
 
     private fun makeSdpObserver(onSuccess: () -> Unit = {}, onFail: (String?) -> Unit = {}) =
         object : SdpObserver {
-            override fun onSetSuccess()                        { onSuccess() }
-            override fun onSetFailure(e: String?)              { onFail(e) }
+            override fun onSetSuccess()                          { onSuccess() }
+            override fun onSetFailure(e: String?)                { onFail(e) }
             override fun onCreateSuccess(s: SessionDescription?) {}
-            override fun onCreateFailure(e: String?)           {}
+            override fun onCreateFailure(e: String?)             {}
         }
 }

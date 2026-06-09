@@ -1517,21 +1517,6 @@ class MainActivity : AppCompatActivity(), UsernameDialogFragment.UsernameDialogL
         }
     }
 
-    /** Start group calls from chat — invites every other device in the session */
-    fun startGroupCall(isVideo: Boolean) {
-        val devices = webSocketManager.sessionDevices.value
-        val myId    = sessionManager.getDeviceId()
-        val others  = devices.filter { it.id != myId }
-        if (others.isEmpty()) {
-            Toast.makeText(this, "No other devices in session", Toast.LENGTH_SHORT).show()
-            return
-        }
-        // Call each participant individually; they each get an incoming call screen
-        others.forEach { d ->
-            startOutgoingCall(d.username.ifEmpty { d.name }, d.id, isVideo)
-        }
-    }
-
     /** Called from WebSocketManager call event collector — shows incoming call UI */
     private fun showIncomingCall(callId: String, fromUsername: String, fromDevice: String, isVideo: Boolean) {
         val fragment = com.flowlink.app.ui.CallFragment.newIncoming(callId, fromUsername, fromDevice, isVideo)
@@ -1551,56 +1536,5 @@ class MainActivity : AppCompatActivity(), UsernameDialogFragment.UsernameDialogL
                 }
             }
         }
-    }
-
-    // ── Minimized call bar ─────────────────────────────────────────────────
-
-    private var miniBarHandler: android.os.Handler? = null
-    private var miniBarRunnable: Runnable? = null
-
-    /**
-     * Show a floating pill at the bottom of the screen while the call is minimized.
-     * @param durationProvider  Lambda that returns the current call duration in seconds
-     * @param onRestore         Called when user taps the bar to restore the call UI
-     * @param onEnd             Called when user taps the end button on the bar
-     */
-    fun showCallMinimizedBar(
-        name: String,
-        durationProvider: () -> Int,
-        onRestore: () -> Unit,
-        onEnd: () -> Unit
-    ) {
-        val bar     = binding.callMinimizedBar
-        val tvName  = binding.callMiniName
-        val tvTime  = binding.callMiniTime
-        val btnEnd  = binding.callMiniEnd
-
-        tvName.text = name
-        bar.visibility = android.view.View.VISIBLE
-
-        // Pulse the green dot
-        val dot = binding.callMiniDot
-        dot.background?.setTint(android.graphics.Color.parseColor("#22C55E"))
-
-        // Tick timer every second
-        miniBarHandler = android.os.Handler(android.os.Looper.getMainLooper())
-        miniBarRunnable = object : Runnable {
-            override fun run() {
-                val s = durationProvider()
-                tvTime.text = "%02d:%02d".format(s / 60, s % 60)
-                miniBarHandler?.postDelayed(this, 1000)
-            }
-        }
-        miniBarHandler?.post(miniBarRunnable!!)
-
-        bar.setOnClickListener { hideCallMinimizedBar(); onRestore() }
-        btnEnd.setOnClickListener { hideCallMinimizedBar(); onEnd() }
-    }
-
-    fun hideCallMinimizedBar() {
-        miniBarHandler?.removeCallbacksAndMessages(null)
-        miniBarHandler  = null
-        miniBarRunnable = null
-        binding.callMinimizedBar.visibility = android.view.View.GONE
     }
 }

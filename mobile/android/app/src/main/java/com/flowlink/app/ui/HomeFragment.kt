@@ -127,6 +127,16 @@ class HomeFragment : Fragment() {
             onDeviceClick = { device -> (activity as? MainActivity)?.let { handleDeviceTileClick(device, it) } },
             onBrowseFilesClick = { device -> (parentFragment as? ShareFragment)?.triggerFilePicker(device.id)
                 ?: (activity as? MainActivity)?.let { /* fallback */ } },
+            onCallDevice = { device ->
+                (activity as? MainActivity)?.startOutgoingCall(
+                    device.name.ifEmpty { "Unknown" }, device.id, false
+                )
+            },
+            onVideoCallDevice = { device ->
+                (activity as? MainActivity)?.startOutgoingCall(
+                    device.name.ifEmpty { "Unknown" }, device.id, true
+                )
+            },
             transferStatuses = transferStatuses
         )
         binding.rvDevices.adapter = deviceAdapter

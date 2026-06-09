@@ -157,14 +157,44 @@ class ChatFragment : Fragment() {
         binding.btnAttach.setOnClickListener { pickFileLauncher.launch(arrayOf("*/*")) }
         binding.btnCancelReply.setOnClickListener { clearReply() }
 
-        // Audio group call — invites every other device in the session
+        // Audio call button — group call: calls ALL other devices in the session
         binding.root.findViewById<android.widget.ImageButton?>(R.id.btn_audio_call)?.setOnClickListener {
-            mainActivity.startGroupCall(isVideo = false)
+            val selfId = sessionManager?.getDeviceId()
+            val devices = mainActivity.webSocketManager.sessionDevices.value
+                .filter { it.id != selfId }
+            if (devices.isEmpty()) {
+                Toast.makeText(requireContext(), "No other devices in session", Toast.LENGTH_SHORT).show()
+            } else if (devices.size == 1) {
+                // 1-on-1 call
+                val target = devices.first()
+                mainActivity.startOutgoingCall(target.username.ifEmpty { target.name }, target.id, false)
+            } else {
+                // Group call — call each device individually (mesh)
+                devices.forEach { target ->
+                    mainActivity.startOutgoingCall(target.username.ifEmpty { target.name }, target.id, false)
+                }
+                Toast.makeText(requireContext(), "Starting group audio call with ${devices.size} devices", Toast.LENGTH_SHORT).show()
+            }
         }
 
-        // Video group call
+        // Video call button — group call: calls ALL other devices in the session
         binding.root.findViewById<android.widget.ImageButton?>(R.id.btn_video_call)?.setOnClickListener {
-            mainActivity.startGroupCall(isVideo = true)
+            val selfId = sessionManager?.getDeviceId()
+            val devices = mainActivity.webSocketManager.sessionDevices.value
+                .filter { it.id != selfId }
+            if (devices.isEmpty()) {
+                Toast.makeText(requireContext(), "No other devices in session", Toast.LENGTH_SHORT).show()
+            } else if (devices.size == 1) {
+                // 1-on-1 video call
+                val target = devices.first()
+                mainActivity.startOutgoingCall(target.username.ifEmpty { target.name }, target.id, true)
+            } else {
+                // Group video call — call each device individually
+                devices.forEach { target ->
+                    mainActivity.startOutgoingCall(target.username.ifEmpty { target.name }, target.id, true)
+                }
+                Toast.makeText(requireContext(), "Starting group video call with ${devices.size} devices", Toast.LENGTH_SHORT).show()
+            }
         }
 
         // Voice message: hold to record, release to send

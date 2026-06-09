@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/call_root"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="#EE0F0C29">
@@ -9,9 +10,11 @@
         android:id="@+id/remote_video"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
+        android:clickable="true"
+        android:focusable="true"
         android:visibility="gone" />
 
-    <!-- Local video PiP — bottom-right corner -->
+    <!-- Local video PiP — bottom-right corner, tap to swap with remote -->
     <org.webrtc.SurfaceViewRenderer
         android:id="@+id/local_video"
         android:layout_width="108dp"
@@ -19,7 +22,10 @@
         android:layout_gravity="bottom|end"
         android:layout_marginEnd="16dp"
         android:layout_marginBottom="112dp"
-        android:background="#44000000"
+        android:background="@drawable/call_pip_bg"
+        android:elevation="8dp"
+        android:clickable="true"
+        android:focusable="true"
         android:visibility="gone" />
 
     <!-- Top gradient scrim for name + status -->
@@ -33,18 +39,6 @@
         android:paddingBottom="24dp"
         android:background="@drawable/call_top_scrim"
         android:padding="20dp">
-
-        <!-- Minimize button top-right -->
-        <ImageButton
-            android:id="@+id/btn_minimize"
-            android:layout_width="32dp"
-            android:layout_height="32dp"
-            android:layout_gravity="end"
-            android:background="@drawable/call_btn_bg_neutral"
-            android:src="@drawable/ic_minimize"
-            android:contentDescription="Minimize"
-            android:padding="6dp"
-            android:layout_marginBottom="8dp" />
 
         <TextView
             android:id="@+id/avatar_text"
@@ -73,6 +67,21 @@
             android:textSize="14sp"
             android:textColor="#CCFFFFFF" />
     </LinearLayout>
+
+    <!-- Minimize button — top-right -->
+    <ImageButton
+        android:id="@+id/btn_minimize"
+        android:layout_width="40dp"
+        android:layout_height="40dp"
+        android:layout_gravity="top|end"
+        android:layout_marginTop="48dp"
+        android:layout_marginEnd="16dp"
+        android:background="@drawable/call_btn_bg_neutral"
+        android:src="@android:drawable/arrow_down_float"
+        android:tint="#FFFFFF"
+        android:padding="8dp"
+        android:contentDescription="Minimize call"
+        android:elevation="12dp" />
 
     <!-- Bottom controls bar -->
     <LinearLayout
@@ -153,5 +162,19 @@
             android:visibility="gone" />
 
     </LinearLayout>
+
+    <!-- Tap-to-swap hint overlay (shown briefly when video call goes active) -->
+    <TextView
+        android:id="@+id/tv_swap_hint"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center"
+        android:text="Tap PiP to swap views"
+        android:textColor="#CCFFFFFF"
+        android:textSize="13sp"
+        android:background="#88000000"
+        android:paddingHorizontal="14dp"
+        android:paddingVertical="8dp"
+        android:visibility="gone" />
 
 </FrameLayout>

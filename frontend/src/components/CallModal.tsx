@@ -8,45 +8,97 @@ interface CallModalProps {
   callInfo: CallInfo | null;
 }
 
+/**
+ * Robustly attach a MediaStream to an HTMLMediaElement and play it.
+ * Handles the browser autoplay policy by retrying on user-gesture events.
+ */
+function attachAndPlay(el: HTMLMediaElement, stream: MediaStream) {
+  if (!el) return;
+  if (el.srcObject !== stream) {
+    el.srcObject = stream;
+  }
+  el.volume = 1;
+  el.muted = false;
+  const tryPlay = () => {
+    el.play().catch((err) => {
+      // NotAllowedError = autoplay blocked — will be unblocked on first user gesture
+      if (err?.name !== 'NotAllowedError') {
+        console.warn('[CallModal] audio play error:', err);
+      }
+    });
+  };
+  tryPlay();
+}
+
+/**
+ * Install a one-shot user-gesture listener that retries audio playback.
+ * Needed on web browsers where autoplay is blocked until the user interacts.
+ */
+function ensureAudioUnlocked(el: HTMLAudioElement) {
+  const unlock = () => {
+    if (el.paused && el.srcObject) {
+      el.play().catch(() => {});
+    }
+    document.removeEventListener('click', unlock, true);
+    document.removeEventListener('keydown', unlock, true);
+    document.removeEventListener('touchstart', unlock, true);
+  };
+  document.addEventListener('click', unlock, { capture: true, once: true });
+  document.addEventListener('keydown', unlock, { capture: true, once: true });
+  document.addEventListener('touchstart', unlock, { capture: true, once: true });
+}
+
 export default function CallModal({ callService, state, callInfo }: CallModalProps) {
-  const [muted, setMuted]           = useState(false);
-  const [cameraOff, setCameraOff]   = useState(false);
-  const [duration, setDuration]     = useState(0);
-  const [minimized, setMinimized]   = useState(false);
-  const [swapped, setSwapped]       = useState(false); // swap local/remote display
+  const [muted, setMuted] = useState(false);
+  const [cameraOff, setCameraOff] = useState(false);
+  const [duration, setDuration] = useState(0);
 
   const localVideoRef  = useRef<HTMLVideoElement | null>(null);
   const remoteVideoRef = useRef<HTMLVideoElement | null>(null);
+  // Dedicated audio element — guarantees remote audio plays even on audio-only calls
+  const remoteAudioRef = useRef<HTMLAudioElement | null>(null);
 
-  // Attach stream to a video element immediately when it mounts
+  // Attach local stream to video element when it mounts
   const attachLocal = useCallback((el: HTMLVideoElement | null) => {
     localVideoRef.current = el;
     if (el) {
       const stream = callService.getLocalStream();
-      if (stream) { el.srcObject = stream; el.play().catch(() => {}); }
+      if (stream) { el.srcObject = stream; el.muted = true; }
     }
   }, [callService]);
 
-  const attachRemote = useCallback((el: HTMLVideoElement | null) => {
+  // Attach remote stream to the video element when it mounts
+  const attachRemoteVideo = useCallback((el: HTMLVideoElement | null) => {
     remoteVideoRef.current = el;
     if (el) {
       const stream = callService.getRemoteStream();
-      if (stream) { el.srcObject = stream; el.play().catch(() => {}); }
+      if (stream) attachAndPlay(el, stream);
     }
   }, [callService]);
 
-  // Remote track callback — fires whenever a new remote stream arrives
+  // Attach remote stream to the dedicated audio element when it mounts
+  const attachRemoteAudio = useCallback((el: HTMLAudioElement | null) => {
+    remoteAudioRef.current = el;
+    if (el) {
+      const stream = callService.getRemoteStream();
+      if (stream) {
+        attachAndPlay(el, stream);
+        ensureAudioUnlocked(el);
+      }
+    }
+  }, [callService]);
+
+  // Called when new remote tracks arrive mid-call
   useEffect(() => {
     callService.setOnRemoteTrack((stream) => {
-      if (remoteVideoRef.current) {
-        remoteVideoRef.current.srcObject = stream;
-        remoteVideoRef.current.play().catch(() => {});
+      if (remoteVideoRef.current) attachAndPlay(remoteVideoRef.current, stream);
+      if (remoteAudioRef.current) {
+        attachAndPlay(remoteAudioRef.current, stream);
+        ensureAudioUnlocked(remoteAudioRef.current);
       }
     });
     callService.setOnLocalTrack((stream) => {
-      if (localVideoRef.current) {
-        localVideoRef.current.srcObject = stream;
-      }
+      if (localVideoRef.current) { localVideoRef.current.srcObject = stream; localVideoRef.current.muted = true; }
     });
     return () => {
       callService.setOnRemoteTrack(() => {});
@@ -54,89 +106,89 @@ export default function CallModal({ callService, state, callInfo }: CallModalPro
     };
   }, [callService]);
 
-  // Fallback: when state changes to active, ensure streams are attached
+  // Fallback: re-attach streams whenever state changes to active/connecting
+  // Also start a short polling interval to catch the race where ontrack fires
+  // before the audio ref is mounted (common on web browsers).
   useEffect(() => {
     if (state === 'active' || state === 'connecting') {
       const local = callService.getLocalStream();
-      if (localVideoRef.current && local) {
-        if (localVideoRef.current.srcObject !== local) {
-          localVideoRef.current.srcObject = local;
-        }
-      }
+      if (localVideoRef.current && local) { localVideoRef.current.srcObject = local; localVideoRef.current.muted = true; }
+
       const remote = callService.getRemoteStream();
-      if (remoteVideoRef.current && remote) {
-        if (remoteVideoRef.current.srcObject !== remote) {
-          remoteVideoRef.current.srcObject = remote;
-          remoteVideoRef.current.play().catch(() => {});
+      if (remote) {
+        if (remoteVideoRef.current) attachAndPlay(remoteVideoRef.current, remote);
+        if (remoteAudioRef.current) {
+          attachAndPlay(remoteAudioRef.current, remote);
+          ensureAudioUnlocked(remoteAudioRef.current);
         }
       }
+
+      // Poll for up to 3 seconds to catch the ref-mount race
+      let attempts = 0;
+      const poll = setInterval(() => {
+        attempts++;
+        const rem = callService.getRemoteStream();
+        if (rem && remoteAudioRef.current && remoteAudioRef.current.srcObject !== rem) {
+          attachAndPlay(remoteAudioRef.current, rem);
+          ensureAudioUnlocked(remoteAudioRef.current);
+        }
+        if (attempts >= 30) clearInterval(poll);
+      }, 100);
+      return () => clearInterval(poll);
     }
   }, [state, callService]);
 
-  // Reset UI state on new call
+  // Reset controls on new call
   useEffect(() => {
     if (state === 'ringing_in' || state === 'ringing_out') {
-      setMuted(false); setCameraOff(false); setSwapped(false); setMinimized(false);
+      setMuted(false);
+      setCameraOff(false);
     }
   }, [state]);
 
-  // Duration timer
+  // Duration counter
   useEffect(() => {
     if (state !== 'active') { setDuration(0); return; }
     const t = setInterval(() => setDuration(d => d + 1), 1000);
     return () => clearInterval(t);
   }, [state]);
 
-  const fmt = (s: number) => `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
+  const fmt = (s: number) =>
+    `${Math.floor(s / 60).toString().padStart(2, '0')}:${(s % 60).toString().padStart(2, '0')}`;
 
   if (state === 'idle' || !callInfo) return null;
 
   const isVideo = callInfo.isVideo;
-  const isActive = state === 'active';
-  const showVideoUI = isVideo && (state === 'connecting' || state === 'active');
-  const showLocalPreview = isVideo && state !== 'ended';
-
-  // ── Minimized pill ──────────────────────────────────────────────────
-  if (minimized) {
-    return (
-      <div className="call-minimized" onClick={() => setMinimized(false)}>
-        <span className="call-minimized-dot" />
-        <span className="call-minimized-name">{callInfo.remoteUsername}</span>
-        <span className="call-minimized-time">{isActive ? fmt(duration) : state === 'ringing_in' ? 'Incoming' : 'Calling…'}</span>
-        <button className="call-minimized-end" onClick={e => { e.stopPropagation(); callService.endCall(); }} title="End call">📵</button>
-      </div>
-    );
-  }
+  const showRemoteVideo  = isVideo && (state === 'connecting' || state === 'active');
+  const showLocalPreview = isVideo && (state === 'ringing_out' || state === 'connecting' || state === 'active');
 
   return (
-    <div className={`call-modal-overlay${isActive && isVideo ? ' call-modal-video-mode' : ''}`}>
+    <div className={`call-modal-overlay${state === 'active' && isVideo ? ' call-modal-video-mode' : ''}`}>
       <div className="call-modal">
 
-        {/* Remote video — full background. Click to swap */}
-        {showVideoUI && (
-          <video
-            ref={swapped ? attachLocal : attachRemote}
-            className="call-video-remote"
-            autoPlay playsInline
-            onClick={() => setSwapped(s => !s)}
-            title="Tap to swap"
-          />
+        {/* ── Always-present hidden audio element for remote audio ──────── */}
+        {/* Mounted as long as the modal is visible so audio plays even     */}
+        {/* before the video element exists (audio-only calls)              */}
+        <audio
+          ref={attachRemoteAudio}
+          autoPlay
+          playsInline
+          style={{ display: 'none' }}
+        />
+
+        {/* Remote video — full-screen background during active video calls */}
+        {showRemoteVideo && (
+          <video ref={attachRemoteVideo} className="call-video-remote" autoPlay playsInline />
         )}
 
-        {/* Local PiP. Click to swap */}
+        {/* Local preview PiP */}
         {showLocalPreview && (
-          <video
-            ref={swapped ? attachRemote : attachLocal}
-            className={`call-video-local${swapped ? ' swapped' : ''}`}
-            autoPlay playsInline muted
-            onClick={() => setSwapped(s => !s)}
-            title="Tap to swap"
-          />
+          <video ref={attachLocal} className="call-video-local" autoPlay playsInline muted />
         )}
 
         {/* Info overlay */}
         <div className="call-modal-info">
-          {!(isActive && isVideo) && (
+          {!(state === 'active' && isVideo) && (
             <div className="call-avatar">{callInfo.remoteUsername[0]?.toUpperCase()}</div>
           )}
           <div className="call-username">{callInfo.remoteUsername}</div>
@@ -149,13 +201,9 @@ export default function CallModal({ callService, state, callInfo }: CallModalPro
           </div>
         </div>
 
-        {/* Minimize button (shown in active/connecting/ringing_out) */}
-        {(state === 'active' || state === 'connecting' || state === 'ringing_out') && (
-          <button className="call-btn-minimize" onClick={() => setMinimized(true)} title="Minimize">⬇</button>
-        )}
-
         {/* Controls */}
         <div className="call-controls">
+
           {state === 'ringing_in' && (
             <>
               <button className="call-btn call-btn-accept" onClick={() => callService.acceptCall()} title="Accept">
@@ -194,7 +242,11 @@ export default function CallModal({ callService, state, callInfo }: CallModalPro
               )}
 
               {isVideo && (
-                <button className="call-btn call-btn-switch" onClick={() => callService.switchCamera()} title="Switch camera">
+                <button
+                  className="call-btn call-btn-switch"
+                  onClick={() => callService.switchCamera()}
+                  title="Switch camera"
+                >
                   <span className="call-icon">🔄</span>
                 </button>
               )}
@@ -204,6 +256,7 @@ export default function CallModal({ callService, state, callInfo }: CallModalPro
               </button>
             </>
           )}
+
         </div>
       </div>
     </div>
