@@ -94,7 +94,7 @@ export default function CallModal({ callService, state, callInfo }: CallModalPro
   const isVideo = callInfo.isVideo;
   const isActive = state === 'active';
   const showVideoUI = isVideo && (state === 'connecting' || state === 'active');
-  const showLocalPreview = isVideo && state !== 'idle' && state !== 'ended';
+  const showLocalPreview = isVideo && state !== 'ended';
 
   // ── Minimized pill ──────────────────────────────────────────────────
   if (minimized) {

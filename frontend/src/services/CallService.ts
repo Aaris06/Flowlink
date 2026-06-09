@@ -37,7 +37,6 @@ export class CallService {
 
   // Signaling race buffers
   private pendingOffer: RTCSessionDescriptionInit | null = null;
-  private pendingAnswer: RTCSessionDescriptionInit | null = null;
   private pendingCandidates: RTCIceCandidateInit[] = [];
   private remoteDescSet = false;
 
@@ -185,7 +184,7 @@ export class CallService {
       }
 
       case 'call_answer': {
-        if (!this.pc) { this.pendingAnswer = payload.data; return; }
+        if (!this.pc) { return; } // answer arrived before PC — discard, will renegotiate
         if (this.pc.signalingState === 'have-local-offer') {
           await this.pc.setRemoteDescription(payload.data);
           this.remoteDescSet = true;
@@ -233,7 +232,7 @@ export class CallService {
 
       // KEY FIX: For audio tracks, attach to hidden audio element so audio plays
       // even without a <video> element (audio-only calls)
-      e.streams[0]?.getAudioTracks().forEach(audioTrack => {
+      e.streams[0]?.getAudioTracks().forEach(_audioTrack => {
         if (!this.audioEl) {
           this.audioEl = new Audio();
           this.audioEl.autoplay = true;
@@ -299,7 +298,6 @@ export class CallService {
     this.remoteStream = null;
     this.pc = null;
     this.pendingOffer = null;
-    this.pendingAnswer = null;
     this.pendingCandidates = [];
     this.remoteDescSet = false;
     this.onTrackCallback = null;
