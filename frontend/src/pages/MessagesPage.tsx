@@ -358,20 +358,23 @@ export default function MessagesPage({ ctx }: Props) {
             <div className="msg-header-actions">
               <button
                 className="msg-call-btn"
-                title="Audio call"
+                title="Audio call everyone"
                 onClick={() => {
                   const peers = (window as any)._sessionDevices as { id: string; username: string }[] | undefined;
-                  const target = peers?.find(d => d.id !== deviceId);
-                  if (target) ctx.callService!.startCall(target.username, target.id, false);
+                  const others = peers?.filter(d => d.id !== deviceId) ?? [];
+                  if (!others.length) return;
+                  // Group call: invite every peer
+                  others.forEach(t => ctx.callService!.startCall(t.username || t.id, t.id, false));
                 }}
               >📞</button>
               <button
                 className="msg-call-btn"
-                title="Video call"
+                title="Video call everyone"
                 onClick={() => {
                   const peers = (window as any)._sessionDevices as { id: string; username: string }[] | undefined;
-                  const target = peers?.find(d => d.id !== deviceId);
-                  if (target) ctx.callService!.startCall(target.username, target.id, true);
+                  const others = peers?.filter(d => d.id !== deviceId) ?? [];
+                  if (!others.length) return;
+                  others.forEach(t => ctx.callService!.startCall(t.username || t.id, t.id, true));
                 }}
               >🎥</button>
             </div>

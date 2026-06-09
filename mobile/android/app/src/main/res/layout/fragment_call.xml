@@ -2,42 +2,56 @@
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="#CC0F0C29">
+    android:background="#EE0F0C29">
 
-    <!-- Remote video surface (full screen) -->
+    <!-- Remote video — full screen, hidden for audio-only calls -->
     <org.webrtc.SurfaceViewRenderer
         android:id="@+id/remote_video"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:visibility="gone" />
 
-    <!-- Local video (PiP bottom-right) -->
+    <!-- Local video PiP — bottom-right corner -->
     <org.webrtc.SurfaceViewRenderer
         android:id="@+id/local_video"
-        android:layout_width="120dp"
-        android:layout_height="160dp"
+        android:layout_width="108dp"
+        android:layout_height="144dp"
         android:layout_gravity="bottom|end"
         android:layout_marginEnd="16dp"
-        android:layout_marginBottom="96dp"
+        android:layout_marginBottom="112dp"
+        android:background="#44000000"
         android:visibility="gone" />
 
-    <!-- Call info overlay -->
+    <!-- Top gradient scrim for name + status -->
     <LinearLayout
-        android:id="@+id/call_info"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_gravity="top|center_horizontal"
+        android:layout_gravity="top"
         android:orientation="vertical"
         android:gravity="center"
-        android:padding="32dp">
+        android:paddingTop="48dp"
+        android:paddingBottom="24dp"
+        android:background="@drawable/call_top_scrim"
+        android:padding="20dp">
 
-        <!-- Avatar -->
+        <!-- Minimize button top-right -->
+        <ImageButton
+            android:id="@+id/btn_minimize"
+            android:layout_width="32dp"
+            android:layout_height="32dp"
+            android:layout_gravity="end"
+            android:background="@drawable/call_btn_bg_neutral"
+            android:src="@drawable/ic_minimize"
+            android:contentDescription="Minimize"
+            android:padding="6dp"
+            android:layout_marginBottom="8dp" />
+
         <TextView
             android:id="@+id/avatar_text"
-            android:layout_width="80dp"
-            android:layout_height="80dp"
+            android:layout_width="76dp"
+            android:layout_height="76dp"
             android:gravity="center"
-            android:textSize="32sp"
+            android:textSize="30sp"
             android:textColor="#FFFFFF"
             android:textStyle="bold"
             android:background="@drawable/call_avatar_bg" />
@@ -46,7 +60,7 @@
             android:id="@+id/remote_username"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
+            android:layout_marginTop="12dp"
             android:textSize="22sp"
             android:textColor="#FFFFFF"
             android:textStyle="bold" />
@@ -55,12 +69,12 @@
             android:id="@+id/call_status"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
+            android:layout_marginTop="6dp"
             android:textSize="14sp"
             android:textColor="#CCFFFFFF" />
     </LinearLayout>
 
-    <!-- Controls -->
+    <!-- Bottom controls bar -->
     <LinearLayout
         android:id="@+id/controls_layout"
         android:layout_width="match_parent"
@@ -68,51 +82,76 @@
         android:layout_gravity="bottom|center_horizontal"
         android:orientation="horizontal"
         android:gravity="center"
-        android:padding="24dp"
-        android:spacing="20dp">
+        android:background="@drawable/call_bottom_scrim"
+        android:paddingTop="16dp"
+        android:paddingBottom="28dp"
+        android:paddingHorizontal="12dp">
 
-        <!-- Mute button (visible during active call) -->
+        <!-- Mute audio -->
         <ImageButton
             android:id="@+id/btn_mute"
-            android:layout_width="60dp"
-            android:layout_height="60dp"
-            android:layout_marginHorizontal="12dp"
+            android:layout_width="56dp"
+            android:layout_height="56dp"
+            android:layout_marginHorizontal="8dp"
             android:background="@drawable/call_btn_bg_neutral"
             android:src="@android:drawable/ic_lock_silent_mode_off"
             android:contentDescription="Mute"
             android:visibility="gone" />
 
-        <!-- Accept call -->
+        <!-- Camera off/on (video only) -->
+        <ImageButton
+            android:id="@+id/btn_camera_off"
+            android:layout_width="56dp"
+            android:layout_height="56dp"
+            android:layout_marginHorizontal="8dp"
+            android:background="@drawable/call_btn_bg_neutral"
+            android:src="@android:drawable/ic_menu_camera"
+            android:contentDescription="Camera off"
+            android:visibility="gone" />
+
+        <!-- Accept call (inbound only) -->
         <ImageButton
             android:id="@+id/btn_accept"
             android:layout_width="68dp"
             android:layout_height="68dp"
-            android:layout_marginHorizontal="16dp"
+            android:layout_marginHorizontal="12dp"
             android:background="@drawable/call_btn_bg_green"
             android:src="@android:drawable/ic_menu_call"
-            android:contentDescription="Accept call"
+            android:contentDescription="Accept"
             android:visibility="gone" />
 
-        <!-- End / reject call -->
+        <!-- End / reject -->
         <ImageButton
             android:id="@+id/btn_end"
             android:layout_width="68dp"
             android:layout_height="68dp"
-            android:layout_marginHorizontal="16dp"
+            android:layout_marginHorizontal="12dp"
             android:background="@drawable/call_btn_bg_red"
             android:src="@android:drawable/ic_menu_close_clear_cancel"
             android:contentDescription="End call" />
 
-        <!-- Speaker button (visible during active call) -->
+        <!-- Switch camera (video only) -->
+        <ImageButton
+            android:id="@+id/btn_switch_camera"
+            android:layout_width="56dp"
+            android:layout_height="56dp"
+            android:layout_marginHorizontal="8dp"
+            android:background="@drawable/call_btn_bg_neutral"
+            android:src="@android:drawable/ic_menu_rotate"
+            android:contentDescription="Switch camera"
+            android:visibility="gone" />
+
+        <!-- Speaker -->
         <ImageButton
             android:id="@+id/btn_speaker"
-            android:layout_width="60dp"
-            android:layout_height="60dp"
-            android:layout_marginHorizontal="12dp"
+            android:layout_width="56dp"
+            android:layout_height="56dp"
+            android:layout_marginHorizontal="8dp"
             android:background="@drawable/call_btn_bg_neutral"
             android:src="@android:drawable/ic_lock_silent_mode"
             android:contentDescription="Speaker"
             android:visibility="gone" />
+
     </LinearLayout>
 
 </FrameLayout>

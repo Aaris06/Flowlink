@@ -144,8 +144,8 @@ function Shell() {
       if (invitationServiceRef.current) invitationServiceRef.current.setWebSocket(ws);
       // Give CallService the live websocket and identity
       if (callServiceRef.current) {
-        (callServiceRef.current as any).deviceId = deviceId;
-        (callServiceRef.current as any).username = username || '';
+        callServiceRef.current.deviceId = deviceId;
+        callServiceRef.current.username = username || '';
         callServiceRef.current.setWebSocket(ws);
       }
     };
@@ -175,6 +175,32 @@ function Shell() {
           (window as any)._sessionDevices = message.payload.devices;
         }
         break;
+
+      case 'device_connected': {
+        // Add/update device in the snapshot
+        const d = message.payload?.device;
+        if (d?.id) {
+          const existing: any[] = (window as any)._sessionDevices || [];
+          const idx = existing.findIndex((x: any) => x.id === d.id);
+          if (idx >= 0) existing[idx] = { ...existing[idx], ...d };
+          else existing.push(d);
+          (window as any)._sessionDevices = [...existing];
+        }
+        window.dispatchEvent(new CustomEvent('sessionMessage', { detail: { message } }));
+        break;
+      }
+
+      case 'device_disconnected': {
+        const disconnectedId = message.payload?.device?.id || message.payload?.deviceId;
+        if (disconnectedId) {
+          const existing: any[] = (window as any)._sessionDevices || [];
+          (window as any)._sessionDevices = existing.map((x: any) =>
+            x.id === disconnectedId ? { ...x, online: false } : x
+          );
+        }
+        window.dispatchEvent(new CustomEvent('sessionMessage', { detail: { message } }));
+        break;
+      }
       case 'chat_message':
       case 'chat_delivered':
       case 'chat_seen':

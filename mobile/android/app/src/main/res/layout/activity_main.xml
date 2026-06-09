@@ -41,5 +41,59 @@
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent" />
 
+    <!-- Floating minimized call bar (shown when call is minimized) -->
+    <LinearLayout
+        android:id="@+id/call_minimized_bar"
+        android:layout_width="wrap_content"
+        android:layout_height="44dp"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:background="@drawable/call_avatar_bg"
+        android:paddingHorizontal="14dp"
+        android:paddingVertical="8dp"
+        android:visibility="gone"
+        android:elevation="12dp"
+        app:layout_constraintBottom_toTopOf="@id/bottom_nav"
+        app:layout_constraintEnd_toEndOf="parent"
+        android:layout_marginEnd="16dp"
+        android:layout_marginBottom="12dp">
+
+        <View
+            android:id="@+id/call_mini_dot"
+            android:layout_width="8dp"
+            android:layout_height="8dp"
+            android:background="@drawable/online_dot"
+            android:layout_marginEnd="8dp" />
+
+        <TextView
+            android:id="@+id/call_mini_name"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Call"
+            android:textColor="#FFFFFF"
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:layout_marginEnd="10dp" />
+
+        <TextView
+            android:id="@+id/call_mini_time"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="00:00"
+            android:textColor="#CCFFFFFF"
+            android:textSize="12sp"
+            android:layout_marginEnd="10dp" />
+
+        <ImageButton
+            android:id="@+id/call_mini_end"
+            android:layout_width="28dp"
+            android:layout_height="28dp"
+            android:background="@drawable/call_btn_bg_red"
+            android:src="@android:drawable/ic_menu_close_clear_cancel"
+            android:contentDescription="End call"
+            android:padding="4dp" />
+
+    </LinearLayout>
+
 </androidx.constraintlayout.widget.ConstraintLayout>
 

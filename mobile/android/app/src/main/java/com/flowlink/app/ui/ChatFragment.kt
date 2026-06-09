@@ -157,15 +157,14 @@ class ChatFragment : Fragment() {
         binding.btnAttach.setOnClickListener { pickFileLauncher.launch(arrayOf("*/*")) }
         binding.btnCancelReply.setOnClickListener { clearReply() }
 
-        // Audio call button — calls the first other device in the session
+        // Audio group call — invites every other device in the session
         binding.root.findViewById<android.widget.ImageButton?>(R.id.btn_audio_call)?.setOnClickListener {
-            val devices = mainActivity.webSocketManager.sessionDevices.value
-            val target = devices.firstOrNull { it.id != sessionManager?.getDeviceId() }
-            if (target != null) {
-                mainActivity.startOutgoingCall(target.username.ifEmpty { target.name }, target.id, false)
-            } else {
-                Toast.makeText(requireContext(), "No other devices in session", Toast.LENGTH_SHORT).show()
-            }
+            mainActivity.startGroupCall(isVideo = false)
+        }
+
+        // Video group call
+        binding.root.findViewById<android.widget.ImageButton?>(R.id.btn_video_call)?.setOnClickListener {
+            mainActivity.startGroupCall(isVideo = true)
         }
 
         // Voice message: hold to record, release to send

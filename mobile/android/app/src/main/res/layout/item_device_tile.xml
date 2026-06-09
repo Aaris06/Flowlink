@@ -151,7 +151,19 @@
             android:src="@android:drawable/ic_menu_call"
             android:tint="#6366F1"
             android:padding="6dp"
-            android:contentDescription="Call"
+            android:contentDescription="Audio call"
+            android:layout_marginEnd="6dp" />
+
+        <!-- Video call -->
+        <ImageButton
+            android:id="@+id/btn_video_call"
+            android:layout_width="36dp"
+            android:layout_height="36dp"
+            android:background="@drawable/glass_card_bg_dark"
+            android:src="@drawable/ic_camera"
+            android:tint="#22C55E"
+            android:padding="6dp"
+            android:contentDescription="Video call"
             android:layout_marginEnd="6dp" />
 
         <Button

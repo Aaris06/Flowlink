@@ -170,9 +170,10 @@ class DeviceTilesFragment : Fragment() {
             onDeviceClick = { device -> handleDeviceTileClick(device) },
             onBrowseFilesClick = { device -> handleBrowseFilesClick(device) },
             onCallDevice = { device ->
-                (activity as? MainActivity)?.startOutgoingCall(
-                    device.name, device.id, false
-                )
+                (activity as? MainActivity)?.startOutgoingCall(device.name, device.id, false)
+            },
+            onVideoCallDevice = { device ->
+                (activity as? MainActivity)?.startOutgoingCall(device.name, device.id, true)
             },
             transferStatuses = transferStatuses
         )
@@ -369,9 +370,10 @@ class DeviceTilesFragment : Fragment() {
                 onDeviceClick = { device -> handleDeviceTileClick(device) },
                 onBrowseFilesClick = { device -> handleBrowseFilesClick(device) },
                 onCallDevice = { device ->
-                    (activity as? MainActivity)?.startOutgoingCall(
-                        device.name, device.id, false
-                    )
+                    (activity as? MainActivity)?.startOutgoingCall(device.name, device.id, false)
+                },
+                onVideoCallDevice = { device ->
+                    (activity as? MainActivity)?.startOutgoingCall(device.name, device.id, true)
                 },
                 transferStatuses = transferStatuses
             )

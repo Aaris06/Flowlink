@@ -18,6 +18,7 @@ class DeviceTileAdapter(
     private val onBrowseFilesClick: (Device) -> Unit,
     private val onAddFriend: ((Device) -> Unit)? = null,
     private val onCallDevice: ((Device) -> Unit)? = null,
+    private val onVideoCallDevice: ((Device) -> Unit)? = null,
     private val transferStatuses: MutableMap<String, TransferStatus> = mutableMapOf()
 ) : RecyclerView.Adapter<DeviceTileAdapter.DeviceViewHolder>() {
 
@@ -36,6 +37,7 @@ class DeviceTileAdapter(
         val tvTapHint: TextView = itemView.findViewById(R.id.tv_tap_hint)
         val btnAddFriend: ImageButton = itemView.findViewById(R.id.btn_add_friend)
         val btnCall: ImageButton = itemView.findViewById(R.id.btn_call)
+        val btnVideoCall: ImageButton = itemView.findViewById(R.id.btn_video_call)
     }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): DeviceViewHolder {
@@ -105,6 +107,14 @@ class DeviceTileAdapter(
             holder.btnCall.setOnClickListener { onCallDevice.invoke(device) }
         } else {
             holder.btnCall.visibility = View.GONE
+        }
+
+        // Video call button
+        if (onVideoCallDevice != null && device.online) {
+            holder.btnVideoCall.visibility = View.VISIBLE
+            holder.btnVideoCall.setOnClickListener { onVideoCallDevice.invoke(device) }
+        } else {
+            holder.btnVideoCall.visibility = View.GONE
         }
     }
 

@@ -2,6 +2,7 @@ package com.flowlink.app.ui
 
 import android.Manifest
 import android.content.pm.PackageManager
+import android.media.AudioManager
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -24,32 +25,23 @@ import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import org.webrtc.*
 
-/**
- * CallFragment — handles audio/video calls via WebRTC.
- *
- * Fixes applied:
- * - cleanup() always runs on main thread via handler.post
- * - WebRTC init runs on IO dispatcher, never blocks main thread
- * - ICE candidates are buffered until remote description is set
- * - offer/answer races handled with pendingOffer + pendingCandidates queues
- */
 class CallFragment : Fragment() {
 
     enum class CallState { RINGING_IN, RINGING_OUT, CONNECTING, ACTIVE, ENDED }
 
     companion object {
         private const val TAG = "CallFragment"
-        const val ARG_CALL_ID = "callId"
-        const val ARG_REMOTE_USERNAME = "remoteUsername"
+        const val ARG_CALL_ID       = "callId"
+        const val ARG_REMOTE_NAME   = "remoteUsername"
         const val ARG_REMOTE_DEVICE = "remoteDevice"
-        const val ARG_IS_VIDEO = "isVideo"
-        const val ARG_DIRECTION = "direction"
+        const val ARG_IS_VIDEO      = "isVideo"
+        const val ARG_DIRECTION     = "direction"
 
         fun newIncoming(callId: String, fromUsername: String, fromDevice: String, isVideo: Boolean) =
             CallFragment().apply {
                 arguments = Bundle().apply {
                     putString(ARG_CALL_ID, callId)
-                    putString(ARG_REMOTE_USERNAME, fromUsername)
+                    putString(ARG_REMOTE_NAME, fromUsername)
                     putString(ARG_REMOTE_DEVICE, fromDevice)
                     putBoolean(ARG_IS_VIDEO, isVideo)
                     putString(ARG_DIRECTION, "inbound")
@@ -60,7 +52,7 @@ class CallFragment : Fragment() {
             CallFragment().apply {
                 arguments = Bundle().apply {
                     putString(ARG_CALL_ID, callId)
-                    putString(ARG_REMOTE_USERNAME, toUsername)
+                    putString(ARG_REMOTE_NAME, toUsername)
                     putString(ARG_REMOTE_DEVICE, toDevice)
                     putBoolean(ARG_IS_VIDEO, isVideo)
                     putString(ARG_DIRECTION, "outbound")
@@ -72,69 +64,77 @@ class CallFragment : Fragment() {
     private lateinit var wsManager: WebSocketManager
     private val mainHandler = Handler(Looper.getMainLooper())
 
-    private var callId = ""
+    private var callId         = ""
     private var remoteUsername = ""
-    private var remoteDevice = ""
-    private var isVideo = false
-    private var direction = "inbound"
-
+    private var remoteDevice   = ""
+    private var isVideo        = false
+    private var direction      = "inbound"
     @Volatile private var callState = CallState.RINGING_IN
 
-    // WebRTC — only accessed on main thread or with synchronization
-    private var peerConnectionFactory: PeerConnectionFactory? = null
-    private var peerConnection: PeerConnection? = null
-    private var localAudioTrack: AudioTrack? = null
-    private var localVideoTrack: VideoTrack? = null
-    private var videoCapturer: CameraVideoCapturer? = null
-    private var remoteVideoView: SurfaceViewRenderer? = null
-    private var localVideoView: SurfaceViewRenderer? = null
-    private var eglBase: EglBase? = null
+    // WebRTC objects
+    private var eglBase               : EglBase? = null
+    private var peerConnectionFactory : PeerConnectionFactory? = null
+    private var peerConnection        : PeerConnection? = null
+    private var localAudioTrack       : AudioTrack? = null
+    private var localVideoTrack       : VideoTrack? = null
+    private var videoCapturer         : CameraVideoCapturer? = null
+    private var surfaceTextureHelper  : SurfaceTextureHelper? = null
 
-    // Queues to handle signaling races
-    private var pendingOffer: String? = null          // raw JSON string
-    private val pendingCandidates = mutableListOf<String>() // raw JSON strings
-    private var remoteDescriptionSet = false
+    // Signaling race queues
+    private var pendingOffer      : String? = null
+    private val pendingCandidates = mutableListOf<String>()
+    @Volatile private var remoteDescSet = false
 
-    private var isMuted = false
+    // Camera state
+    private var usingFrontCamera = true
+    private var cameraEnabled    = true
+
+    // Views (nullable — safe after onDestroyView)
+    private var remoteVideoView : SurfaceViewRenderer? = null
+    private var localVideoView  : SurfaceViewRenderer? = null
+    private var btnAccept       : ImageButton? = null
+    private var btnEnd          : ImageButton? = null
+    private var btnMute         : ImageButton? = null
+    private var btnSpeaker      : ImageButton? = null
+    private var btnCameraOff    : ImageButton? = null
+    private var btnSwitchCamera : ImageButton? = null
+    private var btnMinimize     : ImageButton? = null
+    private var tvUsername      : TextView? = null
+    private var tvStatus        : TextView? = null
+    private var tvAvatar        : TextView? = null
+
+    private var isMuted     = false
     private var isSpeakerOn = false
 
-    // Duration timer
-    private var durationSeconds = 0
-    private val durationRunnable = object : Runnable {
+    private var durationSec = 0
+    private val durationTick = object : Runnable {
         override fun run() {
             if (callState == CallState.ACTIVE && isAdded) {
-                durationSeconds++
-                view?.findViewById<TextView>(R.id.call_status)?.text = formatDuration(durationSeconds)
+                durationSec++
+                tvStatus?.text = formatDuration(durationSec)
                 mainHandler.postDelayed(this, 1000)
             }
         }
     }
 
-    // Views
-    private var btnAccept: ImageButton? = null
-    private var btnEnd: ImageButton? = null
-    private var btnMute: ImageButton? = null
-    private var btnSpeaker: ImageButton? = null
-    private var tvRemoteUsername: TextView? = null
-    private var tvStatus: TextView? = null
-    private var tvAvatar: TextView? = null
+    // ── Lifecycle ─────────────────────────────────────────────────────────
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         mainActivity = activity as MainActivity
-        wsManager = mainActivity.webSocketManager
+        wsManager    = mainActivity.webSocketManager
         arguments?.let {
-            callId = it.getString(ARG_CALL_ID, "")
-            remoteUsername = it.getString(ARG_REMOTE_USERNAME, "Unknown")
-            remoteDevice = it.getString(ARG_REMOTE_DEVICE, "")
-            isVideo = it.getBoolean(ARG_IS_VIDEO, false)
-            direction = it.getString(ARG_DIRECTION, "inbound")
+            callId         = it.getString(ARG_CALL_ID, "")
+            remoteUsername = it.getString(ARG_REMOTE_NAME, "Unknown")
+            remoteDevice   = it.getString(ARG_REMOTE_DEVICE, "")
+            isVideo        = it.getBoolean(ARG_IS_VIDEO, false)
+            direction      = it.getString(ARG_DIRECTION, "inbound")
         }
         callState = if (direction == "inbound") CallState.RINGING_IN else CallState.RINGING_OUT
     }
 
-    override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View? =
-        inflater.inflate(R.layout.fragment_call, container, false)
+    override fun onCreateView(i: LayoutInflater, c: ViewGroup?, s: Bundle?): View? =
+        i.inflate(R.layout.fragment_call, c, false)
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
@@ -145,38 +145,52 @@ class CallFragment : Fragment() {
         btnEnd          = view.findViewById(R.id.btn_end)
         btnMute         = view.findViewById(R.id.btn_mute)
         btnSpeaker      = view.findViewById(R.id.btn_speaker)
-        tvRemoteUsername = view.findViewById(R.id.remote_username)
+        btnCameraOff    = view.findViewById(R.id.btn_camera_off)
+        btnSwitchCamera = view.findViewById(R.id.btn_switch_camera)
+        btnMinimize     = view.findViewById(R.id.btn_minimize)
+        tvUsername      = view.findViewById(R.id.remote_username)
         tvStatus        = view.findViewById(R.id.call_status)
         tvAvatar        = view.findViewById(R.id.avatar_text)
 
-        tvRemoteUsername?.text = remoteUsername
-        tvAvatar?.text = remoteUsername.firstOrNull()?.uppercaseChar()?.toString() ?: "?"
+        tvUsername?.text = remoteUsername
+        tvAvatar?.text   = remoteUsername.firstOrNull()?.uppercaseChar()?.toString() ?: "?"
         updateUI()
 
-        btnAccept?.setOnClickListener { acceptCall() }
-        btnEnd?.setOnClickListener {
-            if (callState == CallState.RINGING_IN) rejectCall() else endCall()
-        }
-        btnMute?.setOnClickListener { toggleMute() }
-        btnSpeaker?.setOnClickListener { toggleSpeaker() }
+        btnAccept?.setOnClickListener       { acceptCall() }
+        btnEnd?.setOnClickListener          { if (callState == CallState.RINGING_IN) rejectCall() else endCall() }
+        btnMute?.setOnClickListener         { toggleMute() }
+        btnSpeaker?.setOnClickListener      { toggleSpeaker() }
+        btnCameraOff?.setOnClickListener    { toggleCamera() }
+        btnSwitchCamera?.setOnClickListener { switchCamera() }
+        btnMinimize?.setOnClickListener     { minimizeCall() }
 
-        // Collect call signaling events
-        lifecycleScope.launch {
-            wsManager.callEvents.collect { event -> handleCallEvent(event) }
-        }
+        // Tap remote/local video to swap which is large vs PiP
+        remoteVideoView?.setOnClickListener { swapVideoViews() }
+        localVideoView?.setOnClickListener  { swapVideoViews() }
 
-        // Outbound: send invite right away
+        lifecycleScope.launch { wsManager.callEvents.collect { handleCallEvent(it) } }
+
         if (direction == "outbound") {
             wsManager.sendCallSignal("call_invite", callId, remoteDevice,
                 JSONObject().apply { put("isVideo", isVideo) })
-            tvStatus?.text = "Calling…"
+            // Show local preview immediately for outbound video
+            if (isVideo) lifecycleScope.launch { startLocalPreviewOnly() }
         }
     }
 
-    // ── Signaling event dispatch ──────────────────────────────────────────
+    override fun onDestroyView() {
+        super.onDestroyView()
+        mainHandler.removeCallbacksAndMessages(null)
+        // Hide minimized bar if showing
+        (activity as? MainActivity)?.hideCallMinimizedBar()
+        cleanup()
+        remoteVideoView = null
+        localVideoView  = null
+    }
+
+    // ── Call signaling events ─────────────────────────────────────────────
 
     private fun handleCallEvent(event: WebSocketManager.CallEvent) {
-        // Always dispatch to main thread safely
         if (!isAdded) return
         mainHandler.post {
             if (!isAdded) return@post
@@ -185,7 +199,8 @@ class CallFragment : Fragment() {
                     if (event.callId == callId && callState == CallState.RINGING_OUT) {
                         callState = CallState.CONNECTING
                         tvStatus?.text = "Connecting…"
-                        initWebRTCAndSendOffer()
+                        setAudioModeForCall()
+                        lifecycleScope.launch { initWebRTCAndSendOffer() }
                     }
                 }
                 is WebSocketManager.CallEvent.Rejected -> {
@@ -195,20 +210,11 @@ class CallFragment : Fragment() {
                     }
                 }
                 is WebSocketManager.CallEvent.Ended -> {
-                    if (event.callId == callId) {
-                        tvStatus?.text = "Call ended"
-                        scheduleClose(1500)
-                    }
+                    if (event.callId == callId) { tvStatus?.text = "Call ended"; scheduleClose(1500) }
                 }
-                is WebSocketManager.CallEvent.Offer -> {
-                    if (event.callId == callId) handleRemoteOffer(event.sdp)
-                }
-                is WebSocketManager.CallEvent.Answer -> {
-                    if (event.callId == callId) handleRemoteAnswer(event.sdp)
-                }
-                is WebSocketManager.CallEvent.IceCandidate -> {
-                    if (event.callId == callId) handleRemoteIce(event.candidate)
-                }
+                is WebSocketManager.CallEvent.Offer        -> { if (event.callId == callId) handleRemoteOffer(event.sdp) }
+                is WebSocketManager.CallEvent.Answer       -> { if (event.callId == callId) handleRemoteAnswer(event.sdp) }
+                is WebSocketManager.CallEvent.IceCandidate -> { if (event.callId == callId) handleRemoteIce(event.candidate) }
                 else -> {}
             }
         }
@@ -222,11 +228,9 @@ class CallFragment : Fragment() {
         tvStatus?.text = "Connecting…"
         btnAccept?.visibility = View.GONE
         updateUI()
-
-        // Send accept — caller will send offer upon receiving this
+        // Set audio mode BEFORE WebRTC init so AudioRecord gets the right session
+        setAudioModeForCall()
         wsManager.sendCallSignal("call_accept", callId, remoteDevice)
-
-        // Initialise WebRTC in background so we're ready to handle the incoming offer
         lifecycleScope.launch { initWebRTCAsync() }
     }
 
@@ -241,235 +245,299 @@ class CallFragment : Fragment() {
         safeCleanupAndClose()
     }
 
+    /** Set AudioManager to call mode — must be called on main thread before WebRTC init */
+    private fun setAudioModeForCall() {
+        try {
+            val am = requireContext().getSystemService(android.content.Context.AUDIO_SERVICE) as AudioManager
+            am.mode = AudioManager.MODE_IN_COMMUNICATION
+            am.isSpeakerphoneOn = false
+            // Request audio focus so other apps duck/stop
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                val focusRequest = android.media.AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)
+                    .setAudioAttributes(
+                        android.media.AudioAttributes.Builder()
+                            .setUsage(android.media.AudioAttributes.USAGE_VOICE_COMMUNICATION)
+                            .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SPEECH)
+                            .build()
+                    )
+                    .build()
+                am.requestAudioFocus(focusRequest)
+            } else {
+                @Suppress("DEPRECATION")
+                am.requestAudioFocus(null, AudioManager.STREAM_VOICE_CALL, AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "setAudioModeForCall: ${e.message}")
+        }
+    }
+
     // ── WebRTC init ───────────────────────────────────────────────────────
 
-    /** Caller: init WebRTC then send offer */
-    private fun initWebRTCAndSendOffer() {
-        lifecycleScope.launch {
-            initWebRTCAsync()
-            if (!isAdded || peerConnection == null) return@launch
+    private suspend fun initWebRTCAndSendOffer() {
+        initWebRTCAsync()
+        if (!isAdded || peerConnection == null) return
+        val constraints = MediaConstraints().apply {
+            mandatory.add(MediaConstraints.KeyValuePair("OfferToReceiveAudio", "true"))
+            mandatory.add(MediaConstraints.KeyValuePair("OfferToReceiveVideo", isVideo.toString()))
+        }
+        peerConnection?.createOffer(object : SdpObserver {
+            override fun onCreateSuccess(sdp: SessionDescription) {
+                peerConnection?.setLocalDescription(makeSdpObserver(
+                    onSuccess = {
+                        wsManager.sendCallSignal("call_offer", callId, remoteDevice,
+                            JSONObject().apply {
+                                put("data", JSONObject().apply {
+                                    put("type", sdp.type.canonicalForm())
+                                    put("sdp", sdp.description)
+                                })
+                            })
+                    },
+                    onFail = { Log.e(TAG, "setLocalDesc(offer) failed: $it") }
+                ), sdp)
+            }
+            override fun onCreateFailure(e: String?) { Log.e(TAG, "createOffer failed: $e") }
+            override fun onSetSuccess() {}
+            override fun onSetFailure(p0: String?) {}
+        }, constraints)
+    }
 
-            val constraints = MediaConstraints().apply {
-                mandatory.add(MediaConstraints.KeyValuePair("OfferToReceiveAudio", "true"))
-                mandatory.add(MediaConstraints.KeyValuePair("OfferToReceiveVideo", isVideo.toString()))
+    private suspend fun initWebRTCAsync() = withContext(Dispatchers.IO) {
+        if (!hasMicPermission()) {
+            withContext(Dispatchers.Main) { if (isAdded) { tvStatus?.text = "Mic permission required"; scheduleClose(1500) } }
+            return@withContext
+        }
+        val ctx = requireContext().applicationContext
+        try {
+            val egl = EglBase.create()
+            PeerConnectionFactory.initialize(
+                PeerConnectionFactory.InitializationOptions.builder(ctx).createInitializationOptions()
+            )
+            val factory = PeerConnectionFactory.builder()
+                .setOptions(PeerConnectionFactory.Options())
+                .setVideoEncoderFactory(DefaultVideoEncoderFactory(egl.eglBaseContext, true, true))
+                .setVideoDecoderFactory(DefaultVideoDecoderFactory(egl.eglBaseContext))
+                .createPeerConnectionFactory()
+
+            val iceServers = listOf(
+                PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer(),
+                PeerConnection.IceServer.builder("stun:stun1.l.google.com:19302").createIceServer(),
+                PeerConnection.IceServer.builder("turn:openrelay.metered.ca:80")
+                    .setUsername("openrelayproject").setPassword("openrelayproject").createIceServer(),
+            )
+            val rtcConfig = PeerConnection.RTCConfiguration(iceServers).apply {
+                sdpSemantics             = PeerConnection.SdpSemantics.UNIFIED_PLAN
+                iceTransportsType        = PeerConnection.IceTransportsType.ALL
+                bundlePolicy             = PeerConnection.BundlePolicy.MAXBUNDLE
+                rtcpMuxPolicy            = PeerConnection.RtcpMuxPolicy.REQUIRE
+                continualGatheringPolicy = PeerConnection.ContinualGatheringPolicy.GATHER_CONTINUALLY
             }
 
-            withContext(Dispatchers.IO) {
-                peerConnection?.createOffer(object : SdpObserver {
-                    override fun onCreateSuccess(sdp: SessionDescription) {
-                        peerConnection?.setLocalDescription(object : SdpObserver {
-                            override fun onSetSuccess() {
-                                wsManager.sendCallSignal("call_offer", callId, remoteDevice,
-                                    JSONObject().apply {
-                                        put("data", JSONObject().apply {
-                                            put("type", sdp.type.canonicalForm())
-                                            put("sdp", sdp.description)
-                                        })
-                                    })
-                            }
-                            override fun onSetFailure(e: String?) { Log.e(TAG, "setLocalDesc failed: $e") }
-                            override fun onCreateSuccess(p0: SessionDescription?) {}
-                            override fun onCreateFailure(p0: String?) {}
-                        }, sdp)
+            val pc = factory.createPeerConnection(rtcConfig, makePcObserver())
+                ?: run { Log.e(TAG, "createPeerConnection returned null"); return@withContext }
+
+            val audioConstraints = MediaConstraints().apply {
+                mandatory.add(MediaConstraints.KeyValuePair("googEchoCancellation", "true"))
+                mandatory.add(MediaConstraints.KeyValuePair("googNoiseSuppression", "true"))
+                mandatory.add(MediaConstraints.KeyValuePair("googAutoGainControl", "true"))
+                mandatory.add(MediaConstraints.KeyValuePair("googHighpassFilter", "true"))
+            }
+            val audioTrack = factory.createAudioTrack("audio0", factory.createAudioSource(audioConstraints))
+            pc.addTrack(audioTrack)
+
+            var videoTrack  : VideoTrack? = null
+            var capturer    : CameraVideoCapturer? = null
+            var stHelper    : SurfaceTextureHelper? = null
+
+            if (isVideo && hasCameraPermission()) {
+                capturer = makeCameraCapturer(usingFrontCamera)
+                if (capturer != null) {
+                    stHelper = SurfaceTextureHelper.create("CaptureThread", egl.eglBaseContext)
+                    val videoSource = factory.createVideoSource(capturer.isScreencast)
+                    capturer.initialize(stHelper, ctx, videoSource.capturerObserver)
+                    capturer.startCapture(1280, 720, 30)
+                    videoTrack = factory.createVideoTrack("video0", videoSource)
+                    pc.addTrack(videoTrack)
+                }
+            }
+
+            withContext(Dispatchers.Main) {
+                if (!isAdded) return@withContext
+
+                // If a preview capturer was already started, stop it cleanly
+                if (videoCapturer != null && videoCapturer !== capturer) {
+                    runCatching { videoCapturer?.stopCapture(); videoCapturer?.dispose() }
+                    runCatching { surfaceTextureHelper?.dispose() }
+                    runCatching { localVideoTrack?.dispose() }
+                }
+
+                eglBase               = egl
+                peerConnectionFactory = factory
+                peerConnection        = pc
+                localAudioTrack       = audioTrack
+                localVideoTrack       = videoTrack
+                videoCapturer         = capturer
+                surfaceTextureHelper  = stHelper
+
+                // AudioManager already configured by setAudioModeForCall() before init
+                if (isVideo && videoTrack != null) {
+                    localVideoView?.apply {
+                        // Re-init if needed (preview may have already initialised it)
+                        runCatching { release() }
+                        init(egl.eglBaseContext, null)
+                        setMirror(usingFrontCamera)
+                        setEnableHardwareScaler(true)
+                        videoTrack.addSink(this)
+                        visibility = View.VISIBLE
                     }
-                    override fun onCreateFailure(e: String?) { Log.e(TAG, "createOffer failed: $e") }
-                    override fun onSetSuccess() {}
-                    override fun onSetFailure(p0: String?) {}
-                }, constraints)
+                    remoteVideoView?.apply {
+                        runCatching { release() }
+                        init(egl.eglBaseContext, null)
+                        setEnableHardwareScaler(true)
+                    }
+                }
+
+                // Drain any queued signaling
+                pendingOffer?.let { o -> pendingOffer = null; handleRemoteOffer(o) }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "initWebRTCAsync failed", e)
+            withContext(Dispatchers.Main) {
+                if (isAdded) { tvStatus?.text = "Setup failed"; scheduleClose(1500) }
             }
         }
     }
 
-    /** Runs WebRTC factory + PeerConnection init on IO, then returns to main */
-    private suspend fun initWebRTCAsync() {
-        if (!checkAudioPermission()) return
+    /** Lightweight local preview before full PeerConnection is ready (outbound video) */
+    private suspend fun startLocalPreviewOnly() = withContext(Dispatchers.IO) {
+        if (!isVideo || !hasCameraPermission()) return@withContext
+        val ctx = requireContext().applicationContext
+        try {
+            val egl = EglBase.create()
+            PeerConnectionFactory.initialize(
+                PeerConnectionFactory.InitializationOptions.builder(ctx).createInitializationOptions()
+            )
+            val factory = PeerConnectionFactory.builder()
+                .setOptions(PeerConnectionFactory.Options())
+                .setVideoEncoderFactory(DefaultVideoEncoderFactory(egl.eglBaseContext, true, true))
+                .setVideoDecoderFactory(DefaultVideoDecoderFactory(egl.eglBaseContext))
+                .createPeerConnectionFactory()
 
-        withContext(Dispatchers.IO) {
-            try {
-                val ctx = requireContext().applicationContext
+            val capturer = makeCameraCapturer(usingFrontCamera) ?: return@withContext
+            val stHelper = SurfaceTextureHelper.create("PreviewThread", egl.eglBaseContext)
+            val videoSource = factory.createVideoSource(capturer.isScreencast)
+            capturer.initialize(stHelper, ctx, videoSource.capturerObserver)
+            capturer.startCapture(1280, 720, 30)
+            val videoTrack = factory.createVideoTrack("video_preview", videoSource)
 
-                // EglBase must be created before factory
-                val egl = EglBase.create()
-
-                PeerConnectionFactory.initialize(
-                    PeerConnectionFactory.InitializationOptions.builder(ctx)
-                        .createInitializationOptions()
-                )
-
-                val factory = PeerConnectionFactory.builder()
-                    .setOptions(PeerConnectionFactory.Options())
-                    .setVideoEncoderFactory(DefaultVideoEncoderFactory(egl.eglBaseContext, true, true))
-                    .setVideoDecoderFactory(DefaultVideoDecoderFactory(egl.eglBaseContext))
-                    .createPeerConnectionFactory()
-
-                val iceServers = listOf(
-                    PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer(),
-                    PeerConnection.IceServer.builder("stun:stun1.l.google.com:19302").createIceServer(),
-                    // TURN fallback for NAT traversal (open relay)
-                    PeerConnection.IceServer.builder("turn:openrelay.metered.ca:80")
-                        .setUsername("openrelayproject")
-                        .setPassword("openrelayproject")
-                        .createIceServer(),
-                )
-
-                val rtcConfig = PeerConnection.RTCConfiguration(iceServers).apply {
-                    sdpSemantics = PeerConnection.SdpSemantics.UNIFIED_PLAN
-                    iceTransportsType = PeerConnection.IceTransportsType.ALL
-                    bundlePolicy = PeerConnection.BundlePolicy.MAXBUNDLE
-                    rtcpMuxPolicy = PeerConnection.RtcpMuxPolicy.REQUIRE
-                    continualGatheringPolicy = PeerConnection.ContinualGatheringPolicy.GATHER_CONTINUALLY
+            withContext(Dispatchers.Main) {
+                if (!isAdded || peerConnectionFactory != null) {
+                    // Full init already happened — discard preview resources
+                    runCatching { capturer.stopCapture(); capturer.dispose() }
+                    runCatching { stHelper.dispose(); videoTrack.dispose() }
+                    runCatching { factory.dispose(); egl.release() }
+                    return@withContext
                 }
+                eglBase               = egl
+                peerConnectionFactory = factory
+                videoCapturer         = capturer
+                surfaceTextureHelper  = stHelper
+                localVideoTrack       = videoTrack
 
-                val pc = factory.createPeerConnection(rtcConfig, object : PeerConnection.Observer {
-                    override fun onIceCandidate(candidate: IceCandidate) {
-                        wsManager.sendCallSignal("call_ice", callId, remoteDevice,
-                            JSONObject().apply {
-                                put("data", JSONObject().apply {
-                                    put("sdpMid", candidate.sdpMid)
-                                    put("sdpMLineIndex", candidate.sdpMLineIndex)
-                                    put("candidate", candidate.sdp)
-                                })
-                            })
-                    }
-                    override fun onAddTrack(receiver: RtpReceiver, streams: Array<out MediaStream>) {
-                        val track = receiver.track()
-                        mainHandler.post {
-                            if (!isAdded) return@post
-                            if (track is VideoTrack) {
-                                remoteVideoView?.visibility = View.VISIBLE
-                                track.addSink(remoteVideoView)
-                            }
-                            if (callState != CallState.ACTIVE) {
-                                callState = CallState.ACTIVE
-                                updateUI()
-                                mainHandler.post(durationRunnable)
-                            }
-                        }
-                    }
-                    override fun onIceConnectionChange(state: PeerConnection.IceConnectionState?) {
-                        Log.d(TAG, "ICE state: $state")
-                        mainHandler.post {
-                            if (!isAdded) return@post
-                            when (state) {
-                                PeerConnection.IceConnectionState.CONNECTED,
-                                PeerConnection.IceConnectionState.COMPLETED -> {
-                                    if (callState != CallState.ACTIVE) {
-                                        callState = CallState.ACTIVE
-                                        updateUI()
-                                        mainHandler.post(durationRunnable)
-                                    }
-                                }
-                                PeerConnection.IceConnectionState.FAILED -> {
-                                    tvStatus?.text = "Connection failed"
-                                    scheduleClose(2000)
-                                }
-                                PeerConnection.IceConnectionState.DISCONNECTED -> {
-                                    if (callState == CallState.ACTIVE) {
-                                        tvStatus?.text = "Connection lost"
-                                        scheduleClose(3000)
-                                    }
-                                }
-                                else -> {}
-                            }
-                        }
-                    }
-                    override fun onSignalingChange(s: PeerConnection.SignalingState?) {}
-                    override fun onIceConnectionReceivingChange(b: Boolean) {}
-                    override fun onIceGatheringChange(s: PeerConnection.IceGatheringState?) {}
-                    override fun onIceCandidatesRemoved(c: Array<out IceCandidate>?) {}
-                    override fun onAddStream(s: MediaStream?) {}
-                    override fun onRemoveStream(s: MediaStream?) {}
-                    override fun onDataChannel(d: DataChannel?) {}
-                    override fun onRenegotiationNeeded() {}
+                localVideoView?.apply {
+                    init(egl.eglBaseContext, null)
+                    setMirror(usingFrontCamera)
+                    setEnableHardwareScaler(true)
+                    videoTrack.addSink(this)
+                    visibility = View.VISIBLE
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Preview failed: ${e.message}")
+        }
+    }
+
+    // ── PeerConnection observer ───────────────────────────────────────────
+
+    private fun makePcObserver() = object : PeerConnection.Observer {
+        override fun onIceCandidate(candidate: IceCandidate) {
+            wsManager.sendCallSignal("call_ice", callId, remoteDevice,
+                JSONObject().apply {
+                    put("data", JSONObject().apply {
+                        put("sdpMid", candidate.sdpMid)
+                        put("sdpMLineIndex", candidate.sdpMLineIndex)
+                        put("candidate", candidate.sdp)
+                    })
                 })
+        }
 
-                // Add audio track
-                val audioSource = factory.createAudioSource(MediaConstraints())
-                val audio = factory.createAudioTrack("audio0", audioSource)
-                pc?.addTrack(audio)
-
-                // Set audio mode for call
-                mainHandler.post {
-                    val am = requireContext().getSystemService(android.content.Context.AUDIO_SERVICE) as android.media.AudioManager
-                    am.mode = android.media.AudioManager.MODE_IN_COMMUNICATION
-                    am.isSpeakerphoneOn = false
-                }
-
-                // Add video track
-                var video: VideoTrack? = null
-                if (isVideo) {
-                    val cap = createCameraCapturer()
-                    if (cap != null) {
-                        val surfaceHelper = SurfaceTextureHelper.create("CaptureThread", egl.eglBaseContext)
-                        val videoSource = factory.createVideoSource(cap.isScreencast)
-                        cap.initialize(surfaceHelper, ctx, videoSource.capturerObserver)
-                        cap.startCapture(640, 480, 30)
-                        video = factory.createVideoTrack("video0", videoSource)
-                        pc?.addTrack(video)
-                        mainHandler.post {
-                            if (!isAdded) return@post
-                            localVideoView?.init(egl.eglBaseContext, null)
-                            localVideoView?.setMirror(true)
-                            localVideoView?.visibility = View.VISIBLE
-                            video?.addSink(localVideoView)
-                            remoteVideoView?.init(egl.eglBaseContext, null)
-                        }
-                        videoCapturer = cap
+        override fun onAddTrack(receiver: RtpReceiver, streams: Array<out MediaStream>) {
+            val track = receiver.track() ?: return
+            mainHandler.post {
+                if (!isAdded) return@post
+                if (track is VideoTrack) {
+                    remoteVideoView?.let { rv ->
+                        track.addSink(rv)
+                        rv.visibility = View.VISIBLE
                     }
                 }
-
-                // Commit on main thread
-                withContext(Dispatchers.Main) {
-                    eglBase = egl
-                    peerConnectionFactory = factory
-                    peerConnection = pc
-                    localAudioTrack = audio
-                    localVideoTrack = video
-
-                    // Process any signaling that arrived while we were initialising
-                    pendingOffer?.let { offer ->
-                        pendingOffer = null
-                        handleRemoteOffer(offer)
-                    }
-                }
-            } catch (e: Exception) {
-                Log.e(TAG, "WebRTC init failed", e)
-                mainHandler.post {
-                    if (isAdded) {
-                        tvStatus?.text = "Setup failed"
-                        scheduleClose(1500)
-                    }
+                if (callState != CallState.ACTIVE) {
+                    callState = CallState.ACTIVE
+                    updateUI()
+                    mainHandler.post(durationTick)
                 }
             }
         }
+
+        override fun onIceConnectionChange(state: PeerConnection.IceConnectionState?) {
+            Log.d(TAG, "ICE: $state")
+            mainHandler.post {
+                if (!isAdded) return@post
+                when (state) {
+                    PeerConnection.IceConnectionState.CONNECTED,
+                    PeerConnection.IceConnectionState.COMPLETED -> {
+                        if (callState != CallState.ACTIVE) {
+                            callState = CallState.ACTIVE
+                            updateUI()
+                            mainHandler.post(durationTick)
+                        }
+                    }
+                    PeerConnection.IceConnectionState.FAILED -> {
+                        tvStatus?.text = "Connection failed"; scheduleClose(2000)
+                    }
+                    PeerConnection.IceConnectionState.DISCONNECTED -> {
+                        if (callState == CallState.ACTIVE) tvStatus?.text = "Reconnecting…"
+                    }
+                    else -> {}
+                }
+            }
+        }
+
+        override fun onSignalingChange(s: PeerConnection.SignalingState?) {}
+        override fun onIceConnectionReceivingChange(b: Boolean) {}
+        override fun onIceGatheringChange(s: PeerConnection.IceGatheringState?) {}
+        override fun onIceCandidatesRemoved(c: Array<out IceCandidate>?) {}
+        override fun onAddStream(s: MediaStream?) {}
+        override fun onRemoveStream(s: MediaStream?) {}
+        override fun onDataChannel(d: DataChannel?) {}
+        override fun onRenegotiationNeeded() {}
     }
 
     // ── Signaling handlers ────────────────────────────────────────────────
 
-    /** Called on main thread */
     private fun handleRemoteOffer(sdpJson: String) {
-        if (peerConnection == null) {
-            // PC not ready yet — queue it
-            pendingOffer = sdpJson
-            return
-        }
+        if (peerConnection == null) { pendingOffer = sdpJson; return }
         val obj = runCatching { JSONObject(sdpJson) }.getOrNull() ?: return
         val sdp = SessionDescription(
             SessionDescription.Type.fromCanonicalForm(obj.optString("type", "offer")),
-            obj.optString("sdp", "")
-        )
-        peerConnection?.setRemoteDescription(object : SdpObserver {
-            override fun onSetSuccess() {
-                remoteDescriptionSet = true
-                // Drain buffered ICE candidates
-                val candidates = synchronized(pendingCandidates) { pendingCandidates.toList().also { pendingCandidates.clear() } }
-                candidates.forEach { applyCandidateJson(it) }
-
-                val constraints = MediaConstraints()
+            obj.optString("sdp", ""))
+        peerConnection?.setRemoteDescription(makeSdpObserver(
+            onSuccess = {
+                remoteDescSet = true
+                drainCandidates()
                 peerConnection?.createAnswer(object : SdpObserver {
                     override fun onCreateSuccess(answer: SessionDescription) {
-                        peerConnection?.setLocalDescription(object : SdpObserver {
-                            override fun onSetSuccess() {
+                        peerConnection?.setLocalDescription(makeSdpObserver(
+                            onSuccess = {
                                 wsManager.sendCallSignal("call_answer", callId, remoteDevice,
                                     JSONObject().apply {
                                         put("data", JSONObject().apply {
@@ -477,64 +545,49 @@ class CallFragment : Fragment() {
                                             put("sdp", answer.description)
                                         })
                                     })
-                            }
-                            override fun onSetFailure(e: String?) { Log.e(TAG, "setLocalDesc (answer) failed: $e") }
-                            override fun onCreateSuccess(p0: SessionDescription?) {}
-                            override fun onCreateFailure(p0: String?) {}
-                        }, answer)
+                            },
+                            onFail = { Log.e(TAG, "setLocalDesc(answer) failed: $it") }
+                        ), answer)
                     }
                     override fun onCreateFailure(e: String?) { Log.e(TAG, "createAnswer failed: $e") }
                     override fun onSetSuccess() {}
                     override fun onSetFailure(p0: String?) {}
-                }, constraints)
-            }
-            override fun onSetFailure(e: String?) { Log.e(TAG, "setRemoteDesc (offer) failed: $e") }
-            override fun onCreateSuccess(p0: SessionDescription?) {}
-            override fun onCreateFailure(p0: String?) {}
-        }, sdp)
+                }, MediaConstraints())
+            },
+            onFail = { Log.e(TAG, "setRemoteDesc(offer) failed: $it") }
+        ), sdp)
     }
 
-    /** Called on main thread */
     private fun handleRemoteAnswer(sdpJson: String) {
         if (peerConnection == null) return
         val obj = runCatching { JSONObject(sdpJson) }.getOrNull() ?: return
         val sdp = SessionDescription(
             SessionDescription.Type.fromCanonicalForm(obj.optString("type", "answer")),
-            obj.optString("sdp", "")
-        )
-        peerConnection?.setRemoteDescription(object : SdpObserver {
-            override fun onSetSuccess() {
-                remoteDescriptionSet = true
-                val candidates = synchronized(pendingCandidates) { pendingCandidates.toList().also { pendingCandidates.clear() } }
-                candidates.forEach { applyCandidateJson(it) }
-            }
-            override fun onSetFailure(e: String?) { Log.e(TAG, "setRemoteDesc (answer) failed: $e") }
-            override fun onCreateSuccess(p0: SessionDescription?) {}
-            override fun onCreateFailure(p0: String?) {}
-        }, sdp)
+            obj.optString("sdp", ""))
+        peerConnection?.setRemoteDescription(makeSdpObserver(
+            onSuccess = { remoteDescSet = true; drainCandidates() },
+            onFail    = { Log.e(TAG, "setRemoteDesc(answer) failed: $it") }
+        ), sdp)
     }
 
-    /** Called on main thread — buffer if remote desc not set yet */
-    private fun handleRemoteIce(candidateJson: String) {
-        if (remoteDescriptionSet) {
-            applyCandidateJson(candidateJson)
-        } else {
-            synchronized(pendingCandidates) { pendingCandidates.add(candidateJson) }
-        }
+    private fun handleRemoteIce(json: String) {
+        if (remoteDescSet) applyCandidate(json)
+        else synchronized(pendingCandidates) { pendingCandidates.add(json) }
     }
 
-    private fun applyCandidateJson(candidateJson: String) {
+    private fun drainCandidates() {
+        val list = synchronized(pendingCandidates) { pendingCandidates.toList().also { pendingCandidates.clear() } }
+        list.forEach { applyCandidate(it) }
+    }
+
+    private fun applyCandidate(json: String) {
         try {
-            val obj = JSONObject(candidateJson)
-            val candidate = IceCandidate(
+            val obj = JSONObject(json)
+            peerConnection?.addIceCandidate(IceCandidate(
                 obj.optString("sdpMid", ""),
                 obj.optInt("sdpMLineIndex", 0),
-                obj.optString("candidate", "")
-            )
-            peerConnection?.addIceCandidate(candidate)
-        } catch (e: Exception) {
-            Log.e(TAG, "addIceCandidate failed", e)
-        }
+                obj.optString("candidate", "")))
+        } catch (e: Exception) { Log.e(TAG, "addIceCandidate: ${e.message}") }
     }
 
     // ── Controls ──────────────────────────────────────────────────────────
@@ -542,43 +595,68 @@ class CallFragment : Fragment() {
     private fun toggleMute() {
         isMuted = !isMuted
         localAudioTrack?.setEnabled(!isMuted)
-        btnMute?.alpha = if (isMuted) 0.5f else 1.0f
+        btnMute?.alpha = if (isMuted) 0.4f else 1.0f
         Toast.makeText(requireContext(), if (isMuted) "Muted" else "Unmuted", Toast.LENGTH_SHORT).show()
     }
 
     private fun toggleSpeaker() {
         isSpeakerOn = !isSpeakerOn
-        val am = requireContext().getSystemService(android.content.Context.AUDIO_SERVICE) as android.media.AudioManager
+        val am = requireContext().getSystemService(android.content.Context.AUDIO_SERVICE) as AudioManager
         am.isSpeakerphoneOn = isSpeakerOn
-        btnSpeaker?.alpha = if (isSpeakerOn) 1.0f else 0.5f
+        btnSpeaker?.alpha = if (isSpeakerOn) 1.0f else 0.4f
     }
 
-    private fun checkAudioPermission(): Boolean {
-        if (ContextCompat.checkSelfPermission(requireContext(), Manifest.permission.RECORD_AUDIO)
-            != PackageManager.PERMISSION_GRANTED) {
-            mainHandler.post {
-                if (isAdded) {
-                    tvStatus?.text = "Microphone permission required"
-                    scheduleClose(2000)
-                }
+    private fun toggleCamera() {
+        cameraEnabled = !cameraEnabled
+        localVideoTrack?.setEnabled(cameraEnabled)
+        btnCameraOff?.alpha = if (cameraEnabled) 1.0f else 0.4f
+        localVideoView?.visibility = if (cameraEnabled) View.VISIBLE else View.INVISIBLE
+    }
+
+    private fun switchCamera() {
+        (videoCapturer as? CameraVideoCapturer)?.switchCamera(object : CameraVideoCapturer.CameraSwitchHandler {
+            override fun onCameraSwitchDone(isFront: Boolean) {
+                usingFrontCamera = isFront
+                mainHandler.post { localVideoView?.setMirror(isFront) }
             }
-            return false
-        }
-        return true
+            override fun onCameraSwitchError(e: String?) { Log.e(TAG, "switchCamera: $e") }
+        })
     }
 
-    private fun createCameraCapturer(): CameraVideoCapturer? {
-        return try {
-            val enumerator = Camera2Enumerator(requireContext())
-            enumerator.deviceNames.firstOrNull { enumerator.isFrontFacing(it) }?.let { enumerator.createCapturer(it, null) }
-                ?: enumerator.deviceNames.firstOrNull()?.let { enumerator.createCapturer(it, null) }
-        } catch (e: Exception) {
-            Log.e(TAG, "Camera capturer failed", e)
-            null
+    /** Minimize the call — hide this fragment and show floating bar in MainActivity */
+    private fun minimizeCall() {
+        view?.visibility = View.GONE
+        (activity as? MainActivity)?.showCallMinimizedBar(
+            name = remoteUsername,
+            durationProvider = { durationSec },
+            onRestore = { view?.visibility = View.VISIBLE },
+            onEnd = { endCall() }
+        )
+    }
+
+    /** Swap remote (fullscreen) and local (PiP) video surfaces */
+    private var videoSwapped = false
+    private fun swapVideoViews() {
+        if (!isVideo || remoteVideoView == null || localVideoView == null) return
+        videoSwapped = !videoSwapped
+
+        // Swap layout params: make local full-screen and remote PiP (or vice-versa)
+        val remoteParams = remoteVideoView!!.layoutParams
+        val localParams  = localVideoView!!.layoutParams
+        remoteVideoView!!.layoutParams = localParams
+        localVideoView!!.layoutParams  = remoteParams
+
+        // Swap z-order so whichever is "main" is behind the PiP
+        if (videoSwapped) {
+            remoteVideoView!!.setZOrderMediaOverlay(false)
+            localVideoView!!.setZOrderMediaOverlay(true)
+        } else {
+            remoteVideoView!!.setZOrderMediaOverlay(false)
+            localVideoView!!.setZOrderMediaOverlay(false)
         }
     }
 
-    // ── UI ────────────────────────────────────────────────────────────────
+    // ── UI update ─────────────────────────────────────────────────────────
 
     private fun updateUI() {
         when (callState) {
@@ -587,28 +665,30 @@ class CallFragment : Fragment() {
                 btnAccept?.visibility = View.VISIBLE
                 btnMute?.visibility = View.GONE
                 btnSpeaker?.visibility = View.GONE
+                btnCameraOff?.visibility = View.GONE
+                btnSwitchCamera?.visibility = View.GONE
             }
-            CallState.RINGING_OUT -> {
-                tvStatus?.text = "Calling…"
+            CallState.RINGING_OUT, CallState.CONNECTING -> {
+                tvStatus?.text = if (callState == CallState.CONNECTING) "Connecting…" else "Calling…"
                 btnAccept?.visibility = View.GONE
                 btnMute?.visibility = View.GONE
                 btnSpeaker?.visibility = View.GONE
-            }
-            CallState.CONNECTING -> {
-                tvStatus?.text = "Connecting…"
-                btnAccept?.visibility = View.GONE
-                btnMute?.visibility = View.GONE
-                btnSpeaker?.visibility = View.GONE
+                btnCameraOff?.visibility = View.GONE
+                btnSwitchCamera?.visibility = View.GONE
             }
             CallState.ACTIVE -> {
                 btnAccept?.visibility = View.GONE
                 btnMute?.visibility = View.VISIBLE
                 btnSpeaker?.visibility = View.VISIBLE
+                btnCameraOff?.visibility = if (isVideo) View.VISIBLE else View.GONE
+                btnSwitchCamera?.visibility = if (isVideo) View.VISIBLE else View.GONE
             }
             CallState.ENDED -> {
                 btnAccept?.visibility = View.GONE
                 btnMute?.visibility = View.GONE
                 btnSpeaker?.visibility = View.GONE
+                btnCameraOff?.visibility = View.GONE
+                btnSwitchCamera?.visibility = View.GONE
             }
         }
     }
@@ -617,65 +697,82 @@ class CallFragment : Fragment() {
 
     // ── Lifecycle / cleanup ───────────────────────────────────────────────
 
-    /** Schedule close — always safe, runs on main thread */
     private fun scheduleClose(delayMs: Long = 1500) {
         callState = CallState.ENDED
         updateUI()
+        mainHandler.removeCallbacks(durationTick)
         mainHandler.postDelayed({ safeCleanupAndClose() }, delayMs)
     }
 
-    /** Cleanup resources then pop the fragment — always on main thread */
-    private fun safeCleanupAndClose() {
-        mainHandler.post {
-            cleanup()
-            safeClose()
-        }
-    }
+    private fun safeCleanupAndClose() = mainHandler.post { cleanup(); safeClose() }
 
     private fun safeClose() {
         if (!isAdded) return
-        try { parentFragmentManager.popBackStack() } catch (e: Exception) { Log.e(TAG, "popBackStack failed", e) }
+        try { parentFragmentManager.popBackStack() } catch (e: Exception) { Log.e(TAG, "popBackStack: ${e.message}") }
     }
 
     private fun cleanup() {
-        mainHandler.removeCallbacks(durationRunnable)
+        mainHandler.removeCallbacks(durationTick)
         synchronized(pendingCandidates) { pendingCandidates.clear() }
-        pendingOffer = null
-        remoteDescriptionSet = false
+        pendingOffer  = null
+        remoteDescSet = false
 
-        try { videoCapturer?.stopCapture() } catch (_: Exception) {}
-        try { videoCapturer?.dispose() } catch (_: Exception) {}
-        videoCapturer = null
+        runCatching { videoCapturer?.stopCapture() }
+        runCatching { videoCapturer?.dispose() }
+        runCatching { surfaceTextureHelper?.dispose() }
+        videoCapturer       = null
+        surfaceTextureHelper= null
 
-        try { localAudioTrack?.dispose() } catch (_: Exception) {}
-        try { localVideoTrack?.dispose() } catch (_: Exception) {}
+        runCatching { localAudioTrack?.dispose() }
+        runCatching { localVideoTrack?.dispose() }
         localAudioTrack = null
         localVideoTrack = null
 
-        try { peerConnection?.close() } catch (_: Exception) {}
+        runCatching { peerConnection?.close() }
         peerConnection = null
 
-        try { peerConnectionFactory?.dispose() } catch (_: Exception) {}
+        runCatching { localVideoView?.release() }
+        runCatching { remoteVideoView?.release() }
+
+        runCatching { peerConnectionFactory?.dispose() }
         peerConnectionFactory = null
 
-        try { localVideoView?.release() } catch (_: Exception) {}
-        try { remoteVideoView?.release() } catch (_: Exception) {}
-
-        try { eglBase?.release() } catch (_: Exception) {}
+        runCatching { eglBase?.release() }
         eglBase = null
 
-        // Restore audio mode
-        try {
-            val am = requireContext().getSystemService(android.content.Context.AUDIO_SERVICE) as android.media.AudioManager
-            am.mode = android.media.AudioManager.MODE_NORMAL
+        runCatching {
+            val am = requireContext().getSystemService(android.content.Context.AUDIO_SERVICE) as AudioManager
+            am.mode = AudioManager.MODE_NORMAL
             am.isSpeakerphoneOn = false
-        } catch (_: Exception) {}
+            if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.O) {
+                @Suppress("DEPRECATION")
+                am.abandonAudioFocus(null)
+            }
+        }
     }
 
-    override fun onDestroyView() {
-        super.onDestroyView()
-        // Always clean up on destroy to prevent ANR when system kills the fragment
-        cleanup()
-        mainHandler.removeCallbacksAndMessages(null)
-    }
+    // ── Helpers ───────────────────────────────────────────────────────────
+
+    private fun hasMicPermission() =
+        ContextCompat.checkSelfPermission(requireContext(), Manifest.permission.RECORD_AUDIO) ==
+                PackageManager.PERMISSION_GRANTED
+
+    private fun hasCameraPermission() =
+        ContextCompat.checkSelfPermission(requireContext(), Manifest.permission.CAMERA) ==
+                PackageManager.PERMISSION_GRANTED
+
+    private fun makeCameraCapturer(useFront: Boolean): CameraVideoCapturer? = try {
+        val e = Camera2Enumerator(requireContext())
+        e.deviceNames.firstOrNull { if (useFront) e.isFrontFacing(it) else e.isBackFacing(it) }
+            ?.let { e.createCapturer(it, null) }
+            ?: e.deviceNames.firstOrNull()?.let { e.createCapturer(it, null) }
+    } catch (e: Exception) { Log.e(TAG, "makeCameraCapturer: ${e.message}"); null }
+
+    private fun makeSdpObserver(onSuccess: () -> Unit = {}, onFail: (String?) -> Unit = {}) =
+        object : SdpObserver {
+            override fun onSetSuccess()                        { onSuccess() }
+            override fun onSetFailure(e: String?)              { onFail(e) }
+            override fun onCreateSuccess(s: SessionDescription?) {}
+            override fun onCreateFailure(e: String?)           {}
+        }
 }
