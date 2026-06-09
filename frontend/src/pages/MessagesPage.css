@@ -218,3 +218,33 @@
   background: var(--primary-light, rgba(99,102,241,0.12));
   transform: scale(1.08);
 }
+
+/* ── Call buttons in chat header ── */
+.msg-header-actions {
+  margin-left: auto;
+  display: flex;
+  gap: 0.4rem;
+  align-items: center;
+}
+
+.msg-call-btn {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 1px solid var(--border, rgba(148,163,184,0.28));
+  background: var(--card-bg, rgba(255,255,255,0.82));
+  cursor: pointer;
+  font-size: 1rem;
+  display: grid;
+  place-items: center;
+  transition: background 0.15s, transform 0.1s;
+}
+
+.msg-call-btn:hover {
+  background: rgba(99, 102, 241, 0.12);
+  transform: scale(1.08);
+}
+
+.msg-call-btn:active {
+  transform: scale(0.95);
+}

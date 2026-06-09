@@ -15,14 +15,13 @@ export default function CallModal({ callService, state, callInfo }: CallModalPro
   const [cameraOff, setCameraOff] = useState(false);
   const [duration, setDuration] = useState(0);
 
-  // Attach media streams to video elements
+  // Attach media streams to video elements when call goes active
   useEffect(() => {
-    if (state === 'active') {
-      const local = callService.getLocalStream();
-      const remote = callService.getRemoteStream();
-      if (localVideoRef.current && local) localVideoRef.current.srcObject = local;
-      if (remoteVideoRef.current && remote) remoteVideoRef.current.srcObject = remote;
-    }
+    if (state !== 'active') return;
+    const local = callService.getLocalStream();
+    const remote = callService.getRemoteStream();
+    if (localVideoRef.current && local) localVideoRef.current.srcObject = local;
+    if (remoteVideoRef.current && remote) remoteVideoRef.current.srcObject = remote;
   }, [state, callService]);
 
   // Call duration timer

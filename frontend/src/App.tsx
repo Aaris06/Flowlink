@@ -20,6 +20,7 @@ import AuthPage from './pages/AuthPage';
 import RemoteAccess from './components/RemoteAccess';
 import DownloadPage from './components/DownloadPage';
 import CallModal from './components/CallModal';
+import CallsPage from './pages/CallsPage';
 import { CallService, CallState, CallInfo } from './services/CallService';
 import './App.css';
 
@@ -527,6 +528,7 @@ function Shell() {
     { to: '/', icon: 'home', label: 'Overview' },
     { to: '/devices', icon: 'devices', label: 'My Devices' },
     { to: '/messages', icon: 'chat', label: 'Messages', badge: chatUnread },
+    { to: '/calls', icon: 'call', label: 'Calls' },
     { to: '/files', icon: 'files', label: 'Files' },
     { to: '/activity', icon: 'activity', label: 'Activity' },
     { to: '/study', icon: 'study', label: 'Study' },
@@ -537,6 +539,7 @@ function Shell() {
   const pageTitles: Record<string, { title: string; sub: string }> = {
     '/': { title: `Welcome back, ${username || 'User'}! 👋`, sub: 'All your devices are in sync and ready to go.' },
     '/devices': { title: 'My Devices', sub: 'Manage and control your connected devices.' },
+    '/calls': { title: 'Calls', sub: 'Audio and video calls with connected devices.' },
     '/groups': { title: 'Groups', sub: 'Organize devices into groups for broadcast.' },
     '/messages': { title: 'Messages', sub: 'Chat with connected devices.' },
     '/files': { title: 'Files', sub: 'Shared files across your session.' },
@@ -680,6 +683,7 @@ function Shell() {
           <Routes>
             <Route path="/" element={<OverviewPage ctx={ctx} />} />
             <Route path="/devices" element={<MyDevicesPage ctx={ctx} />} />
+            <Route path="/calls" element={<CallsPage ctx={ctx} />} />
             <Route path="/groups" element={<GroupsPage ctx={ctx} />} />
             <Route path="/messages" element={<MessagesPage ctx={ctx} />} />
             <Route path="/files" element={<FilesPage ctx={ctx} />} />
