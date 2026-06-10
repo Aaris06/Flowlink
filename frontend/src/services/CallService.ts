@@ -97,7 +97,12 @@ export class CallService {
       const stream = await this.getUserMedia(this.currentCall.isVideo);
       this.localStream = stream;
       this.pc = this.createPeerConnection();
-      stream.getTracks().forEach(t => this.pc!.addTrack(t, stream));
+
+      // Add tracks and log
+      stream.getTracks().forEach(t => {
+        this.pc!.addTrack(t, stream);
+        console.log(`[CallService] callee addTrack: kind=${t.kind} enabled=${t.enabled} readyState=${t.readyState}`);
+      });
 
       this.send({
         type: 'call_accept',
@@ -218,13 +223,27 @@ export class CallService {
           const stream = await this.getUserMedia(this.currentCall.isVideo);
           this.localStream = stream;
           this.pc = this.createPeerConnection();
-          stream.getTracks().forEach(t => this.pc!.addTrack(t, stream));
+
+          // Add each track explicitly and log for diagnosis
+          stream.getTracks().forEach(t => {
+            this.pc!.addTrack(t, stream);
+            console.log(`[CallService] caller addTrack: kind=${t.kind} enabled=${t.enabled} readyState=${t.readyState}`);
+          });
+
+          // Force sendrecv direction on all transceivers so audio actually flows both ways
+          this.pc.getTransceivers().forEach(tr => {
+            if (tr.direction === 'sendonly' || tr.direction === 'inactive') {
+              tr.direction = 'sendrecv';
+            }
+          });
 
           const offer = await this.pc.createOffer({
             offerToReceiveAudio: true,
             offerToReceiveVideo: this.currentCall.isVideo,
           });
           await this.pc.setLocalDescription(offer);
+          console.log('[CallService] caller sending offer, SDP audio direction check:',
+            offer.sdp?.match(/a=(sendrecv|sendonly|recvonly|inactive)/g));
           this.send({ type: 'call_offer', payload: { callId: this.currentCall.callId, toDevice: this.currentCall.remoteDeviceId, data: offer } });
         } catch (err) {
           console.error('[CallService] call_accept handler failed:', err);
@@ -293,8 +312,20 @@ export class CallService {
     this.remoteDescSet = true;
     this.drainCandidates();
 
+    // After setting remote description, ensure all transceivers are sendrecv
+    // so this side actually sends audio/video back to the caller
+    this.pc.getTransceivers().forEach(tr => {
+      if (tr.direction === 'recvonly') {
+        tr.direction = 'sendrecv';
+      } else if (tr.direction === 'inactive') {
+        tr.direction = 'sendrecv';
+      }
+    });
+
     const answer = await this.pc.createAnswer();
     await this.pc.setLocalDescription(answer);
+    console.log('[CallService] callee sending answer, SDP audio direction check:',
+      answer.sdp?.match(/a=(sendrecv|sendonly|recvonly|inactive)/g));
     this.send({
       type: 'call_answer',
       payload: { callId: this.currentCall!.callId, toDevice: this.currentCall!.remoteDeviceId, data: answer },
@@ -361,23 +392,15 @@ export class CallService {
   }
 
   private async getUserMedia(video: boolean): Promise<MediaStream> {
-    // Try with ideal constraints first, fall back to basic audio if denied
     let stream: MediaStream;
+
+    // Step 1: try with processing constraints (no invalid sampleRate/channelCount)
     try {
       stream = await navigator.mediaDevices.getUserMedia({
         audio: {
           echoCancellation: true,
           noiseSuppression: true,
           autoGainControl: true,
-          channelCount: 1,
-          sampleRate: 48000,
-          // Chrome-specific legacy constraints (belt-and-suspenders)
-          // @ts-ignore
-          googEchoCancellation: true,
-          // @ts-ignore
-          googNoiseSuppression: true,
-          // @ts-ignore
-          googAutoGainControl: true,
         },
         video: video
           ? { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user' }
@@ -385,9 +408,22 @@ export class CallService {
       });
     } catch (err) {
       console.warn('[CallService] getUserMedia with constraints failed, retrying basic:', err);
-      // Retry with minimal constraints (some browsers reject advanced ones)
-      stream = await navigator.mediaDevices.getUserMedia({ audio: true, video });
+      // Step 2: absolute minimum — just get any audio
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ audio: true, video });
+      } catch (err2) {
+        console.error('[CallService] getUserMedia basic also failed:', err2);
+        throw err2;
+      }
     }
+
+    // Ensure all audio tracks are explicitly enabled — some browsers give
+    // back a track with enabled=false when constraints were partially rejected
+    stream.getAudioTracks().forEach(t => {
+      t.enabled = true;
+      console.log(`[CallService] audio track: id=${t.id} enabled=${t.enabled} muted=${t.muted} readyState=${t.readyState}`);
+    });
+
     if (this.onLocalTrackCallback) this.onLocalTrackCallback(stream);
     return stream;
   }

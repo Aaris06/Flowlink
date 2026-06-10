@@ -237,20 +237,14 @@
   position: fixed;
   bottom: 90px;
   right: 20px;
-  width: 88px;
-  height: 88px;
-  border-radius: 50%;
-  background: linear-gradient(145deg, #1e1b4b, #312e81);
-  box-shadow: 0 8px 32px rgba(0,0,0,0.55), 0 0 0 2px rgba(99,102,241,0.4);
+  /* Slightly larger than the circle so the ✕ button fits without clipping */
+  width: 100px;
+  height: 100px;
   cursor: grab;
   z-index: 99999;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  overflow: hidden;
   animation: bubbleIn 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
   user-select: none;
+  /* NO overflow:hidden here — that would clip the end button */
 }
 .call-bubble:active { cursor: grabbing; }
 
@@ -259,11 +253,28 @@
   to   { transform: scale(1); opacity: 1; }
 }
 
-/* Pulse ring animation */
-.call-bubble::before {
+/* The actual visible circle — this is what clips content */
+.call-bubble-circle {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  width: 88px;
+  height: 88px;
+  border-radius: 50%;
+  background: linear-gradient(145deg, #1e1b4b, #312e81);
+  box-shadow: 0 8px 32px rgba(0,0,0,0.55), 0 0 0 2px rgba(99,102,241,0.4);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden; /* clips video/avatar to circle shape */
+}
+
+/* Pulse ring — on the circle, not the outer div */
+.call-bubble-circle::before {
   content: '';
   position: absolute;
-  inset: -4px;
+  inset: -5px;
   border-radius: 50%;
   border: 2px solid rgba(99,102,241,0.5);
   animation: bubblePulse 1.8s ease-in-out infinite;
@@ -271,7 +282,7 @@
 }
 @keyframes bubblePulse {
   0%, 100% { transform: scale(1); opacity: 0.6; }
-  50%       { transform: scale(1.1); opacity: 0; }
+  50%       { transform: scale(1.12); opacity: 0; }
 }
 
 .call-bubble-video {
@@ -280,7 +291,6 @@
   width: 100%;
   height: 100%;
   object-fit: cover;
-  border-radius: 50%;
 }
 
 .call-bubble-avatar {
@@ -293,17 +303,21 @@
   font-weight: 700;
   display: grid;
   place-items: center;
-  margin-bottom: 2px;
+  flex-shrink: 0;
 }
 
 .call-bubble-info {
   position: absolute;
-  bottom: 6px;
-  left: 0; right: 0;
+  bottom: 5px;
+  left: 0;
+  right: 0;
   display: flex;
   flex-direction: column;
   align-items: center;
   z-index: 2;
+  background: linear-gradient(to top, rgba(0,0,0,0.6), transparent);
+  padding-top: 10px;
+  padding-bottom: 4px;
 }
 
 .call-bubble-name {
@@ -314,33 +328,36 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  line-height: 1.2;
 }
 
 .call-bubble-timer {
   font-size: 9px;
-  color: rgba(255,255,255,0.75);
-  font-weight: 500;
+  color: rgba(255,255,255,0.85);
+  font-weight: 600;
+  letter-spacing: 0.3px;
 }
 
-/* End call button on bubble — top-right corner */
+/* End call button — top-right of the OUTER div, fully visible */
 .call-bubble-end {
   position: absolute;
-  top: -2px;
-  right: -2px;
-  width: 26px;
-  height: 26px;
+  top: 0;
+  right: 0;
+  width: 28px;
+  height: 28px;
   border-radius: 50%;
-  border: none;
+  border: 2px solid #fff;
   background: #ef4444;
   color: #fff;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
   cursor: pointer;
-  z-index: 3;
+  z-index: 10;
   display: grid;
   place-items: center;
-  box-shadow: 0 2px 8px rgba(239,68,68,0.5);
-  transition: transform 0.15s;
+  box-shadow: 0 2px 8px rgba(239,68,68,0.6);
+  transition: transform 0.15s, background 0.15s;
+  line-height: 1;
 }
-.call-bubble-end:hover { transform: scale(1.15); }
+.call-bubble-end:hover { background: #dc2626; transform: scale(1.15); }
 .call-bubble-end:active { transform: scale(0.9); }

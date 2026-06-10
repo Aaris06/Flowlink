@@ -119,30 +119,47 @@ export default function CallModal({ callService, state, callInfo }: CallModalPro
   const fmt = (s: number) =>
     `${Math.floor(s / 60).toString().padStart(2, '0')}:${(s % 60).toString().padStart(2, '0')}`;
 
-  // ── Bubble drag ────────────────────────────────────────────────────────
+  // ── Bubble drag — with viewport clamping ─────────────────────────────
   const onBubbleMouseDown = (e: React.MouseEvent) => {
+    // Don't start drag when clicking the end-call button
+    if ((e.target as HTMLElement).closest('.call-bubble-end')) return;
     const el = bubbleRef.current;
     if (!el) return;
     const rect = el.getBoundingClientRect();
-    dragState.current = { dragging: true, startX: e.clientX, startY: e.clientY, origX: rect.left, origY: rect.top };
+    dragState.current = {
+      dragging: true,
+      startX: e.clientX,
+      startY: e.clientY,
+      origX: rect.left,
+      origY: rect.top,
+    };
     e.preventDefault();
   };
 
   useEffect(() => {
+    const BUBBLE_SIZE = 100; // slightly larger than 88dp to give safe margin
     const onMove = (e: MouseEvent) => {
       const ds = dragState.current;
       if (!ds.dragging || !bubbleRef.current) return;
       const dx = e.clientX - ds.startX;
       const dy = e.clientY - ds.startY;
-      bubbleRef.current.style.left = `${ds.origX + dx}px`;
-      bubbleRef.current.style.top  = `${ds.origY + dy}px`;
+      const rawX = ds.origX + dx;
+      const rawY = ds.origY + dy;
+      // Clamp within viewport, leaving at least 10px on every edge
+      const clampedX = Math.min(Math.max(rawX, 10), window.innerWidth  - BUBBLE_SIZE - 10);
+      const clampedY = Math.min(Math.max(rawY, 10), window.innerHeight - BUBBLE_SIZE - 10);
+      bubbleRef.current.style.left   = `${clampedX}px`;
+      bubbleRef.current.style.top    = `${clampedY}px`;
       bubbleRef.current.style.right  = 'auto';
       bubbleRef.current.style.bottom = 'auto';
     };
     const onUp = () => { dragState.current.dragging = false; };
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);
-    return () => { window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); };
+    return () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
   }, []);
 
   if (state === 'idle' || !callInfo) return null;
@@ -165,25 +182,29 @@ export default function CallModal({ callService, state, callInfo }: CallModalPro
         {/* Always-present audio even when minimized */}
         <audio ref={attachRemoteAudio} autoPlay playsInline style={{ display: 'none' }} />
 
-        {/* Video preview inside bubble for video calls */}
-        {showRemoteVideo && (
-          <video ref={attachRemoteVideo} className="call-bubble-video" autoPlay playsInline />
-        )}
+        {/* Circle clipping wrapper — overflow:hidden lives here, NOT on the outer div */}
+        <div className="call-bubble-circle">
+          {/* Video preview inside bubble for video calls */}
+          {showRemoteVideo && (
+            <video ref={attachRemoteVideo} className="call-bubble-video" autoPlay playsInline />
+          )}
 
-        {/* Avatar shown for audio calls */}
-        {!showRemoteVideo && (
-          <div className="call-bubble-avatar">{callInfo.remoteUsername[0]?.toUpperCase()}</div>
-        )}
+          {/* Avatar shown for audio calls */}
+          {!showRemoteVideo && (
+            <div className="call-bubble-avatar">{callInfo.remoteUsername[0]?.toUpperCase()}</div>
+          )}
 
-        {/* Status row */}
-        <div className="call-bubble-info">
-          <span className="call-bubble-name">{callInfo.remoteUsername}</span>
-          <span className="call-bubble-timer">{state === 'active' ? fmt(duration) : 'Calling…'}</span>
+          {/* Bottom scrim + timer */}
+          <div className="call-bubble-info">
+            <span className="call-bubble-name">{callInfo.remoteUsername}</span>
+            <span className="call-bubble-timer">{state === 'active' ? fmt(duration) : 'Calling…'}</span>
+          </div>
         </div>
 
-        {/* End call button — positioned top-right of bubble */}
+        {/* End call button — outside the circle so it's never clipped */}
         <button
           className="call-bubble-end"
+          onMouseDown={(e) => e.stopPropagation()}
           onClick={(e) => { e.stopPropagation(); callService.endCall(); }}
           title="End call"
         >✕</button>
