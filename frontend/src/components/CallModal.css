@@ -209,3 +209,138 @@
   line-height: 1;
   user-select: none;
 }
+
+/* ── Minimize button ── */
+.call-btn-minimize {
+  position: absolute;
+  top: 0.75rem;
+  right: 0.75rem;
+  z-index: 10;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: none;
+  cursor: pointer;
+  background: rgba(255, 255, 255, 0.18);
+  color: #fff;
+  font-size: 1rem;
+  display: grid;
+  place-items: center;
+  transition: background 0.15s, transform 0.15s;
+  backdrop-filter: blur(4px);
+}
+.call-btn-minimize:hover { background: rgba(255,255,255,0.3); transform: scale(1.08); }
+.call-btn-minimize:active { transform: scale(0.93); }
+
+/* ── Minimized floating bubble ── */
+.call-bubble {
+  position: fixed;
+  bottom: 90px;
+  right: 20px;
+  width: 88px;
+  height: 88px;
+  border-radius: 50%;
+  background: linear-gradient(145deg, #1e1b4b, #312e81);
+  box-shadow: 0 8px 32px rgba(0,0,0,0.55), 0 0 0 2px rgba(99,102,241,0.4);
+  cursor: grab;
+  z-index: 99999;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  animation: bubbleIn 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  user-select: none;
+}
+.call-bubble:active { cursor: grabbing; }
+
+@keyframes bubbleIn {
+  from { transform: scale(0); opacity: 0; }
+  to   { transform: scale(1); opacity: 1; }
+}
+
+/* Pulse ring animation */
+.call-bubble::before {
+  content: '';
+  position: absolute;
+  inset: -4px;
+  border-radius: 50%;
+  border: 2px solid rgba(99,102,241,0.5);
+  animation: bubblePulse 1.8s ease-in-out infinite;
+  pointer-events: none;
+}
+@keyframes bubblePulse {
+  0%, 100% { transform: scale(1); opacity: 0.6; }
+  50%       { transform: scale(1.1); opacity: 0; }
+}
+
+.call-bubble-video {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 50%;
+}
+
+.call-bubble-avatar {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #6366f1, #8b5cf6);
+  color: #fff;
+  font-size: 1.25rem;
+  font-weight: 700;
+  display: grid;
+  place-items: center;
+  margin-bottom: 2px;
+}
+
+.call-bubble-info {
+  position: absolute;
+  bottom: 6px;
+  left: 0; right: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  z-index: 2;
+}
+
+.call-bubble-name {
+  font-size: 8px;
+  color: #fff;
+  font-weight: 600;
+  max-width: 72px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.call-bubble-timer {
+  font-size: 9px;
+  color: rgba(255,255,255,0.75);
+  font-weight: 500;
+}
+
+/* End call button on bubble — top-right corner */
+.call-bubble-end {
+  position: absolute;
+  top: -2px;
+  right: -2px;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: none;
+  background: #ef4444;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  cursor: pointer;
+  z-index: 3;
+  display: grid;
+  place-items: center;
+  box-shadow: 0 2px 8px rgba(239,68,68,0.5);
+  transition: transform 0.15s;
+}
+.call-bubble-end:hover { transform: scale(1.15); }
+.call-bubble-end:active { transform: scale(0.9); }

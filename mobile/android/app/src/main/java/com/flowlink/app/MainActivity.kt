@@ -1537,4 +1537,155 @@ class MainActivity : AppCompatActivity(), UsernameDialogFragment.UsernameDialogL
             }
         }
     }
+
+    // ── Floating call bubble ───────────────────────────────────────────────
+
+    private var callBubbleView: android.view.View? = null
+
+    /** Attach the floating minimized call bubble to the window decor */
+    @android.annotation.SuppressLint("ClickableViewAccessibility")
+    fun showCallBubble() {
+        if (callBubbleView != null) return                        // already showing
+        if (!com.flowlink.app.service.CallSession.isActive) return
+
+        val decor = window.decorView as? android.widget.FrameLayout ?: return
+        val bubble = layoutInflater.inflate(R.layout.overlay_call_minimized, decor, false)
+
+        // Populate
+        val avatarTv = bubble.findViewById<android.widget.TextView>(R.id.bubble_avatar)
+        val timerTv  = bubble.findViewById<android.widget.TextView>(R.id.bubble_timer)
+        val endBtn   = bubble.findViewById<android.view.View>(R.id.bubble_btn_end)
+        val videoSv  = bubble.findViewById<org.webrtc.SurfaceViewRenderer?>(R.id.bubble_video)
+        val audioBg  = bubble.findViewById<android.view.View?>(R.id.bubble_audio_bg)
+
+        avatarTv.text = com.flowlink.app.service.CallSession.remoteUsername
+            .firstOrNull()?.uppercaseChar()?.toString() ?: "?"
+        timerTv.text  = if (com.flowlink.app.service.CallSession.state ==
+            com.flowlink.app.service.CallSession.State.ACTIVE)
+            "%02d:%02d".format(com.flowlink.app.service.CallSession.durationSec / 60,
+                com.flowlink.app.service.CallSession.durationSec % 60)
+        else "Calling…"
+
+        // Show local video preview inside bubble for video calls
+        if (com.flowlink.app.service.CallSession.isVideo) {
+            val egl    = com.flowlink.app.service.CallSession.eglBase
+            val vTrack = com.flowlink.app.service.CallSession.localVideoTrack
+            if (egl != null && vTrack != null && videoSv != null) {
+                runCatching {
+                    videoSv.init(egl.eglBaseContext, null)
+                    videoSv.setMirror(com.flowlink.app.service.CallSession.usingFrontCamera)
+                    videoSv.setEnableHardwareScaler(true)
+                    vTrack.addSink(videoSv)
+                    videoSv.visibility = android.view.View.VISIBLE
+                    audioBg?.visibility = android.view.View.GONE
+                }
+            }
+        }
+
+        // End call button
+        endBtn.setOnClickListener {
+            webSocketManager.sendCallSignal(
+                "call_end",
+                com.flowlink.app.service.CallSession.callId,
+                com.flowlink.app.service.CallSession.remoteDevice
+            )
+            hideBubbleAndRestoreIfNeeded()
+            com.flowlink.app.service.CallSession.cleanup()
+            runOnUiThread {
+                val am = getSystemService(AUDIO_SERVICE) as android.media.AudioManager
+                am.mode = android.media.AudioManager.MODE_NORMAL
+                am.isSpeakerphoneOn = false
+                volumeControlStream = android.media.AudioManager.USE_DEFAULT_STREAM_TYPE
+            }
+        }
+
+        // Tap bubble body → restore call fragment
+        bubble.setOnClickListener { restoreCallFromBubble() }
+
+        // Draggable
+        var startRawX = 0f; var startRawY = 0f
+        var origX = 0f;     var origY = 0f
+        var isDragging = false
+        bubble.setOnTouchListener { v, event ->
+            when (event.action) {
+                android.view.MotionEvent.ACTION_DOWN -> {
+                    startRawX = event.rawX; startRawY = event.rawY
+                    origX = v.x; origY = v.y; isDragging = false; false
+                }
+                android.view.MotionEvent.ACTION_MOVE -> {
+                    val dx = event.rawX - startRawX
+                    val dy = event.rawY - startRawY
+                    if (!isDragging && (Math.abs(dx) > 8 || Math.abs(dy) > 8)) isDragging = true
+                    if (isDragging) { v.x = origX + dx; v.y = origY + dy; true }
+                    else false
+                }
+                android.view.MotionEvent.ACTION_UP -> {
+                    if (!isDragging) {
+                        // Snap to nearest edge for a cleaner look
+                        val parentW = decor.width
+                        val midX = parentW / 2f
+                        v.animate().x(if (v.x + v.width / 2f < midX) 16f
+                                      else parentW - v.width - 16f)
+                            .setDuration(200).start()
+                    }
+                    false
+                }
+                else -> false
+            }
+        }
+
+        // Initial position — bottom-left, above bottom nav
+        val params = android.widget.FrameLayout.LayoutParams(
+            android.widget.FrameLayout.LayoutParams.WRAP_CONTENT,
+            android.widget.FrameLayout.LayoutParams.WRAP_CONTENT)
+        decor.addView(bubble, params)
+
+        bubble.post {
+            bubble.x = 24f
+            bubble.y = (decor.height - bubble.height - 180).toFloat().coerceAtLeast(80f)
+            // Pop-in animation
+            bubble.scaleX = 0f; bubble.scaleY = 0f; bubble.alpha = 0f
+            bubble.animate().scaleX(1f).scaleY(1f).alpha(1f).setDuration(280)
+                .setInterpolator(android.view.animation.OvershootInterpolator(1.4f)).start()
+        }
+
+        callBubbleView = bubble
+    }
+
+    /** Remove the bubble from the decor */
+    fun hideBubbleAndRestoreIfNeeded() {
+        val bubble = callBubbleView ?: return
+        callBubbleView = null
+        // Release bubble video sink
+        runCatching {
+            val sv = bubble.findViewById<org.webrtc.SurfaceViewRenderer?>(R.id.bubble_video)
+            if (sv?.visibility == android.view.View.VISIBLE) {
+                com.flowlink.app.service.CallSession.localVideoTrack?.removeSink(sv)
+                sv.release()
+            }
+        }
+        val decor = window.decorView as? android.widget.FrameLayout
+        bubble.animate().scaleX(0f).scaleY(0f).alpha(0f).setDuration(200)
+            .withEndAction { decor?.removeView(bubble) }.start()
+    }
+
+    /** Update the timer text shown on the bubble while call is minimized */
+    fun updateBubbleTimer(text: String) {
+        callBubbleView?.findViewById<android.widget.TextView>(R.id.bubble_timer)?.text = text
+    }
+
+    /** Re-add CallFragment on top of whatever is currently shown */
+    private fun restoreCallFromBubble() {
+        if (!com.flowlink.app.service.CallSession.isActive) {
+            hideBubbleAndRestoreIfNeeded(); return
+        }
+        hideBubbleAndRestoreIfNeeded()
+        val fragment = com.flowlink.app.ui.CallFragment.restore()
+        runOnUiThread {
+            supportFragmentManager.beginTransaction()
+                .add(R.id.fragment_container, fragment, "call")
+                .addToBackStack("call")
+                .commitAllowingStateLoss()
+        }
+    }
 }

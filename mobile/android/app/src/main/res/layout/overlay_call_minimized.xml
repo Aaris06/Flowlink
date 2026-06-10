@@ -1,84 +1,95 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Minimized floating call bubble — shown over the app when call is minimized -->
+<!--
+  Minimized call bubble — floats over the app, draggable, tap to restore.
+  For audio calls: shows pulsing avatar circle.
+  For video calls: shows live local camera feed in the circle.
+-->
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
-    android:id="@+id/minimized_call_root"
-    android:layout_width="160dp"
-    android:layout_height="56dp"
-    android:background="@drawable/glass_card_bg"
-    android:elevation="20dp"
+    android:id="@+id/bubble_root"
+    android:layout_width="80dp"
+    android:layout_height="80dp"
+    android:elevation="32dp"
     android:clickable="true"
     android:focusable="true">
 
-    <!-- Local camera preview (video calls) -->
-    <org.webrtc.SurfaceViewRenderer
-        android:id="@+id/minimized_local_video"
-        android:layout_width="match_parent"
-        android:layout_height="match_parent"
-        android:visibility="gone" />
+    <!-- Circular clip container -->
+    <FrameLayout
+        android:id="@+id/bubble_circle"
+        android:layout_width="80dp"
+        android:layout_height="80dp"
+        android:background="@drawable/bubble_call_bg"
+        android:clipToOutline="true">
 
-    <!-- Audio-only gradient background -->
-    <View
-        android:id="@+id/minimized_audio_bg"
-        android:layout_width="match_parent"
-        android:layout_height="match_parent"
-        android:background="@drawable/bg_gradient"
-        android:visibility="visible" />
+        <!-- Video preview (video calls only) — fills the circle -->
+        <org.webrtc.SurfaceViewRenderer
+            android:id="@+id/bubble_video"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:visibility="gone" />
 
-    <!-- Info row: avatar + name + timer -->
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="match_parent"
-        android:orientation="horizontal"
-        android:gravity="center_vertical"
-        android:paddingHorizontal="10dp">
-
-        <!-- Avatar circle -->
-        <TextView
-            android:id="@+id/minimized_avatar"
-            android:layout_width="32dp"
-            android:layout_height="32dp"
-            android:gravity="center"
-            android:textColor="#FFFFFF"
-            android:textSize="14sp"
-            android:textStyle="bold"
-            android:background="@drawable/call_avatar_bg"
-            android:layout_marginEnd="8dp" />
-
+        <!-- Audio avatar (audio calls, or when camera off) -->
         <LinearLayout
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
+            android:id="@+id/bubble_audio_bg"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:background="@drawable/bg_gradient"
+            android:gravity="center"
             android:orientation="vertical">
 
             <TextView
-                android:id="@+id/minimized_username"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="Calling…"
+                android:id="@+id/bubble_avatar"
+                android:layout_width="44dp"
+                android:layout_height="44dp"
+                android:gravity="center"
                 android:textColor="#FFFFFF"
-                android:textSize="12sp"
+                android:textSize="20sp"
                 android:textStyle="bold"
-                android:ellipsize="end"
-                android:maxLines="1" />
-
-            <TextView
-                android:id="@+id/minimized_timer"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="00:00"
-                android:textColor="#A78BFA"
-                android:textSize="11sp" />
+                android:background="@drawable/call_avatar_bg" />
         </LinearLayout>
 
-        <!-- End call button -->
-        <ImageButton
-            android:id="@+id/minimized_btn_end"
-            android:layout_width="32dp"
-            android:layout_height="32dp"
-            android:background="@drawable/call_btn_bg_red"
-            android:src="@android:drawable/ic_menu_close_clear_cancel"
-            android:padding="6dp"
-            android:contentDescription="End call"
-            android:layout_marginStart="6dp" />
-    </LinearLayout>
+        <!-- Dark scrim at bottom for text -->
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="28dp"
+            android:layout_gravity="bottom"
+            android:background="@drawable/call_bottom_scrim" />
+
+        <!-- Timer at bottom of circle -->
+        <TextView
+            android:id="@+id/bubble_timer"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_gravity="bottom"
+            android:gravity="center"
+            android:text="00:00"
+            android:textColor="#FFFFFF"
+            android:textSize="10sp"
+            android:textStyle="bold"
+            android:paddingBottom="5dp" />
+
+    </FrameLayout>
+
+    <!-- End call button — small circle at top-right -->
+    <FrameLayout
+        android:id="@+id/bubble_btn_end"
+        android:layout_width="26dp"
+        android:layout_height="26dp"
+        android:layout_gravity="top|end"
+        android:layout_marginTop="-2dp"
+        android:layout_marginEnd="-2dp"
+        android:background="@drawable/call_btn_bg_red"
+        android:clickable="true"
+        android:focusable="true"
+        android:elevation="36dp">
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:gravity="center"
+            android:text="✕"
+            android:textColor="#FFFFFF"
+            android:textSize="11sp"
+            android:textStyle="bold" />
+    </FrameLayout>
+
 </FrameLayout>
