@@ -122,9 +122,12 @@ function Shell() {
   const [callInfo, setCallInfo] = useState<CallInfo | null>(null);
   const callServiceRef = useRef<CallService | null>(null);
   if (!callServiceRef.current) {
+    // Pass real deviceId immediately — deviceId is stable (useState initializer runs once)
+    // username may still be null here if token verification is pending, so we use a
+    // getter approach: CallService reads username via the ws onopen patch below.
     callServiceRef.current = new CallService(
-      '', // deviceId not available yet – updated below
-      '',
+      deviceId,
+      authService.getUsername() || '',
       (state, info) => { setCallState(state); setCallInfo(info); }
     );
   }
@@ -142,11 +145,15 @@ function Shell() {
       (window as any).appWebSocket = ws;
       setIsConnected(true);
       if (invitationServiceRef.current) invitationServiceRef.current.setWebSocket(ws);
-      // Give CallService the live websocket and identity
+      // Always refresh CallService identity on every connection open
+      // (username might have been empty at construction time if token verification
+      // hadn't completed yet; deviceId is now always correct but refresh anyway)
       if (callServiceRef.current) {
         (callServiceRef.current as any).deviceId = deviceId;
-        (callServiceRef.current as any).username = username || '';
+        (callServiceRef.current as any).username = username || authService.getUsername() || '';
         callServiceRef.current.setWebSocket(ws);
+        console.log('[CallService] identity refreshed on ws open — deviceId:', deviceId,
+          'username:', (callServiceRef.current as any).username);
       }
     };
     ws.onmessage = (e) => handleWebSocketMessage(JSON.parse(e.data));
