@@ -10,4 +10,7 @@ build/
 .idea/
 .vscode/
 *.iml
-
+.gradle/
+mobile/android/.gradle/
+mobile/android/app/build/
+mobile/android/build/

@@ -526,8 +526,20 @@ class CallFragment : Fragment() {
                 mandatory.add(MediaConstraints.KeyValuePair("googNoiseSuppression", "true"))
                 mandatory.add(MediaConstraints.KeyValuePair("googHighpassFilter", "true"))
             }
-            val audioTrack = factory.createAudioTrack("audio0", factory.createAudioSource(audioConstraints))
+            val audioSource = factory.createAudioSource(audioConstraints)
+            val audioTrack  = factory.createAudioTrack("audio0", audioSource)
+            audioTrack.setEnabled(true)  // explicitly enable before adding to PC
             pc.addTrack(audioTrack)
+
+            // Force all audio transceivers to sendrecv immediately after addTrack.
+            // In Unified Plan, addTrack creates a transceiver that defaults to sendrecv,
+            // but some Android WebRTC builds default it to sendonly. Explicitly set it.
+            pc.transceivers.filter { it.mediaType == MediaStreamTrack.MediaType.MEDIA_TYPE_AUDIO }
+                .forEach { tr ->
+                    if (tr.direction != RtpTransceiver.RtpTransceiverDirection.SEND_RECV) {
+                        tr.direction = RtpTransceiver.RtpTransceiverDirection.SEND_RECV
+                    }
+                }
 
             var videoTrack: VideoTrack? = null
             var capturer: CameraVideoCapturer? = null
@@ -707,8 +719,17 @@ class CallFragment : Fragment() {
         val sdp = SessionDescription(
             SessionDescription.Type.fromCanonicalForm(obj.optString("type", "offer")),
             obj.optString("sdp", ""))
+
         pc.setRemoteDescription(sdpObserver(onSuccess = {
             CallSession.remoteDescSet = true; drainCandidates()
+
+            // CRITICAL: createAnswer with proper constraints so Android declares sendrecv
+            // for audio — empty MediaConstraints can produce recvonly on some Android builds.
+            val answerConstraints = MediaConstraints().apply {
+                mandatory.add(MediaConstraints.KeyValuePair("OfferToReceiveAudio", "true"))
+                mandatory.add(MediaConstraints.KeyValuePair("OfferToReceiveVideo",
+                    CallSession.isVideo.toString()))
+            }
             pc.createAnswer(object : SdpObserver {
                 override fun onCreateSuccess(answer: SessionDescription) {
                     pc.setLocalDescription(sdpObserver(onSuccess = {
@@ -719,11 +740,15 @@ class CallFragment : Fragment() {
                                     put("sdp", answer.description)
                                 })
                             })
+                        Log.d(TAG, "Sent answer. Audio direction in SDP: " +
+                            answer.description.lines().filter { it.startsWith("a=sendrecv") ||
+                                it.startsWith("a=sendonly") || it.startsWith("a=recvonly") ||
+                                it.startsWith("a=inactive") })
                     }), answer)
                 }
                 override fun onCreateFailure(e: String?) { Log.e(TAG, "createAnswer: $e") }
                 override fun onSetSuccess() {}; override fun onSetFailure(p0: String?) {}
-            }, MediaConstraints())
+            }, answerConstraints)
         }), sdp)
     }
 
