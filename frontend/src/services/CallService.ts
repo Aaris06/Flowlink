@@ -97,12 +97,7 @@ export class CallService {
       const stream = await this.getUserMedia(this.currentCall.isVideo);
       this.localStream = stream;
       this.pc = this.createPeerConnection();
-
-      // Add tracks and log
-      stream.getTracks().forEach(t => {
-        this.pc!.addTrack(t, stream);
-        console.log(`[CallService] callee addTrack: kind=${t.kind} enabled=${t.enabled} readyState=${t.readyState}`);
-      });
+      await this.attachLocalStream(stream, this.currentCall.isVideo, 'callee');
 
       this.send({
         type: 'call_accept',
@@ -224,25 +219,18 @@ export class CallService {
           this.localStream = stream;
           this.pc = this.createPeerConnection();
 
-          // Add each track and verify
-          stream.getTracks().forEach(t => {
-            this.pc!.addTrack(t, stream);
-            console.log(`[CallService] caller addTrack: kind=${t.kind} enabled=${t.enabled} readyState=${t.readyState}`);
-          });
+          await this.attachLocalStream(stream, this.currentCall.isVideo, 'caller');
 
-          // After addTrack, transceivers default to sendrecv in spec.
-          // Explicitly verify — some browsers set it sendonly when there's no incoming track yet.
+          // Explicitly verify directions — some browser/app pairings leave
+          // the first audio transceiver in a receive-only state.
           this.pc.getTransceivers().forEach(tr => {
             console.log(`[CallService] pre-offer transceiver: mid=${tr.mid} direction=${tr.direction} kind=${tr.receiver.track?.kind}`);
-            if (tr.direction === 'sendonly' || tr.direction === 'inactive') {
+            if (tr.direction !== 'sendrecv') {
               tr.direction = 'sendrecv';
             }
           });
 
-          const offer = await this.pc.createOffer({
-            offerToReceiveAudio: true,
-            offerToReceiveVideo: this.currentCall.isVideo,
-          });
+          const offer = await this.pc.createOffer();
           await this.pc.setLocalDescription(offer);
 
           // Verify audio direction in offer SDP
@@ -344,6 +332,51 @@ export class CallService {
     const queued = this.pendingCandidates.splice(0);
     queued.forEach(c => {
       try { this.pc?.addIceCandidate(c); } catch { /* ignore */ }
+    });
+  }
+
+  private ensureTransceiver(kind: 'audio' | 'video'): RTCRtpTransceiver {
+    if (!this.pc) throw new Error('Peer connection is not ready');
+    const existing = this.pc.getTransceivers().find((tr) => {
+      const transceiverKind = tr.sender.track?.kind || tr.receiver.track?.kind;
+      return transceiverKind === kind;
+    });
+
+    if (existing) {
+      if (existing.direction !== 'sendrecv') {
+        existing.direction = 'sendrecv';
+      }
+      return existing;
+    }
+
+    return this.pc.addTransceiver(kind, { direction: 'sendrecv' });
+  }
+
+  private async attachLocalStream(stream: MediaStream, isVideo: boolean, role: 'caller' | 'callee') {
+    if (!this.pc) throw new Error('Peer connection is not ready');
+
+    const audioTrack = stream.getAudioTracks()[0];
+    const videoTrack = isVideo ? stream.getVideoTracks()[0] : null;
+
+    const audioTransceiver = audioTrack ? this.ensureTransceiver('audio') : null;
+    const videoTransceiver = videoTrack ? this.ensureTransceiver('video') : null;
+
+    if (audioTrack && audioTransceiver) {
+      await audioTransceiver.sender.replaceTrack(audioTrack);
+      console.log(`[CallService] ${role} attachTrack: kind=${audioTrack.kind} enabled=${audioTrack.enabled} readyState=${audioTrack.readyState} direction=${audioTransceiver.direction}`);
+    }
+
+    if (videoTrack && videoTransceiver) {
+      await videoTransceiver.sender.replaceTrack(videoTrack);
+      console.log(`[CallService] ${role} attachTrack: kind=${videoTrack.kind} enabled=${videoTrack.enabled} readyState=${videoTrack.readyState} direction=${videoTransceiver.direction}`);
+    }
+
+    stream.getTracks().forEach((track) => {
+      const alreadyAttached = this.pc!.getSenders().some((sender) => sender.track?.id === track.id);
+      if (!alreadyAttached) {
+        this.pc!.addTrack(track, stream);
+        console.log(`[CallService] ${role} fallback addTrack: kind=${track.kind} enabled=${track.enabled} readyState=${track.readyState}`);
+      }
     });
   }
 
