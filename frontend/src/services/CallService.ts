@@ -45,7 +45,6 @@ export class CallService {
 
   // Signaling race buffers
   private pendingOffer: RTCSessionDescriptionInit | null = null;
-  private pendingAnswer: RTCSessionDescriptionInit | null = null;
   private pendingCandidates: RTCIceCandidateInit[] = [];
   private remoteDescSet = false;
 
@@ -309,10 +308,9 @@ export class CallService {
 
       case 'call_answer': {
         const answerDesc = payload.data as RTCSessionDescriptionInit;
-        if (!this.pc) {
-          this.pendingAnswer = answerDesc;
-          return;
-        }
+        // PC is always created before we send the offer, so a null PC here
+        // means a stale/duplicate answer — safe to ignore.
+        if (!this.pc) return;
         if (this.pc.signalingState === 'have-local-offer') {
           await this.pc.setRemoteDescription(answerDesc);
           this.remoteDescSet = true;
@@ -469,7 +467,6 @@ export class CallService {
     this.remoteStream = null;
     this.pc           = null;
     this.pendingOffer = null;
-    this.pendingAnswer = null;
     this.pendingCandidates = [];
     this.remoteDescSet = false;
 
