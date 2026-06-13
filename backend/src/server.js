@@ -51,6 +51,10 @@ const globalDevices = new Map();
 const clipboardDedupeCache = new Map();
 const CLIPBOARD_DEDUPE_TTL_MS = 5000; // 5 second dedupe window
 
+// Active call rooms for group calls
+// Structure: callId -> { hostDeviceId, participants: Set<deviceId>, isVideo, sessionId, startedAt }
+const callRooms = new Map();
+
 // Admin config
 const ADMIN_USERNAME = process.env.ADMIN_USERNAME || 'flowlink_admin';
 const ADMIN_SECRET   = process.env.ADMIN_SECRET   || 'flowlink_admin_2024';
@@ -522,6 +526,7 @@ wss.on('connection', (ws, req) => {
         case 'call_offer':
         case 'call_answer':
         case 'call_ice':
+        case 'call_join_room':
           handleCallSignal(ws, message);
           break;
 
@@ -1238,14 +1243,129 @@ function handleWebRTCSignal(ws, message) {
 
 /**
  * Handle call signaling (invite/accept/reject/end/offer/answer/ice)
- * Routes call messages between devices via global registry (works outside sessions too)
+ * Supports both 1-to-1 and group calls via call rooms.
  */
 function handleCallSignal(ws, message) {
   const fromDeviceId = message.deviceId || ws.deviceId;
   const toDeviceId = message.payload?.toDevice || message.payload?.toDeviceId;
   const toUsername = message.payload?.toUsername;
+  const callId = message.payload?.callId;
 
-  // Try routing by deviceId first, then by username
+  // ── Group call room management ──────────────────────────────────────────
+
+  if (message.type === 'call_invite') {
+    // Create or update call room when a call is initiated
+    if (callId && !callRooms.has(callId)) {
+      callRooms.set(callId, {
+        hostDeviceId: fromDeviceId,
+        participants: new Set([fromDeviceId]),
+        isVideo: message.payload?.isVideo || false,
+        sessionId: ws.sessionId || null,
+        startedAt: Date.now(),
+      });
+      console.log(`Call room created: ${callId} by ${fromDeviceId}`);
+
+      // Inject a call_activity chat message so all session members see the call
+      const room = callRooms.get(callId);
+      if (room?.sessionId) {
+        const session = sessions.get(room.sessionId);
+        const hostDevice = session?.devices.get(fromDeviceId);
+        const activityMsg = {
+          type: 'chat_message',
+          sessionId: room.sessionId,
+          deviceId: 'system',
+          payload: {
+            sourceDevice: 'system',
+            chat: {
+              messageId: `call_activity_${callId}`,
+              text: '',
+              username: 'System',
+              sentAt: Date.now(),
+              callActivity: {
+                callId,
+                callType: room.isVideo ? 'video' : 'audio',
+                hostUsername: hostDevice?.username || 'Unknown',
+                status: 'started',
+              },
+            },
+          },
+          timestamp: Date.now(),
+        };
+        // Store in chat history
+        if (session) {
+          session.chatHistory = session.chatHistory || [];
+          session.chatHistory.push(activityMsg.payload.chat);
+          session.chatHistory = session.chatHistory.slice(-200);
+        }
+        // Broadcast to all session members (including caller)
+        broadcastToSession(room.sessionId, activityMsg, null);
+      }
+    }
+  }
+
+  if (message.type === 'call_accept' && callId) {
+    // Add joining participant to call room
+    const room = callRooms.get(callId);
+    if (room) {
+      room.participants.add(fromDeviceId);
+      console.log(`Device ${fromDeviceId} joined call room ${callId}. Participants: ${room.participants.size}`);
+    }
+  }
+
+  if (message.type === 'call_end' && callId) {
+    const room = callRooms.get(callId);
+    if (room) {
+      room.participants.delete(fromDeviceId);
+      console.log(`Device ${fromDeviceId} left call room ${callId}. Remaining: ${room.participants.size}`);
+      // Clean up room only when everyone leaves
+      if (room.participants.size === 0) {
+        callRooms.delete(callId);
+        console.log(`Call room ${callId} destroyed (all participants left)`);
+      }
+    }
+  }
+
+  // Handle call_join_room — late joiner wants to enter an existing call
+  if (message.type === 'call_join_room' && callId) {
+    const room = callRooms.get(callId);
+    if (!room) {
+      ws.send(JSON.stringify({ type: 'call_reject', payload: { reason: 'call_ended', callId }, timestamp: Date.now() }));
+      return;
+    }
+    // Send the joiner info about all current participants so they can
+    // set up peer connections with each one
+    const participantInfos = [];
+    for (const participantId of room.participants) {
+      const entry = globalDevices.get(participantId);
+      if (entry) participantInfos.push({ deviceId: participantId, username: entry.device.username });
+    }
+    ws.send(JSON.stringify({
+      type: 'call_room_state',
+      payload: { callId, participants: participantInfos, isVideo: room.isVideo, hostDeviceId: room.hostDeviceId },
+      timestamp: Date.now(),
+    }));
+    // Notify existing participants about the new joiner
+    for (const participantId of room.participants) {
+      const targetWs = deviceConnections.get(participantId);
+      if (targetWs && targetWs.readyState === targetWs.OPEN) {
+        targetWs.send(JSON.stringify({
+          type: 'call_participant_joined',
+          payload: {
+            callId,
+            deviceId: fromDeviceId,
+            username: globalDevices.get(fromDeviceId)?.device.username || 'Unknown',
+          },
+          timestamp: Date.now(),
+        }));
+      }
+    }
+    room.participants.add(fromDeviceId);
+    return;
+  }
+
+  // ── Standard signal routing ─────────────────────────────────────────────
+
+  // For group call signals (offer/answer/ice), toDevice identifies the specific peer
   let targetWs = null;
   if (toDeviceId) {
     targetWs = deviceConnections.get(toDeviceId);
@@ -1262,11 +1382,10 @@ function handleCallSignal(ws, message) {
   }
 
   if (!targetWs || targetWs.readyState !== targetWs.OPEN) {
-    // For invite, send busy/unavailable back to caller
     if (message.type === 'call_invite') {
       ws.send(JSON.stringify({
         type: 'call_reject',
-        payload: { reason: 'unavailable', callId: message.payload?.callId },
+        payload: { reason: 'unavailable', callId },
         timestamp: Date.now()
       }));
     }

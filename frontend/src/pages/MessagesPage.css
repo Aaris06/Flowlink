@@ -248,3 +248,70 @@
 .msg-call-btn:active {
   transform: scale(0.95);
 }
+
+/* ── Call activity banner ─────────────────────────────────────────────── */
+.msg-row-activity {
+  justify-content: center;
+  margin: 0.4rem 0;
+  pointer-events: auto;
+}
+
+.msg-call-activity {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  background: linear-gradient(135deg, rgba(99,102,241,0.08), rgba(139,92,246,0.08));
+  border: 1px solid rgba(99,102,241,0.2);
+  border-radius: 14px;
+  padding: 0.65rem 1.1rem;
+  max-width: 460px;
+  width: 100%;
+}
+
+.msg-call-activity-icon {
+  font-size: 1.4rem;
+  flex-shrink: 0;
+  line-height: 1;
+}
+
+.msg-call-activity-body {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.msg-call-activity-title {
+  font-size: 0.82rem;
+  color: var(--text);
+  flex: 1;
+  min-width: 0;
+}
+
+.msg-call-activity-title strong {
+  color: var(--brand);
+}
+
+.msg-call-activity-join {
+  flex-shrink: 0;
+  background: linear-gradient(135deg, #6366f1, #8b5cf6);
+  color: #fff;
+  border: none;
+  border-radius: 20px;
+  padding: 0.3rem 0.9rem;
+  font-size: 0.78rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: opacity 0.15s, transform 0.1s;
+  white-space: nowrap;
+}
+
+.msg-call-activity-join:hover { opacity: 0.88; transform: scale(1.04); }
+.msg-call-activity-join:active { transform: scale(0.97); }
+
+.msg-call-activity-ended {
+  font-size: 0.75rem;
+  color: var(--text-3);
+  font-style: italic;
+}

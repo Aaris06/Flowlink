@@ -176,6 +176,43 @@ function Shell() {
           (window as any)._sessionDevices = message.payload.devices;
         }
         break;
+      case 'device_connected':
+      case 'device_disconnected':
+      case 'device_status_update':
+        // Re-emit so OverviewPage, MyDevicesPage, etc. can update device lists
+        window.dispatchEvent(new CustomEvent('sessionMessage', { detail: { message } }));
+        // Keep session.devices Map in sync so pages that seed from it on re-mount
+        // (OverviewPage, MyDevicesPage) get the current list rather than the stale
+        // snapshot from initial join.
+        setSession(prev => {
+          if (!prev) return prev;
+          const updated = new Map(prev.devices);
+          if (message.type === 'device_connected' && message.payload?.device) {
+            const d = message.payload.device;
+            updated.set(d.id, { ...d, online: true });
+          } else if (message.type === 'device_disconnected' && message.payload?.deviceId) {
+            const existing = updated.get(message.payload.deviceId);
+            if (existing) updated.set(message.payload.deviceId, { ...existing, online: false });
+          } else if (message.type === 'device_status_update' && message.payload?.device) {
+            const d = message.payload.device;
+            updated.set(d.id, { ...(updated.get(d.id) || d), ...d });
+          }
+          return { ...prev, devices: updated };
+        });
+        // Also keep the global session device snapshot up to date
+        if (message.type === 'device_connected' && message.payload?.device) {
+          const d = message.payload.device;
+          const existing: any[] = (window as any)._sessionDevices || [];
+          const idx = existing.findIndex((x: any) => x.id === d.id);
+          if (idx >= 0) existing[idx] = { ...existing[idx], ...d };
+          else existing.push(d);
+          (window as any)._sessionDevices = existing;
+        }
+        if (message.type === 'device_disconnected' && message.payload?.deviceId) {
+          (window as any)._sessionDevices = ((window as any)._sessionDevices || [])
+            .filter((x: any) => x.id !== message.payload.deviceId);
+        }
+        break;
       case 'chat_message':
       case 'chat_delivered':
       case 'chat_seen':
@@ -211,6 +248,7 @@ function Shell() {
                   seen: false,
                   replyTo: chat.replyTo,
                   attachment,
+                  ...(chat.callActivity ? { callActivity: chat.callActivity } : {}),
                 });
                 sessionStorage.setItem(key, JSON.stringify(msgs.slice(-200)));
               }
@@ -431,6 +469,8 @@ function Shell() {
       case 'call_offer':
       case 'call_answer':
       case 'call_ice':
+      case 'call_room_state':
+      case 'call_participant_joined':
         if (callServiceRef.current) {
           callServiceRef.current.handleMessage(message);
         }
