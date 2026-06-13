@@ -20,8 +20,10 @@ import AuthPage from './pages/AuthPage';
 import RemoteAccess from './components/RemoteAccess';
 import DownloadPage from './components/DownloadPage';
 import CallModal from './components/CallModal';
+import GroupCallModal from './components/GroupCallModal';
 import CallsPage from './pages/CallsPage';
 import { CallService, CallState, CallInfo } from './services/CallService';
+import { GroupCallService, GroupCallState, GroupCallRoom } from './services/GroupCallService';
 import './App.css';
 
 export interface AppContext {
@@ -31,6 +33,7 @@ export interface AppContext {
   username: string;
   invitationService: InvitationService | null;
   callService: CallService | null;
+  groupCallService: GroupCallService | null;
   onSessionCreated: (s: Session) => void;
   onSessionJoined: (s: Session) => void;
   onLeaveSession: () => void;
@@ -129,6 +132,18 @@ function Shell() {
     );
   }
 
+  // ── Group call state ─────────────────────────────────────────────────────
+  const [groupCallState, setGroupCallState] = useState<GroupCallState>('idle');
+  const [groupCallRoom, setGroupCallRoom] = useState<GroupCallRoom | null>(null);
+  const groupCallServiceRef = useRef<GroupCallService | null>(null);
+  if (!groupCallServiceRef.current) {
+    groupCallServiceRef.current = new GroupCallService(
+      '', // deviceId not available yet – updated below
+      '',
+      (state, room) => { setGroupCallState(state); setGroupCallRoom(room); }
+    );
+  }
+
   const connectWebSocket = () => {
     if (wsRef.current?.readyState === WebSocket.OPEN) return wsRef.current;
     const ws = new WebSocket(SIGNALING_WS_URL);
@@ -148,6 +163,11 @@ function Shell() {
         (callServiceRef.current as any).deviceId = deviceId;
         (callServiceRef.current as any).username = username || '';
         callServiceRef.current.setWebSocket(ws);
+      }
+      // Give GroupCallService the live websocket and identity
+      if (groupCallServiceRef.current) {
+        groupCallServiceRef.current.updateIdentity(deviceId, username || '');
+        groupCallServiceRef.current.setWebSocket(ws);
       }
     };
     ws.onmessage = (e) => handleWebSocketMessage(JSON.parse(e.data));
@@ -508,6 +528,19 @@ function Shell() {
           callServiceRef.current.handleMessage(message);
         }
         break;
+      // ── Group call signaling ─────────────────────────────────────────────
+      case 'group_call_invite':
+      case 'group_call_room_state':
+      case 'group_call_peer_joined':
+      case 'group_call_peer_left':
+      case 'group_call_offer':
+      case 'group_call_answer':
+      case 'group_call_ice':
+      case 'group_call_error':
+        if (groupCallServiceRef.current) {
+          groupCallServiceRef.current.handleMessage(message);
+        }
+        break;
     }
   };
 
@@ -592,6 +625,7 @@ function Shell() {
     session, deviceId, deviceName, username: username || '',
     invitationService,
     callService: callServiceRef.current,
+    groupCallService: groupCallServiceRef.current,
     onSessionCreated: setSession,
     onSessionJoined: setSession,
     onLeaveSession: () => setSession(null),
@@ -779,6 +813,15 @@ function Shell() {
           callService={callServiceRef.current}
           state={callState}
           callInfo={callInfo}
+        />
+      )}
+
+      {/* Group call overlay */}
+      {groupCallServiceRef.current && (
+        <GroupCallModal
+          groupCallService={groupCallServiceRef.current}
+          state={groupCallState}
+          room={groupCallRoom}
         />
       )}
     </div>

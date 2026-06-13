@@ -201,3 +201,86 @@
   font-size: 0.95rem;
   line-height: 1;
 }
+
+/* ── Group call bar ── */
+.calls-group-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.85rem 1.25rem;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.calls-group-bar-left {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.calls-group-label {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-2);
+}
+
+.calls-select-btn {
+  background: rgba(99,102,241,0.12);
+  color: #6366f1;
+  border: none;
+  border-radius: 999px;
+  padding: 0.3rem 0.75rem;
+  font-size: 0.78rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.calls-select-btn:hover { background: rgba(99,102,241,0.22); }
+
+.calls-group-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.calls-btn-group {
+  border-radius: 10px;
+  padding: 0.5rem 1rem;
+}
+
+/* ── Device card selection state ── */
+.calls-device-card {
+  cursor: pointer;
+  position: relative;
+}
+
+.calls-device-card.selected {
+  border: 2px solid rgba(99,102,241,0.55);
+  background: rgba(99,102,241,0.06);
+}
+
+.calls-select-check {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 2px solid var(--border);
+  background: var(--surface-2);
+  display: grid;
+  place-items: center;
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: #fff;
+  flex-shrink: 0;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.calls-select-check.checked {
+  background: #6366f1;
+  border-color: #6366f1;
+}
+
+.calls-selected-hint {
+  font-size: 0.75rem;
+  color: var(--text-3);
+  padding: 0.25rem 0.5rem;
+}

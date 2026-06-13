@@ -1,0 +1,395 @@
+/* ── Group Call Modal ── */
+.gcall-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.82);
+  backdrop-filter: blur(8px);
+  animation: gcallFadeIn 0.2s ease;
+}
+
+@keyframes gcallFadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+.gcall-modal {
+  position: relative;
+  width: min(860px, 96vw);
+  max-height: 92vh;
+  background: linear-gradient(145deg, #0f0c29, #1e1b4b);
+  border-radius: 20px;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 32px 80px rgba(0, 0, 0, 0.7);
+  overflow: hidden;
+}
+
+/* ── Video mode stretches the modal ── */
+.gcall-video-mode .gcall-modal {
+  width: min(1100px, 98vw);
+  max-height: 96vh;
+}
+
+/* ── Incoming ring ── */
+.gcall-ring-modal {
+  width: min(360px, 94vw);
+  align-items: center;
+  padding: 2.5rem 2rem;
+  gap: 1rem;
+  background: linear-gradient(145deg, #1e1b4b, #312e81);
+}
+
+.gcall-ring-icon {
+  font-size: 3rem;
+  animation: gcallPulse 1.4s ease-in-out infinite;
+}
+
+@keyframes gcallPulse {
+  0%, 100% { transform: scale(1); }
+  50%       { transform: scale(1.15); }
+}
+
+.gcall-ring-title {
+  font-size: 1.4rem;
+  font-weight: 700;
+  color: #fff;
+}
+
+.gcall-ring-sub {
+  font-size: 0.9rem;
+  color: rgba(255,255,255,0.7);
+  text-align: center;
+}
+
+.gcall-ring-controls {
+  display: flex;
+  gap: 1.5rem;
+  margin-top: 0.5rem;
+}
+
+/* ── Header ── */
+.gcall-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.9rem 1.25rem;
+  background: rgba(0,0,0,0.3);
+  border-bottom: 1px solid rgba(255,255,255,0.08);
+  flex-shrink: 0;
+}
+
+.gcall-header-left {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.gcall-header-icon { font-size: 1.1rem; }
+
+.gcall-header-title {
+  font-size: 1rem;
+  font-weight: 700;
+  color: #fff;
+}
+
+.gcall-header-count {
+  font-size: 0.78rem;
+  color: rgba(255,255,255,0.55);
+  background: rgba(255,255,255,0.1);
+  padding: 2px 8px;
+  border-radius: 20px;
+}
+
+.gcall-header-right {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.gcall-header-timer {
+  font-size: 0.9rem;
+  color: #a3e635;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.gcall-header-connecting {
+  font-size: 0.85rem;
+  color: rgba(255,255,255,0.6);
+  animation: blink 1.2s ease-in-out infinite;
+}
+
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.3; }
+}
+
+.gcall-minimize-btn {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: none;
+  cursor: pointer;
+  background: rgba(255,255,255,0.15);
+  color: #fff;
+  font-size: 0.9rem;
+  display: grid;
+  place-items: center;
+  transition: background 0.15s, transform 0.15s;
+}
+.gcall-minimize-btn:hover { background: rgba(255,255,255,0.28); transform: scale(1.1); }
+
+/* ── Participant Grid ── */
+.gcall-grid {
+  flex: 1;
+  display: grid;
+  gap: 6px;
+  padding: 10px;
+  overflow-y: auto;
+  min-height: 200px;
+}
+
+/* Dynamic grid columns based on participant count */
+.gcall-grid-1 { grid-template-columns: 1fr; }
+.gcall-grid-2 { grid-template-columns: repeat(2, 1fr); }
+.gcall-grid-3 { grid-template-columns: repeat(2, 1fr); }
+.gcall-grid-4 { grid-template-columns: repeat(2, 1fr); }
+.gcall-grid-5 { grid-template-columns: repeat(3, 1fr); }
+.gcall-grid-6 { grid-template-columns: repeat(3, 1fr); }
+
+/* 3-participant: first tile spans full width */
+.gcall-grid-3 .gcall-tile:first-child {
+  grid-column: 1 / -1;
+}
+
+/* For 5: last row has 2, not 3 — wrap naturally */
+@media (max-width: 600px) {
+  .gcall-grid-3,
+  .gcall-grid-4,
+  .gcall-grid-5,
+  .gcall-grid-6 { grid-template-columns: repeat(2, 1fr); }
+  .gcall-grid-3 .gcall-tile:first-child { grid-column: auto; }
+}
+
+/* ── Individual tile ── */
+.gcall-tile {
+  position: relative;
+  background: #1e1b4b;
+  border-radius: 12px;
+  overflow: hidden;
+  aspect-ratio: 4/3;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid transparent;
+  transition: border-color 0.2s;
+}
+
+.gcall-tile.self {
+  border-color: rgba(99, 102, 241, 0.4);
+}
+
+.gcall-tile-video {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.gcall-tile-avatar {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #6366f1, #8b5cf6);
+  display: grid;
+  place-items: center;
+  font-size: 1.6rem;
+  font-weight: 700;
+  color: #fff;
+  box-shadow: 0 0 0 4px rgba(99,102,241,0.25);
+  animation: gcallAvatarPulse 2s ease-in-out infinite;
+}
+
+@keyframes gcallAvatarPulse {
+  0%, 100% { box-shadow: 0 0 0 4px rgba(99,102,241,0.25); }
+  50%       { box-shadow: 0 0 0 10px rgba(99,102,241,0.08); }
+}
+
+.gcall-tile-label {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: linear-gradient(to top, rgba(0,0,0,0.7), transparent);
+  padding: 1.25rem 0.5rem 0.4rem;
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  z-index: 2;
+}
+
+.gcall-tile-name {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #fff;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+
+.gcall-tile-muted,
+.gcall-tile-camoff {
+  font-size: 0.75rem;
+  flex-shrink: 0;
+}
+
+/* ── Waiting state ── */
+.gcall-waiting {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 3rem 1rem;
+  gap: 0.5rem;
+  color: rgba(255,255,255,0.5);
+}
+
+.gcall-waiting-icon { font-size: 2.5rem; margin-bottom: 0.25rem; }
+.gcall-waiting-text { font-size: 1rem; font-weight: 600; color: rgba(255,255,255,0.7); }
+.gcall-waiting-sub  { font-size: 0.82rem; }
+
+/* ── Controls ── */
+.gcall-controls {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1.25rem;
+  padding: 0.85rem 1rem;
+  background: rgba(0,0,0,0.3);
+  border-top: 1px solid rgba(255,255,255,0.08);
+  flex-shrink: 0;
+}
+
+/* Reuse 1-to-1 call button styles */
+.gcall-controls .call-btn { width: 52px; height: 52px; }
+
+/* ── Minimized bubble ── */
+.gcall-bubble {
+  position: fixed;
+  bottom: 90px;
+  right: 20px;
+  width: 100px;
+  cursor: pointer;
+  z-index: 99999;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  animation: bubbleIn 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  user-select: none;
+}
+
+.gcall-bubble-circle {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  background: linear-gradient(145deg, #312e81, #4c1d95);
+  box-shadow: 0 8px 32px rgba(0,0,0,0.55), 0 0 0 2px rgba(99,102,241,0.4);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.5rem;
+  position: relative;
+}
+
+.gcall-bubble-count {
+  font-size: 0.65rem;
+  background: #6366f1;
+  color: #fff;
+  border-radius: 20px;
+  padding: 1px 5px;
+  font-weight: 700;
+  position: absolute;
+  bottom: -2px;
+  right: -2px;
+}
+
+.gcall-bubble-info {
+  font-size: 0.72rem;
+  color: rgba(255,255,255,0.85);
+  font-weight: 600;
+  background: rgba(0,0,0,0.5);
+  border-radius: 8px;
+  padding: 2px 6px;
+}
+
+.gcall-bubble-end {
+  position: absolute;
+  top: 0;
+  right: 8px;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 2px solid #fff;
+  background: #ef4444;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  box-shadow: 0 2px 8px rgba(239,68,68,0.6);
+  transition: transform 0.15s;
+}
+.gcall-bubble-end:hover { transform: scale(1.15); }
+
+/* ── "Join Now" in chat ── */
+.gcall-join-now-msg {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  background: linear-gradient(135deg, rgba(99,102,241,0.15), rgba(139,92,246,0.1));
+  border: 1px solid rgba(99,102,241,0.3);
+  border-radius: 10px;
+  padding: 0.6rem 0.8rem;
+}
+
+.gcall-join-now-icon { font-size: 1.25rem; }
+
+.gcall-join-now-text {
+  flex: 1;
+  font-size: 0.85rem;
+  color: rgba(255,255,255,0.85);
+  line-height: 1.35;
+}
+
+.gcall-join-now-text strong {
+  color: #fff;
+  display: block;
+  font-size: 0.9rem;
+}
+
+.gcall-join-now-btn {
+  background: linear-gradient(135deg, #6366f1, #8b5cf6);
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  padding: 0.45rem 0.85rem;
+  font-size: 0.8rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: opacity 0.15s, transform 0.15s;
+  white-space: nowrap;
+}
+.gcall-join-now-btn:hover { opacity: 0.88; transform: scale(1.04); }
+.gcall-join-now-btn:active { transform: scale(0.96); }
+.gcall-join-now-btn:disabled { opacity: 0.45; cursor: not-allowed; }

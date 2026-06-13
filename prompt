@@ -1,0 +1,155 @@
+# Group Call Room Architecture Fixes & Enhancements
+
+Please redesign the group calling flow so that group calls behave like WhatsApp, Google Meet, Discord, or Microsoft Teams, where users join a persistent call room instead of requiring every participant to accept simultaneously.
+
+## Current Issues
+
+### 1. Group Call Ends When One User Rejects
+
+* If multiple users are invited to a group voice or video call and even one user rejects the call, the entire group call is sometimes rejected or affected.
+* A single user's rejection should never affect other participants.
+
+### Required Behavior
+
+* Each participant's response should be handled independently.
+* If User A rejects:
+
+  * User B and User C should still be able to join normally.
+* Rejected users should simply be marked as unavailable.
+
+---
+
+### 2. Simultaneous Acceptance Issues
+
+* When multiple users accept the call around the same time, some users remain stuck in:
+
+  ```text
+  Connecting...
+  ```
+* The call does not always establish correctly.
+
+### Required Behavior
+
+* Multiple users should be able to join concurrently without connection conflicts.
+* Proper peer connection handling should be implemented for all participants.
+
+---
+
+### 3. Late Join Support
+
+### Current Problem
+
+* Users who do not accept immediately often lose the ability to join.
+* Existing call participants cannot easily bring them into the ongoing call.
+
+### Required Behavior
+
+* A persistent call room should remain active while at least one participant remains connected.
+* Late users should be able to join at any time.
+
+### Chat Message Integration
+
+When a group call starts, automatically create a message such as:
+
+```text
+Group call is ongoing.
+Click "Join Now" to enter the call.
+```
+
+Requirements:
+
+* The message should remain visible in the chat.
+* Any invited participant can click **Join Now** later and enter the ongoing call.
+* Works for both voice calls and video calls.
+
+---
+
+## Required Room-Based Architecture
+
+### Voice Calls
+
+When a user starts a group voice call:
+
+1. Create a unique call room.
+2. Invite all selected participants.
+3. The room remains active regardless of who accepts or rejects.
+4. Users who accept join the room immediately.
+5. Users who accept later can still join the same room.
+6. Users can leave and rejoin without affecting the room.
+
+### Video Calls
+
+When a user starts a group video call:
+
+1. Create a persistent video room.
+2. Every participant who joins is added to the room.
+3. Late joiners are added dynamically.
+4. Existing participants remain connected.
+
+---
+
+## Participant Management
+
+### Join
+
+* Users can join through:
+
+  * Incoming call notification
+  * Join Now button in chat
+  * Ongoing call banner
+
+### Leave
+
+* Users can leave independently.
+* The call continues for remaining participants.
+
+### Rejoin
+
+* Users who left should be able to rejoin while the room is still active.
+
+### Add Participants
+
+* Existing participants should be able to add more users during an ongoing call.
+* Newly added users receive invitations and can join the same active room.
+
+---
+
+## Video Call UI Requirements
+
+Each participant should be represented by a dedicated tile.
+
+### Example: 4 Participants
+
+```text
+[User A] [User B]
+[User C] [User D]
+```
+
+### Example: 6 Participants
+
+```text
+[User A] [User B] [User C]
+[User D] [User E] [User F]
+```
+
+### Requirements
+
+* Every participant has a username label.
+* Every participant has their own video stream tile.
+* Tiles update dynamically when users join or leave.
+* Active speaker highlighting is preferred.
+* Layout should automatically adapt to participant count.
+
+---
+
+## Expected Final Behavior
+
+* Group calls are room-based, not acceptance-based.
+* One user's rejection does not affect other participants.
+* Users can join at different times.
+* Join Now button allows late entry into ongoing calls.
+* Users can leave and rejoin freely.
+* Additional users can be invited during the call.
+* Voice and video calls support dynamic participant management.
+* Video calls display all active participants in a responsive grid layout with username and stream tiles.
+* Works consistently across Web ↔ Web, App ↔ Web, and App ↔ App environments.

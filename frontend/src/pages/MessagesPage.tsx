@@ -205,6 +205,14 @@ export default function MessagesPage({ ctx }: Props) {
         return null;
       }
     }
+    if (text.startsWith('[[GROUP_CALL_START]]')) {
+      try {
+        const data = JSON.parse(text.replace('[[GROUP_CALL_START]]', ''));
+        return renderGroupCallStart(data);
+      } catch {
+        return null;
+      }
+    }
     if (!text) return null;
     // Code block
     if (text.includes('```')) {
@@ -255,8 +263,33 @@ export default function MessagesPage({ ctx }: Props) {
     );
   };
 
-  const startRecording = async () => {
-    try {
+  const renderGroupCallStart = (data: { roomId: string; callType: 'audio' | 'video'; hostUsername: string }) => {
+    const icon = data.callType === 'video' ? '🎥' : '📞';
+    const label = data.callType === 'video' ? 'Group Video Call' : 'Group Voice Call';
+    const isInCall = ctx.groupCallService?.getState() !== 'idle' && ctx.groupCallService?.getState() !== 'ended';
+    const isThisRoom = ctx.groupCallService?.getRoom()?.roomId === data.roomId;
+    return (
+      <div className="gcall-join-now-msg">
+        <span className="gcall-join-now-icon">{icon}</span>
+        <div className="gcall-join-now-text">
+          <strong>{label} — ongoing</strong>
+          Started by {data.hostUsername}. Click to join.
+        </div>
+        <button
+          className="gcall-join-now-btn"
+          disabled={isInCall && !isThisRoom}
+          onClick={() => {
+            if (!ctx.groupCallService || !session) return;
+            ctx.groupCallService.joinByRoomId(data.roomId, data.callType, session.id, data.hostUsername);
+          }}
+        >
+          {isThisRoom ? 'In Call' : 'Join Now'}
+        </button>
+      </div>
+    );
+  };
+
+  const startRecording = async () => {    try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const mimeType = MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : 'audio/ogg';
       const recorder = new MediaRecorder(stream, { mimeType });

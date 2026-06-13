@@ -13,9 +13,13 @@ interface SessionDevice {
 }
 
 export default function CallsPage({ ctx }: Props) {
-  const { session, deviceId, callService } = ctx;
+  const { session, deviceId, callService, groupCallService } = ctx;
   const [devices, setDevices] = useState<SessionDevice[]>([]);
   const [callState, setCallState] = useState(callService?.getState() ?? 'idle');
+  const [groupCallState, setGroupCallState] = useState(groupCallService?.getState() ?? 'idle');
+
+  // Multi-select for group calls
+  const [selected, setSelected] = useState<Set<string>>(new Set());
 
   // Pull session devices from the global snapshot kept by App.tsx
   useEffect(() => {
@@ -24,29 +28,76 @@ export default function CallsPage({ ctx }: Props) {
       if (snap) setDevices(snap.filter(d => d.id !== deviceId));
     };
     refresh();
-    // Refresh on any session message (device join/leave)
     const handler = () => refresh();
     window.addEventListener('sessionMessage', handler);
     return () => window.removeEventListener('sessionMessage', handler);
   }, [deviceId]);
 
-  // Mirror call state for the button labels
+  // Mirror call states
   useEffect(() => {
     if (!callService) return;
-    // Poll state — lightweight since CallService already drives the overlay
     const t = setInterval(() => setCallState(callService.getState()), 500);
     return () => clearInterval(t);
   }, [callService]);
 
-  const isInCall = callState !== 'idle' && callState !== 'ended';
+  useEffect(() => {
+    if (!groupCallService) return;
+    const t = setInterval(() => setGroupCallState(groupCallService.getState()), 500);
+    return () => clearInterval(t);
+  }, [groupCallService]);
+
+  const isInCall = (callState !== 'idle' && callState !== 'ended') ||
+                   (groupCallState !== 'idle' && groupCallState !== 'ended');
+
+  const toggleSelect = (d: SessionDevice) => {
+    if (!d.online) return;
+    setSelected(prev => {
+      const next = new Set(prev);
+      if (next.has(d.id)) next.delete(d.id);
+      else next.add(d.id);
+      return next;
+    });
+  };
+
+  const selectAll = () => {
+    const online = devices.filter(d => d.online);
+    setSelected(new Set(online.map(d => d.id)));
+  };
+
+  const clearSelection = () => setSelected(new Set());
 
   const startAudio = (d: SessionDevice) => {
-    callService?.startCall(d.username || d.name, d.id, false);
+    if (selected.size === 0) {
+      callService?.startCall(d.username || d.name, d.id, false);
+    }
   };
 
   const startVideo = (d: SessionDevice) => {
-    callService?.startCall(d.username || d.name, d.id, true);
+    if (selected.size === 0) {
+      callService?.startCall(d.username || d.name, d.id, true);
+    }
   };
+
+  const startGroupAudio = () => {
+    if (!groupCallService || !session || selected.size === 0) return;
+    const invitees = devices
+      .filter(d => selected.has(d.id))
+      .map(d => ({ username: d.username || d.name, deviceId: d.id }));
+    groupCallService.startGroupCall(invitees, 'audio', session.id);
+    setSelected(new Set());
+  };
+
+  const startGroupVideo = () => {
+    if (!groupCallService || !session || selected.size === 0) return;
+    const invitees = devices
+      .filter(d => selected.has(d.id))
+      .map(d => ({ username: d.username || d.name, deviceId: d.id }));
+    groupCallService.startGroupCall(invitees, 'video', session.id);
+    setSelected(new Set());
+  };
+
+  const selectedCount = selected.size;
+  const isGroupMode = selectedCount > 0;
 
   return (
     <div className="calls-page">
@@ -85,42 +136,105 @@ export default function CallsPage({ ctx }: Props) {
       )}
 
       {session && devices.length > 0 && (
-        <div className="calls-devices">
-          {devices.map(d => (
-            <div key={d.id} className={`calls-device-card card${!d.online ? ' offline' : ''}`}>
-              <div className="calls-device-avatar">
-                {(d.username || d.name)[0]?.toUpperCase()}
-              </div>
-              <div className="calls-device-info">
-                <div className="calls-device-name">{d.username || d.name}</div>
-                <div className="calls-device-meta">
-                  <span className={`calls-status-dot${d.online ? ' online' : ''}`} />
-                  {d.online ? 'Online' : 'Offline'} · {d.type}
-                </div>
-              </div>
-              <div className="calls-device-actions">
+        <>
+          {/* Group call action bar (shown when devices are available) */}
+          <div className="calls-group-bar card">
+            <div className="calls-group-bar-left">
+              <span className="calls-group-label">
+                {isGroupMode
+                  ? `${selectedCount} device${selectedCount !== 1 ? 's' : ''} selected`
+                  : 'Select devices for a group call'}
+              </span>
+              {devices.filter(d => d.online).length > 1 && (
                 <button
-                  className="calls-btn calls-btn-audio"
-                  title="Audio call"
-                  disabled={!d.online || isInCall}
-                  onClick={() => startAudio(d)}
+                  className="calls-select-btn"
+                  onClick={isGroupMode ? clearSelection : selectAll}
+                >
+                  {isGroupMode ? 'Clear' : 'Select All'}
+                </button>
+              )}
+            </div>
+            {isGroupMode && (
+              <div className="calls-group-actions">
+                <button
+                  className="calls-btn calls-btn-audio calls-btn-group"
+                  disabled={isInCall}
+                  onClick={startGroupAudio}
+                  title="Start group voice call"
                 >
                   <span className="calls-btn-icon">📞</span>
-                  Audio
+                  Group Voice
                 </button>
                 <button
-                  className="calls-btn calls-btn-video"
-                  title="Video call"
-                  disabled={!d.online || isInCall}
-                  onClick={() => startVideo(d)}
+                  className="calls-btn calls-btn-video calls-btn-group"
+                  disabled={isInCall}
+                  onClick={startGroupVideo}
+                  title="Start group video call"
                 >
                   <span className="calls-btn-icon">🎥</span>
-                  Video
+                  Group Video
                 </button>
               </div>
-            </div>
-          ))}
-        </div>
+            )}
+          </div>
+
+          <div className="calls-devices">
+            {devices.map(d => (
+              <div
+                key={d.id}
+                className={`calls-device-card card${!d.online ? ' offline' : ''}${selected.has(d.id) ? ' selected' : ''}`}
+                onClick={() => toggleSelect(d)}
+                title={d.online ? (selected.has(d.id) ? 'Deselect' : 'Select for group call') : undefined}
+              >
+                {/* Selection indicator */}
+                <div className={`calls-select-check${selected.has(d.id) ? ' checked' : ''}`}>
+                  {selected.has(d.id) ? '✓' : ''}
+                </div>
+
+                <div className="calls-device-avatar">
+                  {(d.username || d.name)[0]?.toUpperCase()}
+                </div>
+                <div className="calls-device-info">
+                  <div className="calls-device-name">{d.username || d.name}</div>
+                  <div className="calls-device-meta">
+                    <span className={`calls-status-dot${d.online ? ' online' : ''}`} />
+                    {d.online ? 'Online' : 'Offline'} · {d.type}
+                  </div>
+                </div>
+                <div className="calls-device-actions" onClick={e => e.stopPropagation()}>
+                  {/* 1-to-1 call buttons (only shown when nothing selected) */}
+                  {!isGroupMode && (
+                    <>
+                      <button
+                        className="calls-btn calls-btn-audio"
+                        title="Audio call"
+                        disabled={!d.online || isInCall}
+                        onClick={() => startAudio(d)}
+                      >
+                        <span className="calls-btn-icon">📞</span>
+                        Audio
+                      </button>
+                      <button
+                        className="calls-btn calls-btn-video"
+                        title="Video call"
+                        disabled={!d.online || isInCall}
+                        onClick={() => startVideo(d)}
+                      >
+                        <span className="calls-btn-icon">🎥</span>
+                        Video
+                      </button>
+                    </>
+                  )}
+                  {isGroupMode && d.online && (
+                    <div className="calls-selected-hint">
+                      {selected.has(d.id) ? '✓ In group' : 'Tap to add'}
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </>
       )}
     </div>
   );
