@@ -296,3 +296,14 @@
 .gcall-join-now-btn:hover:not(:disabled) { opacity: 0.85; transform: scale(1.04); }
 .gcall-join-now-btn:active:not(:disabled) { transform: scale(0.96); }
 .gcall-join-now-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* System message row (group call, etc.) — full width, no bubble */
+.msg-row-system {
+  justify-content: center;
+  padding: 0.25rem 0;
+}
+
+.msg-row-system .gcall-join-now-msg {
+  width: 100%;
+  max-width: 480px;
+}

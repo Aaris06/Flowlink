@@ -441,20 +441,36 @@ export default function MessagesPage({ ctx }: Props) {
             <div className="msg-header-actions">
               <button
                 className="msg-call-btn"
-                title="Audio call"
+                title="Voice call"
                 onClick={() => {
-                  const peers = (window as any)._sessionDevices as { id: string; username: string }[] | undefined;
-                  const target = peers?.find(d => d.id !== deviceId);
-                  if (target) ctx.callService!.startCall(target.username, target.id, false);
+                  const peers = ((window as any)._sessionDevices as { id: string; username: string; online?: boolean }[] | undefined)
+                    ?.filter(d => d.id !== deviceId);
+                  if (!peers || peers.length === 0) return;
+                  if (peers.length === 1) {
+                    // 1-to-1
+                    ctx.callService!.startCall(peers[0].username, peers[0].id, false);
+                  } else {
+                    // group call — invite everyone in session
+                    const invitees = peers.map(d => ({ username: d.username, deviceId: d.id }));
+                    ctx.groupCallService?.startGroupCall(invitees, 'audio', session.id);
+                  }
                 }}
               >📞</button>
               <button
                 className="msg-call-btn"
                 title="Video call"
                 onClick={() => {
-                  const peers = (window as any)._sessionDevices as { id: string; username: string }[] | undefined;
-                  const target = peers?.find(d => d.id !== deviceId);
-                  if (target) ctx.callService!.startCall(target.username, target.id, true);
+                  const peers = ((window as any)._sessionDevices as { id: string; username: string; online?: boolean }[] | undefined)
+                    ?.filter(d => d.id !== deviceId);
+                  if (!peers || peers.length === 0) return;
+                  if (peers.length === 1) {
+                    // 1-to-1
+                    ctx.callService!.startCall(peers[0].username, peers[0].id, true);
+                  } else {
+                    // group call — invite everyone in session
+                    const invitees = peers.map(d => ({ username: d.username, deviceId: d.id }));
+                    ctx.groupCallService?.startGroupCall(invitees, 'video', session.id);
+                  }
                 }}
               >🎥</button>
             </div>
@@ -468,6 +484,31 @@ export default function MessagesPage({ ctx }: Props) {
           {messages.map(m => {
             const own = m.sourceDevice === deviceId;
             const repliedMsg = m.replyTo ? messages.find(r => r.messageId === m.replyTo) : null;
+
+            // System messages: GROUP_CALL_START renders as a full-width call card, not a bubble
+            if (m.text?.startsWith('[[GROUP_CALL_START]]')) {
+              try {
+                const data = JSON.parse(m.text.replace('[[GROUP_CALL_START]]', ''));
+                return (
+                  <div key={m.messageId} className="msg-row msg-row-system">
+                    {renderGroupCallStart(data)}
+                  </div>
+                );
+              } catch { /* fall through to normal render */ }
+            }
+
+            // CALL_ACTIVITY also renders as a system card
+            if (m.text?.startsWith('[[CALL_ACTIVITY]]')) {
+              try {
+                const data = JSON.parse(m.text.replace('[[CALL_ACTIVITY]]', '')) as CallActivity;
+                return (
+                  <div key={m.messageId} className="msg-row msg-row-system">
+                    {renderCallActivity(data)}
+                  </div>
+                );
+              } catch { /* fall through to normal render */ }
+            }
+
             return (
               <div key={m.messageId} className={`msg-row${own ? ' own' : ''}`} onContextMenu={e => handleContextMenu(e, m)}>
                 {!own && <div className="msg-avatar">{(m.username || '?')[0].toUpperCase()}</div>}

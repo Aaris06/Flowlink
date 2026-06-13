@@ -25,13 +25,23 @@ export default function CallsPage({ ctx }: Props) {
   useEffect(() => {
     const refresh = () => {
       const snap = (window as any)._sessionDevices as SessionDevice[] | undefined;
-      if (snap) setDevices(snap.filter(d => d.id !== deviceId));
+      if (snap && snap.length > 0) {
+        setDevices(snap.filter((d: SessionDevice) => d.id !== deviceId));
+      }
     };
+    // immediate
     refresh();
-    const handler = () => refresh();
-    window.addEventListener('sessionMessage', handler);
-    return () => window.removeEventListener('sessionMessage', handler);
-  }, [deviceId]);
+    // re-run on any session event (join/leave/connect/disconnect)
+    window.addEventListener('sessionMessage', refresh);
+    // also poll for the first 3s in case the snapshot arrives late
+    const t1 = setTimeout(refresh, 500);
+    const t2 = setTimeout(refresh, 1500);
+    const t3 = setTimeout(refresh, 3000);
+    return () => {
+      window.removeEventListener('sessionMessage', refresh);
+      clearTimeout(t1); clearTimeout(t2); clearTimeout(t3);
+    };
+  }, [deviceId, session]);
 
   // Mirror call states
   useEffect(() => {
