@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { CallService, CallState, CallInfo } from '../services/CallService';
+import { startRingtone, stopRingtone } from '../services/RingtoneService';
 import './CallModal.css';
 
 interface CallModalProps {
@@ -8,17 +9,29 @@ interface CallModalProps {
   callInfo: CallInfo | null;
 }
 
-function attachAndPlay(el: HTMLMediaElement, stream: MediaStream) {
-  if (!el) return;
-  if (el.srcObject !== stream) el.srcObject = stream;
+/**
+ * Attach a MediaStream to a media element and start playback.
+ * Safe to call multiple times — only reassigns srcObject if the stream changed.
+ */
+function attachAndPlay(el: HTMLMediaElement | null, stream: MediaStream | null) {
+  if (!el || !stream) return;
+  if (el.srcObject !== stream) {
+    el.srcObject = stream;
+  }
   el.volume = 1;
   el.muted = false;
   el.play().catch((err) => {
-    if (err?.name !== 'NotAllowedError') console.warn('[CallModal] audio play error:', err);
+    if (err?.name !== 'NotAllowedError') console.warn('[CallModal] play error:', err);
   });
 }
 
-function ensureAudioUnlocked(el: HTMLAudioElement) {
+/**
+ * On iOS, audio playback requires a user gesture before it can start.
+ * Register one-shot listeners so that the next user interaction resumes
+ * any paused audio elements.
+ */
+function ensureAudioUnlocked(el: HTMLAudioElement | null) {
+  if (!el) return;
   const unlock = () => {
     if (el.paused && el.srcObject) el.play().catch(() => {});
     document.removeEventListener('click', unlock, true);
@@ -36,14 +49,70 @@ export default function CallModal({ callService, state, callInfo }: CallModalPro
   const [duration, setDuration] = useState(0);
   const [minimized, setMinimized] = useState(false);
 
-  // Bubble drag state
-  const bubbleRef = useRef<HTMLDivElement | null>(null);
-  const dragState  = useRef({ dragging: false, startX: 0, startY: 0, origX: 0, origY: 0 });
+  // ── Ringtone ────────────────────────────────────────────────────────────
+  useEffect(() => {
+    const username = (window as any).__flowlink_username ?? 'default';
+    if (state === 'ringing_in') {
+      startRingtone(username);
+    } else {
+      stopRingtone();
+    }
+    return () => stopRingtone();
+  }, [state]);
 
+  // ── Refs ────────────────────────────────────────────────────────────────
+  const bubbleRef      = useRef<HTMLDivElement | null>(null);
+  const dragState      = useRef({ dragging: false, startX: 0, startY: 0, origX: 0, origY: 0 });
   const localVideoRef  = useRef<HTMLVideoElement | null>(null);
   const remoteVideoRef = useRef<HTMLVideoElement | null>(null);
+  // The remote audio element is ALWAYS mounted (even during connecting/ringing)
+  // so it is never torn down and recreated at the moment a track arrives.
   const remoteAudioRef = useRef<HTMLAudioElement | null>(null);
 
+  // ── Helpers ─────────────────────────────────────────────────────────────
+  const attachRemoteMedia = useCallback((stream: MediaStream | null) => {
+    if (!stream) return;
+    // Audio: always attach to keep audio running regardless of video visibility
+    attachAndPlay(remoteAudioRef.current, stream);
+    ensureAudioUnlocked(remoteAudioRef.current);
+    // Video: only attach when the video element is mounted
+    if (remoteVideoRef.current) {
+      attachAndPlay(remoteVideoRef.current, stream);
+    }
+  }, []);
+
+  // ── Register callbacks with CallService once ────────────────────────────
+  useEffect(() => {
+    // Called whenever a remote track arrives (can fire multiple times for audio + video)
+    callService.setOnRemoteTrack((stream) => {
+      attachRemoteMedia(stream);
+    });
+    callService.setOnLocalTrack((stream) => {
+      if (localVideoRef.current) {
+        localVideoRef.current.srcObject = stream;
+        localVideoRef.current.muted = true;
+      }
+    });
+    return () => {
+      callService.setOnRemoteTrack(() => {});
+      callService.setOnLocalTrack(() => {});
+    };
+  }, [callService, attachRemoteMedia]);
+
+  // ── Re-attach streams when state becomes connecting/active ──────────────
+  // This covers the case where the DOM elements mounted *after* the track arrived.
+  useEffect(() => {
+    if (state === 'active' || state === 'connecting') {
+      const local = callService.getLocalStream();
+      if (localVideoRef.current && local) {
+        localVideoRef.current.srcObject = local;
+        localVideoRef.current.muted = true;
+      }
+      attachRemoteMedia(callService.getRemoteStream());
+    }
+  }, [state, callService, attachRemoteMedia]);
+
+  // ── Attach ref callbacks for elements that mount/unmount ────────────────
   const attachLocal = useCallback((el: HTMLVideoElement | null) => {
     localVideoRef.current = el;
     if (el) {
@@ -60,56 +129,55 @@ export default function CallModal({ callService, state, callInfo }: CallModalPro
     }
   }, [callService]);
 
+  // The audio element is always-mounted; this ref callback fires once on mount.
   const attachRemoteAudio = useCallback((el: HTMLAudioElement | null) => {
     remoteAudioRef.current = el;
     if (el) {
       const stream = callService.getRemoteStream();
-      if (stream) { attachAndPlay(el, stream); ensureAudioUnlocked(el); }
-    }
-  }, [callService]);
-
-  useEffect(() => {
-    callService.setOnRemoteTrack((stream) => {
-      if (remoteVideoRef.current) attachAndPlay(remoteVideoRef.current, stream);
-      if (remoteAudioRef.current) { attachAndPlay(remoteAudioRef.current, stream); ensureAudioUnlocked(remoteAudioRef.current); }
-    });
-    callService.setOnLocalTrack((stream) => {
-      if (localVideoRef.current) { localVideoRef.current.srcObject = stream; localVideoRef.current.muted = true; }
-    });
-    return () => { callService.setOnRemoteTrack(() => {}); callService.setOnLocalTrack(() => {}); };
-  }, [callService]);
-
-  useEffect(() => {
-    if (state === 'active' || state === 'connecting') {
-      const local = callService.getLocalStream();
-      if (localVideoRef.current && local) { localVideoRef.current.srcObject = local; localVideoRef.current.muted = true; }
-      const remote = callService.getRemoteStream();
-      if (remote) {
-        if (remoteVideoRef.current) attachAndPlay(remoteVideoRef.current, remote);
-        if (remoteAudioRef.current) { attachAndPlay(remoteAudioRef.current, remote); ensureAudioUnlocked(remoteAudioRef.current); }
+      if (stream) {
+        attachAndPlay(el, stream);
+        ensureAudioUnlocked(el);
       }
-      let attempts = 0;
-      const poll = setInterval(() => {
-        attempts++;
-        const rem = callService.getRemoteStream();
-        if (rem && remoteAudioRef.current && remoteAudioRef.current.srcObject !== rem) {
-          attachAndPlay(remoteAudioRef.current, rem); ensureAudioUnlocked(remoteAudioRef.current);
-        }
-        if (attempts >= 30) clearInterval(poll);
-      }, 100);
-      return () => clearInterval(poll);
     }
+  }, [callService]);
+
+  // ── Periodic retry for audio (iOS autoplay policy) ──────────────────────
+  // Polls for 5 seconds after connecting to ensure audio starts playing.
+  useEffect(() => {
+    if (state !== 'active' && state !== 'connecting') return;
+    let attempts = 0;
+    const poll = setInterval(() => {
+      attempts++;
+      const el = remoteAudioRef.current;
+      const stream = callService.getRemoteStream();
+      if (el && stream) {
+        if (el.srcObject !== stream) {
+          el.srcObject = stream;
+          el.muted = false;
+        }
+        if (el.paused) {
+          el.play().catch(() => {});
+        }
+      }
+      if (attempts >= 50) clearInterval(poll); // 5 seconds @ 100ms
+    }, 100);
+    return () => clearInterval(poll);
   }, [state, callService]);
 
+  // ── Reset state on new call ─────────────────────────────────────────────
   useEffect(() => {
-    if (state === 'ringing_in' || state === 'ringing_out') { setMuted(false); setCameraOff(false); setMinimized(false); }
+    if (state === 'ringing_in' || state === 'ringing_out') {
+      setMuted(false);
+      setCameraOff(false);
+      setMinimized(false);
+    }
   }, [state]);
 
-  // Un-minimize automatically when call ends
   useEffect(() => {
     if (state === 'idle' || state === 'ended') setMinimized(false);
   }, [state]);
 
+  // ── Duration timer ──────────────────────────────────────────────────────
   useEffect(() => {
     if (state !== 'active') { setDuration(0); return; }
     const t = setInterval(() => setDuration(d => d + 1), 1000);
@@ -119,33 +187,23 @@ export default function CallModal({ callService, state, callInfo }: CallModalPro
   const fmt = (s: number) =>
     `${Math.floor(s / 60).toString().padStart(2, '0')}:${(s % 60).toString().padStart(2, '0')}`;
 
-  // ── Bubble drag — with viewport clamping ─────────────────────────────
+  // ── Bubble drag ─────────────────────────────────────────────────────────
   const onBubbleMouseDown = (e: React.MouseEvent) => {
-    // Don't start drag when clicking the end-call button
     if ((e.target as HTMLElement).closest('.call-bubble-end')) return;
     const el = bubbleRef.current;
     if (!el) return;
     const rect = el.getBoundingClientRect();
-    dragState.current = {
-      dragging: true,
-      startX: e.clientX,
-      startY: e.clientY,
-      origX: rect.left,
-      origY: rect.top,
-    };
+    dragState.current = { dragging: true, startX: e.clientX, startY: e.clientY, origX: rect.left, origY: rect.top };
     e.preventDefault();
   };
 
   useEffect(() => {
-    const BUBBLE_SIZE = 100; // slightly larger than 88dp to give safe margin
+    const BUBBLE_SIZE = 100;
     const onMove = (e: MouseEvent) => {
       const ds = dragState.current;
       if (!ds.dragging || !bubbleRef.current) return;
-      const dx = e.clientX - ds.startX;
-      const dy = e.clientY - ds.startY;
-      const rawX = ds.origX + dx;
-      const rawY = ds.origY + dy;
-      // Clamp within viewport, leaving at least 10px on every edge
+      const rawX = ds.origX + (e.clientX - ds.startX);
+      const rawY = ds.origY + (e.clientY - ds.startY);
       const clampedX = Math.min(Math.max(rawX, 10), window.innerWidth  - BUBBLE_SIZE - 10);
       const clampedY = Math.min(Math.max(rawY, 10), window.innerHeight - BUBBLE_SIZE - 10);
       bubbleRef.current.style.left   = `${clampedX}px`;
@@ -156,12 +214,10 @@ export default function CallModal({ callService, state, callInfo }: CallModalPro
     const onUp = () => { dragState.current.dragging = false; };
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);
-    return () => {
-      window.removeEventListener('mousemove', onMove);
-      window.removeEventListener('mouseup', onUp);
-    };
+    return () => { window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); };
   }, []);
 
+  // ── Render ──────────────────────────────────────────────────────────────
   if (state === 'idle' || !callInfo) return null;
 
   const isVideo = callInfo.isVideo;
@@ -169,7 +225,7 @@ export default function CallModal({ callService, state, callInfo }: CallModalPro
   const showLocalPreview = isVideo && (state === 'ringing_out' || state === 'connecting' || state === 'active');
   const showMinimizeBtn  = state === 'active' || state === 'connecting' || state === 'ringing_out';
 
-  // ── Minimized bubble ───────────────────────────────────────────────────
+  // ── Minimized bubble ────────────────────────────────────────────────────
   if (minimized) {
     return (
       <div
@@ -179,29 +235,25 @@ export default function CallModal({ callService, state, callInfo }: CallModalPro
         onClick={() => setMinimized(false)}
         title="Click to restore call"
       >
-        {/* Always-present audio even when minimized */}
+        {/*
+          The audio element must always be present — even in the bubble —
+          so audio never stops when minimizing/restoring.
+        */}
         <audio ref={attachRemoteAudio} autoPlay playsInline style={{ display: 'none' }} />
 
-        {/* Circle clipping wrapper — overflow:hidden lives here, NOT on the outer div */}
         <div className="call-bubble-circle">
-          {/* Video preview inside bubble for video calls */}
           {showRemoteVideo && (
             <video ref={attachRemoteVideo} className="call-bubble-video" autoPlay playsInline />
           )}
-
-          {/* Avatar shown for audio calls */}
           {!showRemoteVideo && (
             <div className="call-bubble-avatar">{callInfo.remoteUsername[0]?.toUpperCase()}</div>
           )}
-
-          {/* Bottom scrim + timer */}
           <div className="call-bubble-info">
             <span className="call-bubble-name">{callInfo.remoteUsername}</span>
             <span className="call-bubble-timer">{state === 'active' ? fmt(duration) : 'Calling…'}</span>
           </div>
         </div>
 
-        {/* End call button — outside the circle so it's never clipped */}
         <button
           className="call-bubble-end"
           onMouseDown={(e) => e.stopPropagation()}
@@ -212,36 +264,33 @@ export default function CallModal({ callService, state, callInfo }: CallModalPro
     );
   }
 
-  // ── Full call modal ────────────────────────────────────────────────────
+  // ── Full call modal ──────────────────────────────────────────────────────
   return (
     <div className={`call-modal-overlay${state === 'active' && isVideo ? ' call-modal-video-mode' : ''}`}>
       <div className="call-modal">
 
-        {/* Minimize button */}
         {showMinimizeBtn && (
-          <button
-            className="call-btn-minimize"
-            onClick={() => setMinimized(true)}
-            title="Minimize call"
-          >
+          <button className="call-btn-minimize" onClick={() => setMinimized(true)} title="Minimize call">
             <span>⬇</span>
           </button>
         )}
 
-        {/* Always-present hidden audio element */}
+        {/*
+          The audio element is ALWAYS rendered (never conditional) so it is
+          never unmounted/remounted when state changes from connecting→active.
+          If it were conditional it could be torn down at the exact moment a
+          track fires, causing the audio to go silent.
+        */}
         <audio ref={attachRemoteAudio} autoPlay playsInline style={{ display: 'none' }} />
 
-        {/* Remote video */}
         {showRemoteVideo && (
           <video ref={attachRemoteVideo} className="call-video-remote" autoPlay playsInline />
         )}
 
-        {/* Local preview PiP */}
         {showLocalPreview && (
           <video ref={attachLocal} className="call-video-local" autoPlay playsInline muted />
         )}
 
-        {/* Info overlay */}
         <div className="call-modal-info">
           {!(state === 'active' && isVideo) && (
             <div className="call-avatar">{callInfo.remoteUsername[0]?.toUpperCase()}</div>
@@ -256,7 +305,6 @@ export default function CallModal({ callService, state, callInfo }: CallModalPro
           </div>
         </div>
 
-        {/* Controls */}
         <div className="call-controls">
           {state === 'ringing_in' && (
             <>

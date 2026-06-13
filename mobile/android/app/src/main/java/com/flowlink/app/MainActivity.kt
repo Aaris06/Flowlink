@@ -50,10 +50,20 @@ import org.json.JSONObject
 import java.io.File
 
 class MainActivity : AppCompatActivity(), UsernameDialogFragment.UsernameDialogListener, InvitationDialogFragment.InvitationDialogListener {
+    // ── Public action constants ────────────────────────────────────────────
+    companion object {
+        const val ACTION_ANSWER_CALL    = "com.flowlink.app.ACTION_ANSWER_CALL"
+        /** Sent when user accepted from notification — CallSession already CONNECTING */
+        const val ACTION_SHOW_ACTIVE_CALL = "com.flowlink.app.ACTION_SHOW_ACTIVE_CALL"
+    }
+
     private lateinit var binding: ActivityMainBinding
     lateinit var sessionManager: SessionManager
     lateinit var webSocketManager: WebSocketManager
     lateinit var notificationService: NotificationService
+
+    /** True while MainActivity is in the foreground — used to skip call notifications */
+    private var isAppInForeground = false
     private var clipboardSyncEnabled = false
     private var pendingScreenShareViewerDeviceId: String? = null
     
@@ -410,6 +420,7 @@ class MainActivity : AppCompatActivity(), UsernameDialogFragment.UsernameDialogL
 
     override fun onResume() {
         super.onResume()
+        isAppInForeground = true
         // Check if we have an active session and should show DeviceTiles
         val currentCode = sessionManager.getCurrentSessionCode()
         val currentSessionId = sessionManager.getCurrentSessionId()
@@ -456,8 +467,7 @@ class MainActivity : AppCompatActivity(), UsernameDialogFragment.UsernameDialogL
     
     override fun onPause() {
         super.onPause()
-        // Don't disconnect WebSocket when app goes to background
-        // Let it maintain connection for receiving invitations and messages
+        isAppInForeground = false
         android.util.Log.d("FlowLink", "onPause: Keeping WebSocket connected in background")
     }
 
@@ -520,6 +530,31 @@ class MainActivity : AppCompatActivity(), UsernameDialogFragment.UsernameDialogL
                 if (!tabHandoffJson.isNullOrBlank()) {
                     openTabHandoff(JSONObject(tabHandoffJson))
                 }
+            }
+
+            ACTION_ANSWER_CALL -> {
+                // User tapped "Accept" on the incoming-call notification.
+                // The activity was brought to foreground via FLAG_ACTIVITY_SINGLE_TOP
+                // so onNewIntent or onCreate fires — session back stack is preserved.
+                val callId     = intent.getStringExtra(com.flowlink.app.receiver.CallActionReceiver.EXTRA_CALL_ID)     ?: return
+                val fromDevice = intent.getStringExtra(com.flowlink.app.receiver.CallActionReceiver.EXTRA_FROM_DEVICE) ?: return
+                val fromUser   = intent.getStringExtra(com.flowlink.app.receiver.CallActionReceiver.EXTRA_FROM_USER)   ?: "Unknown"
+                val isVideo    = intent.getBooleanExtra(com.flowlink.app.receiver.CallActionReceiver.EXTRA_IS_VIDEO, false)
+
+                notificationService.dismissIncomingCall()
+                stopBackgroundRingtone()
+                showCallFragment(
+                    com.flowlink.app.ui.CallFragment.newIncoming(callId, fromUser, fromDevice, isVideo)
+                )
+            }
+
+            ACTION_SHOW_ACTIVE_CALL -> {
+                // Called after user accepted from the notification — CallSession is already
+                // CONNECTING. Open CallFragment in restore mode so it skips ringing and
+                // goes straight to connecting/active.
+                stopBackgroundRingtone()
+                notificationService.dismissIncomingCall()
+                showActiveCallScreen()
             }
         }
     }
@@ -1519,7 +1554,20 @@ class MainActivity : AppCompatActivity(), UsernameDialogFragment.UsernameDialogL
 
     /** Called from WebSocketManager call event collector — shows incoming call UI */
     private fun showIncomingCall(callId: String, fromUsername: String, fromDevice: String, isVideo: Boolean) {
-        val fragment = com.flowlink.app.ui.CallFragment.newIncoming(callId, fromUsername, fromDevice, isVideo)
+        if (!isAppInForeground) {
+            // App is in the background — show the heads-up notification with Accept/Reject.
+            // Also play the ringtone via the service so the user hears it.
+            notificationService.showIncomingCall(callId, fromUsername, fromDevice, isVideo)
+            startRingtoneForBackgroundCall(callId)
+            return
+        }
+        // App is foregrounded — open CallFragment directly (it handles its own ringtone)
+        showCallFragment(com.flowlink.app.ui.CallFragment.newIncoming(callId, fromUsername, fromDevice, isVideo))
+    }
+
+    private fun showCallFragment(fragment: androidx.fragment.app.Fragment) {
+        val existing = supportFragmentManager.findFragmentByTag("call")
+        if (existing != null && existing.isAdded) return
         runOnUiThread {
             supportFragmentManager.beginTransaction()
                 .add(R.id.fragment_container, fragment, "call")
@@ -1528,11 +1576,47 @@ class MainActivity : AppCompatActivity(), UsernameDialogFragment.UsernameDialogL
         }
     }
 
+    private fun showActiveCallScreen() {
+        if (!com.flowlink.app.service.CallSession.isActive) return
+        if (callBubbleView != null) {
+            restoreCallFromBubble()
+            return
+        }
+        showCallFragment(com.flowlink.app.ui.CallFragment.restore())
+    }
+
+    // ── Background ringtone ──────────────────────────────────────────────────
+    private var bgRingtone: android.media.Ringtone? = null
+    private var bgRingtoneCallId: String? = null
+
+    private fun startRingtoneForBackgroundCall(callId: String) {
+        stopBackgroundRingtone()
+        bgRingtoneCallId = callId
+        bgRingtone = com.flowlink.app.ui.SettingsFragment.playRingtone(this)
+    }
+
+    fun stopBackgroundRingtone() {
+        bgRingtone?.stop()
+        bgRingtone = null
+        bgRingtoneCallId = null
+    }
+
     private fun listenForIncomingCalls() {
         lifecycleScope.launch {
             webSocketManager.callEvents.collect { event ->
-                if (event is com.flowlink.app.service.WebSocketManager.CallEvent.Incoming) {
-                    showIncomingCall(event.callId, event.fromUsername, event.fromDevice, event.isVideo)
+                when (event) {
+                    is com.flowlink.app.service.WebSocketManager.CallEvent.Incoming -> {
+                        showIncomingCall(event.callId, event.fromUsername, event.fromDevice, event.isVideo)
+                    }
+                    is com.flowlink.app.service.WebSocketManager.CallEvent.Ended,
+                    is com.flowlink.app.service.WebSocketManager.CallEvent.Rejected -> {
+                        // If the call ends while app is in background, stop the ringtone
+                        // and dismiss the notification
+                        stopBackgroundRingtone()
+                        notificationService.dismissIncomingCall()
+                        notificationService.dismissOngoingCall()
+                    }
+                    else -> {}
                 }
             }
         }
@@ -1562,8 +1646,8 @@ class MainActivity : AppCompatActivity(), UsernameDialogFragment.UsernameDialogL
             .firstOrNull()?.uppercaseChar()?.toString() ?: "?"
         timerTv.text  = if (com.flowlink.app.service.CallSession.state ==
             com.flowlink.app.service.CallSession.State.ACTIVE)
-            "%02d:%02d".format(com.flowlink.app.service.CallSession.durationSec / 60,
-                com.flowlink.app.service.CallSession.durationSec % 60)
+            "%02d:%02d".format(com.flowlink.app.service.CallSession.currentDurationSec() / 60,
+                com.flowlink.app.service.CallSession.currentDurationSec() % 60)
         else "Calling…"
 
         // Show local video preview inside bubble for video calls

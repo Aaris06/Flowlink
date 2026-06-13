@@ -1,5 +1,6 @@
 package com.flowlink.app.service
 
+import android.os.SystemClock
 import android.util.Log
 import org.webrtc.*
 
@@ -50,11 +51,27 @@ object CallSession {
 
     // Duration
     var durationSec : Int = 0
+    private var connectedAtElapsedMs: Long? = null
 
     // ── State helpers ──────────────────────────────────────────────────────
     val isActive get() = state != State.IDLE && state != State.ENDED
 
-    fun setState(s: State) { state = s }
+    fun setState(s: State) {
+        if (state == State.ACTIVE && s != State.ACTIVE) {
+            durationSec = currentDurationSec()
+        }
+        if (s == State.ACTIVE && connectedAtElapsedMs == null) {
+            connectedAtElapsedMs = SystemClock.elapsedRealtime() - (durationSec * 1000L)
+        }
+        state = s
+    }
+
+    fun currentDurationSec(): Int {
+        val connectedAt = connectedAtElapsedMs ?: return durationSec
+        return ((SystemClock.elapsedRealtime() - connectedAt) / 1000L).toInt().coerceAtLeast(0)
+    }
+
+    fun getConnectedAtElapsedMs(): Long? = connectedAtElapsedMs
 
     fun startNew(
         callId: String,
@@ -70,6 +87,7 @@ object CallSession {
         this.direction      = direction
         this.state          = if (direction == "inbound") State.RINGING_IN else State.RINGING_OUT
         this.durationSec    = 0
+        this.connectedAtElapsedMs = null
         this.isSwapped      = false
         this.isMuted        = false
         this.isSpeakerOn    = false
@@ -103,6 +121,7 @@ object CallSession {
         pendingCandidates.clear()
         remoteDescSet         = false
         durationSec           = 0
+        connectedAtElapsedMs  = null
         state                 = State.IDLE
         Log.d(TAG, "CallSession cleaned up")
     }

@@ -25,12 +25,16 @@ class NotificationService(private val context: Context) {
         const val CHANNEL_ID_MEDIA = "media_handoff"
         const val CHANNEL_ID_TRANSFERS = "file_transfers"
         const val CHANNEL_ID_SOS = "sos_alerts"
-        
+        const val CHANNEL_ID_CALLS = "incoming_calls"
+        const val CHANNEL_ID_ONGOING_CALLS = "ongoing_calls"
+
         const val NOTIFICATION_ID_INVITATION = 1001
         const val NOTIFICATION_ID_NEARBY = 1002
         const val NOTIFICATION_ID_GENERAL = 1003
         const val NOTIFICATION_ID_MEDIA = 1004
         const val NOTIFICATION_ID_TRANSFER = 1005
+        const val NOTIFICATION_ID_INCOMING_CALL = 2001
+        const val NOTIFICATION_ID_ONGOING_CALL = 2002
         
         const val ACTION_ACCEPT_INVITATION = "accept_invitation"
         const val ACTION_REJECT_INVITATION = "reject_invitation"
@@ -107,6 +111,29 @@ class NotificationService(private val context: Context) {
                     )
                     enableVibration(true)
                     vibrationPattern = longArrayOf(0, 200, 100, 200, 100, 200, 100, 600, 100, 600, 100, 600, 100, 200, 100, 200, 100, 200)
+                    lockscreenVisibility = android.app.Notification.VISIBILITY_PUBLIC
+                },
+                // ── Incoming call channel (max importance + full-screen) ────────
+                NotificationChannel(
+                    CHANNEL_ID_CALLS,
+                    "Incoming Calls",
+                    NotificationManager.IMPORTANCE_MAX
+                ).apply {
+                    description = "Incoming audio and video call alerts"
+                    setSound(null, null)            // ringtone played by CallFragment
+                    enableVibration(true)
+                    vibrationPattern = longArrayOf(0, 400, 200, 400, 200, 400)
+                    lockscreenVisibility = android.app.Notification.VISIBILITY_PUBLIC
+                    setBypassDnd(true)
+                },
+                NotificationChannel(
+                    CHANNEL_ID_ONGOING_CALLS,
+                    "Ongoing Calls",
+                    NotificationManager.IMPORTANCE_LOW
+                ).apply {
+                    description = "Persistent notifications for active FlowLink calls"
+                    setSound(null, null)
+                    enableVibration(false)
                     lockscreenVisibility = android.app.Notification.VISIBILITY_PUBLIC
                 }
             )
@@ -415,6 +442,158 @@ class NotificationService(private val context: Context) {
      */
     fun clearNotification(notificationId: Int) {
         notificationManager.cancel(notificationId)
+    }
+
+    /**
+     * Show incoming call heads-up notification with Accept (green) and Reject (red) action buttons.
+     * Also sets a full-screen intent so it appears on the lock screen.
+     */
+    fun showIncomingCall(
+        callId: String,
+        fromUsername: String,
+        fromDevice: String,
+        isVideo: Boolean
+    ) {
+        // ── Accept PendingIntent (broadcast → receiver accepts without full app launch) ──
+        val acceptIntent = Intent(context,
+            com.flowlink.app.receiver.CallActionReceiver::class.java).apply {
+            action = com.flowlink.app.receiver.CallActionReceiver.ACTION_CALL_ACCEPT
+            putExtra(com.flowlink.app.receiver.CallActionReceiver.EXTRA_CALL_ID,     callId)
+            putExtra(com.flowlink.app.receiver.CallActionReceiver.EXTRA_FROM_DEVICE, fromDevice)
+            putExtra(com.flowlink.app.receiver.CallActionReceiver.EXTRA_FROM_USER,   fromUsername)
+            putExtra(com.flowlink.app.receiver.CallActionReceiver.EXTRA_IS_VIDEO,    isVideo)
+        }
+        val acceptPi = PendingIntent.getBroadcast(
+            context, 3001, acceptIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        // ── Reject PendingIntent ────────────────────────────────────────────────────
+        val rejectIntent = Intent(context,
+            com.flowlink.app.receiver.CallActionReceiver::class.java).apply {
+            action = com.flowlink.app.receiver.CallActionReceiver.ACTION_CALL_REJECT
+            putExtra(com.flowlink.app.receiver.CallActionReceiver.EXTRA_CALL_ID,     callId)
+            putExtra(com.flowlink.app.receiver.CallActionReceiver.EXTRA_FROM_DEVICE, fromDevice)
+            putExtra(com.flowlink.app.receiver.CallActionReceiver.EXTRA_FROM_USER,   fromUsername)
+        }
+        val rejectPi = PendingIntent.getBroadcast(
+            context, 3002, rejectIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        // ── Full-screen / tap intent — opens the app to the call screen ──────────
+        val fullScreenIntent = Intent(context, com.flowlink.app.MainActivity::class.java).apply {
+            action = com.flowlink.app.MainActivity.ACTION_ANSWER_CALL
+            putExtra(com.flowlink.app.receiver.CallActionReceiver.EXTRA_CALL_ID,     callId)
+            putExtra(com.flowlink.app.receiver.CallActionReceiver.EXTRA_FROM_DEVICE, fromDevice)
+            putExtra(com.flowlink.app.receiver.CallActionReceiver.EXTRA_FROM_USER,   fromUsername)
+            putExtra(com.flowlink.app.receiver.CallActionReceiver.EXTRA_IS_VIDEO,    isVideo)
+            // SINGLE_TOP preserves the existing activity + back stack so the
+            // session is not destroyed when the user answers from the lock screen.
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
+        }
+        val fullScreenPi = PendingIntent.getActivity(
+            context, 3003, fullScreenIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val callTypeLabel = if (isVideo) "Incoming Video Call" else "Incoming Call"
+        val notification = NotificationCompat.Builder(context, CHANNEL_ID_CALLS)
+            .setSmallIcon(R.drawable.ic_notification)
+            .setContentTitle(callTypeLabel)
+            .setContentText("$fromUsername is calling…")
+            .setStyle(NotificationCompat.BigTextStyle()
+                .bigText("$fromUsername is calling you${if (isVideo) " (video)" else ""}.\nTap Accept to answer or Reject to decline."))
+            .setPriority(NotificationCompat.PRIORITY_MAX)
+            .setCategory(NotificationCompat.CATEGORY_CALL)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            .setAutoCancel(true)
+            .setOngoing(true)                   // stays until dismissed by Accept/Reject
+            .setTimeoutAfter(60_000)            // auto-dismiss after 60s if not answered
+            .setFullScreenIntent(fullScreenPi, true)
+            .setContentIntent(fullScreenPi)
+            // ── Accept (green) ──────────────────────────────────────────────
+            .addAction(
+                NotificationCompat.Action.Builder(
+                    R.drawable.ic_check,
+                    "Accept",
+                    acceptPi
+                ).build()
+            )
+            // ── Reject (red) ────────────────────────────────────────────────
+            .addAction(
+                NotificationCompat.Action.Builder(
+                    R.drawable.ic_close,
+                    "Reject",
+                    rejectPi
+                ).build()
+            )
+            .build()
+
+        try {
+            notificationManager.notify(NOTIFICATION_ID_INCOMING_CALL, notification)
+        } catch (_: SecurityException) {}
+    }
+
+    /** Dismiss the incoming-call notification (call was answered/rejected from within the app) */
+    fun dismissIncomingCall() {
+        notificationManager.cancel(NOTIFICATION_ID_INCOMING_CALL)
+    }
+
+    fun showOngoingCall(
+        callId: String,
+        callerName: String,
+        fromDevice: String,
+        isVideo: Boolean,
+        status: String,
+        connectedAtElapsedMs: Long? = null
+    ) {
+        val openIntent = Intent(context, MainActivity::class.java).apply {
+            action = MainActivity.ACTION_SHOW_ACTIVE_CALL
+            putExtra(com.flowlink.app.receiver.CallActionReceiver.EXTRA_CALL_ID, callId)
+            putExtra(com.flowlink.app.receiver.CallActionReceiver.EXTRA_FROM_DEVICE, fromDevice)
+            putExtra(com.flowlink.app.receiver.CallActionReceiver.EXTRA_FROM_USER, callerName)
+            putExtra(com.flowlink.app.receiver.CallActionReceiver.EXTRA_IS_VIDEO, isVideo)
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+        }
+        val openPi = PendingIntent.getActivity(
+            context,
+            3004,
+            openIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val builder = NotificationCompat.Builder(context, CHANNEL_ID_ONGOING_CALLS)
+            .setSmallIcon(R.drawable.ic_notification)
+            .setContentTitle(callerName)
+            .setContentText(status)
+            .setSubText(if (isVideo) "Video call" else "Voice call")
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setCategory(NotificationCompat.CATEGORY_CALL)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            .setOngoing(true)
+            .setOnlyAlertOnce(true)
+            .setAutoCancel(false)
+            .setContentIntent(openPi)
+
+        if (connectedAtElapsedMs != null) {
+            builder
+                .setUsesChronometer(true)
+                .setWhen(System.currentTimeMillis() - (android.os.SystemClock.elapsedRealtime() - connectedAtElapsedMs))
+                .setShowWhen(true)
+        } else {
+            builder
+                .setUsesChronometer(false)
+                .setShowWhen(false)
+        }
+
+        try {
+            notificationManager.notify(NOTIFICATION_ID_ONGOING_CALL, builder.build())
+        } catch (_: SecurityException) {}
+    }
+
+    fun dismissOngoingCall() {
+        notificationManager.cancel(NOTIFICATION_ID_ONGOING_CALL)
     }
 
     /**

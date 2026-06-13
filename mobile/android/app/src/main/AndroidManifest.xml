@@ -24,6 +24,8 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- Full-screen notification for incoming calls (lock-screen overlay) -->
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
 
     <application
         android:name=".FlowLinkApplication"
@@ -49,6 +51,7 @@
             android:name=".MainActivity"
             android:exported="true"
             android:hardwareAccelerated="true"
+            android:launchMode="singleTop"
             android:theme="@style/Theme.FlowLink">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
@@ -101,6 +104,16 @@
             android:name=".service.ScreenCaptureService"
             android:exported="false"
             android:foregroundServiceType="mediaProjection|dataSync" />
+
+        <!-- Call action receiver — handles Accept/Reject from notification -->
+        <receiver
+            android:name=".receiver.CallActionReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.flowlink.app.CALL_ACCEPT" />
+                <action android:name="com.flowlink.app.CALL_REJECT" />
+            </intent-filter>
+        </receiver>
     </application>
 
 </manifest>

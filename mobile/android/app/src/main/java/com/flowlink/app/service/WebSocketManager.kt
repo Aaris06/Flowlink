@@ -1490,10 +1490,8 @@ class WebSocketManager(private val mainActivity: MainActivity) {
                     val isVideo = payload.optBoolean("isVideo", false)
                     Log.d("FlowLink", "📞 Incoming ${if (isVideo) "video" else "audio"} call from $fromUsername")
                     _callEvents.tryEmit(CallEvent.Incoming(callId, fromUsername, fromDevice, isVideo))
-                    mainActivity.notificationService.showNotification(
-                        "📞 Incoming ${if (isVideo) "Video" else "Audio"} Call",
-                        "$fromUsername is calling you"
-                    )
+                    // Notification is shown by MainActivity.showIncomingCall() which checks
+                    // isAppInForeground — do NOT call notificationService directly here.
                 }
                 "call_accept" -> {
                     val payload = json.optJSONObject("payload") ?: return

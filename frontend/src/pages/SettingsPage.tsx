@@ -2,10 +2,11 @@
 import { AppContext } from '../App';
 import { logActivity } from './ActivityPage';
 import { friendService, Friend, FriendRequest, SosAlert } from '../services/FriendService';
+import { RINGTONES, getSavedRingtoneId, getSavedVolume, saveRingtone, previewRingtone } from '../services/RingtoneService';
 import './SettingsPage.css';
 
 interface Props { ctx: AppContext; }
-type Tab = 'session' | 'chat' | 'privacy' | 'inbox' | 'browser' | 'friends' | 'permissions' | 'feedback' | 'about';
+type Tab = 'session' | 'chat' | 'privacy' | 'calls' | 'inbox' | 'browser' | 'friends' | 'permissions' | 'feedback' | 'about';
 
 export default function SettingsPage({ ctx }: Props) {
   const { session, username, deviceName, deviceId, onLogout } = ctx;
@@ -24,7 +25,11 @@ export default function SettingsPage({ ctx }: Props) {
   const [clipboardSync, setClipboardSync] = useState(() => localStorage.getItem(uKey('clipboard_sync')) !== 'false');
   const [notifications, setNotifications] = useState(() => localStorage.getItem(uKey('notifications')) !== 'false');
 
-  // Friends & inbox
+  // Ringtone settings — keyed by username so each user has their own
+  const uName = (username || 'default').toLowerCase();
+  const [ringtoneId, setRingtoneId] = useState(() => getSavedRingtoneId(uName));
+  const [ringtoneVol, setRingtoneVol] = useState(() => getSavedVolume(uName));
+
   const [friends, setFriends] = useState<Friend[]>(() => friendService.getFriends());
   const [inbox, setInbox] = useState<FriendRequest[]>(() => friendService.getInbox());
   const [sosAlerts, setSosAlerts] = useState<SosAlert[]>([]);
@@ -87,6 +92,7 @@ export default function SettingsPage({ ctx }: Props) {
     { id: 'session', label: 'Session Details' },
     { id: 'chat', label: 'Chat' },
     { id: 'privacy', label: 'Privacy' },
+    { id: 'calls', label: 'Calls & Ringtone' },
     { id: 'inbox', label: 'Inbox', badge: pendingInbox.length + sosAlerts.length },
     { id: 'browser', label: 'Browser' },
     { id: 'friends', label: 'Friends' },
@@ -194,6 +200,75 @@ export default function SettingsPage({ ctx }: Props) {
                   </label>
                 </div>
               ))}
+            </div>
+          )}
+
+          {/* ── Calls & Ringtone ── */}
+          {tab === 'calls' && (
+            <div className="settings-section">
+              <div className="ss-title">Calls &amp; Ringtone</div>
+
+              {/* Ringtone picker */}
+              <div className="ss-label" style={{ marginBottom: '0.6rem' }}>Ringtone</div>
+              <div className="ringtone-grid">
+                {RINGTONES.map(r => (
+                  <button
+                    key={r.id}
+                    className={`ringtone-option${ringtoneId === r.id ? ' selected' : ''}`}
+                    onClick={() => {
+                      setRingtoneId(r.id);
+                      saveRingtone(uName, r.id, ringtoneVol);
+                      previewRingtone(r.id, ringtoneVol);
+                      logActivity({ type: 'settings', icon: '🔔', label: `Ringtone changed to ${r.label}`, sub: '' });
+                    }}
+                  >
+                    <span className="ringtone-icon">{r.id === 'silent' ? '🔕' : '🔔'}</span>
+                    <span className="ringtone-label">{r.label}</span>
+                    {ringtoneId === r.id && <span className="ringtone-check">✓</span>}
+                  </button>
+                ))}
+              </div>
+
+              {/* Volume slider */}
+              <div className="ss-toggle-row" style={{ marginTop: '1.25rem' }}>
+                <div>
+                  <div className="ss-label">Ringtone Volume</div>
+                  <div className="ss-desc">Adjust how loud the ringtone plays when a call arrives.</div>
+                </div>
+                <div className="ringtone-vol-row">
+                  <span className="ringtone-vol-icon">🔈</span>
+                  <input
+                    type="range" min="0" max="1" step="0.05"
+                    value={ringtoneVol}
+                    className="ringtone-vol-slider"
+                    onChange={e => {
+                      const v = parseFloat(e.target.value);
+                      setRingtoneVol(v);
+                      saveRingtone(uName, ringtoneId, v);
+                    }}
+                    onMouseUp={() => previewRingtone(ringtoneId, ringtoneVol)}
+                    onTouchEnd={() => previewRingtone(ringtoneId, ringtoneVol)}
+                  />
+                  <span className="ringtone-vol-icon">🔊</span>
+                  <span className="ringtone-vol-pct">{Math.round(ringtoneVol * 100)}%</span>
+                </div>
+              </div>
+
+              {/* Preview button */}
+              <button
+                className="btn-primary"
+                style={{ marginTop: '1rem', alignSelf: 'flex-start' }}
+                onClick={() => previewRingtone(ringtoneId, ringtoneVol)}
+                disabled={ringtoneId === 'silent'}
+              >
+                ▶ Preview Ringtone
+              </button>
+
+              {ringtoneId === 'silent' && (
+                <div className="ss-desc" style={{ marginTop: '0.75rem', color: '#f59e0b' }}>
+                  ⚠ Silent mode is on — you won't hear incoming calls.
+                </div>
+              )}
             </div>
           )}
 

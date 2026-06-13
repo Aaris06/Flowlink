@@ -1,11 +1,28 @@
 /**
  * CallService - WebRTC audio/video call management
  *
- * Fixes:
- * - ICE candidates buffered until remote description is set
- * - offer can arrive before acceptCall() — stored as pendingOffer
- * - answer/ice arriving before PC is created are queued
- * - audio mode set correctly for calls
+ * Architecture notes:
+ *
+ * CALLER flow:
+ *   startCall() → [remote accepts] → call_accept received → getUserMedia →
+ *   createPC → addTrack (creates sendrecv transceivers) → createOffer →
+ *   setLocalDescription → send call_offer → [receive call_answer] →
+ *   setRemoteDescription → ICE connects
+ *
+ * CALLEE flow:
+ *   call_invite → [user accepts] → acceptCall() → getUserMedia →
+ *   createPC → send call_accept → [receive call_offer] →
+ *   setRemoteDescription (creates transceivers from offer m-lines) →
+ *   addTrack for each local track (matched to existing m-lines) →
+ *   force sendrecv on all transceivers → createAnswer →
+ *   setLocalDescription → send call_answer → ICE connects
+ *
+ * CRITICAL: The callee must NOT call addTrack() before setRemoteDescription().
+ * If addTrack() is called first it creates transceivers with no m-line binding.
+ * When setRemoteDescription() then runs, it creates NEW transceivers for the
+ * offer m-lines and the pre-created ones become orphaned — so the local audio/
+ * video tracks are never associated with the negotiated m-lines and nothing is
+ * sent back to the caller.
  */
 
 export type CallState = 'idle' | 'ringing_out' | 'ringing_in' | 'connecting' | 'active' | 'ended';
@@ -23,7 +40,6 @@ type CallEventHandler = (state: CallState, info: CallInfo | null) => void;
 const ICE_SERVERS: RTCIceServer[] = [
   { urls: 'stun:stun.l.google.com:19302' },
   { urls: 'stun:stun1.l.google.com:19302' },
-  // TURN fallback so calls work across strict NATs
   {
     urls: 'turn:openrelay.metered.ca:80',
     username: 'openrelayproject',
@@ -45,9 +61,9 @@ export class CallService {
   private onLocalTrackCallback: ((stream: MediaStream) => void) | null = null;
 
   // Signaling race buffers
-  private pendingOffer: RTCSessionDescriptionInit | null = null;   // offer arrived before acceptCall
-  private pendingAnswer: RTCSessionDescriptionInit | null = null;  // answer arrived before PC ready
-  private pendingCandidates: RTCIceCandidateInit[] = [];           // ICE before remote desc
+  private pendingOffer: RTCSessionDescriptionInit | null = null;
+  private pendingAnswer: RTCSessionDescriptionInit | null = null;
+  private pendingCandidates: RTCIceCandidateInit[] = [];
   private remoteDescSet = false;
 
   constructor(deviceId: string, username: string, onStateChange: CallEventHandler) {
@@ -94,31 +110,27 @@ export class CallService {
     this.setState('connecting');
 
     try {
+      // Acquire media first so we're ready to add tracks after setRemoteDescription
       const stream = await this.getUserMedia(this.currentCall.isVideo);
       this.localStream = stream;
-      this.pc = this.createPeerConnection();
-      await this.attachLocalStream(stream, this.currentCall.isVideo, 'callee');
 
+      // Create the peer connection but do NOT add tracks yet.
+      // Tracks must be added AFTER setRemoteDescription so the browser can
+      // match them to the correct m-lines from the offer. Adding tracks before
+      // the offer creates orphaned transceivers that never get negotiated.
+      this.pc = this.createPeerConnection();
+
+      // Tell caller we're ready — they'll send us the offer
       this.send({
         type: 'call_accept',
         payload: { callId: this.currentCall.callId, toDevice: this.currentCall.remoteDeviceId, fromUsername: this.username },
       });
 
-      // If the offer arrived before we accepted, process it now
+      // If the offer arrived before acceptCall finished (race condition), process it now
       if (this.pendingOffer) {
         const offer = this.pendingOffer;
         this.pendingOffer = null;
         await this.applyRemoteOffer(offer);
-      }
-      // If a stale answer arrived (shouldn't happen inbound, but be safe)
-      if (this.pendingAnswer) {
-        const answer = this.pendingAnswer;
-        this.pendingAnswer = null;
-        if (this.pc.signalingState === 'have-local-offer') {
-          await this.pc.setRemoteDescription(answer);
-          this.remoteDescSet = true;
-          this.drainCandidates();
-        }
       }
     } catch (err) {
       console.error('[CallService] acceptCall failed:', err);
@@ -152,37 +164,31 @@ export class CallService {
     return !video.enabled;
   }
 
-  /** Switch between front and back camera (mobile browsers) */
   async switchCamera(): Promise<void> {
     if (!this.localStream || !this.currentCall?.isVideo) return;
     const videoTrack = this.localStream.getVideoTracks()[0];
     if (!videoTrack) return;
 
-    // Read current facing mode
     const settings = videoTrack.getSettings();
     const currentFacing = settings.facingMode ?? 'user';
     const nextFacing = currentFacing === 'user' ? 'environment' : 'user';
 
     try {
-      // Get new stream with opposite camera
       const newStream = await navigator.mediaDevices.getUserMedia({
         audio: false,
         video: { facingMode: { exact: nextFacing } },
       });
       const newVideoTrack = newStream.getVideoTracks()[0];
 
-      // Replace the track in the peer connection
       if (this.pc) {
         const sender = this.pc.getSenders().find(s => s.track?.kind === 'video');
         if (sender) await sender.replaceTrack(newVideoTrack);
       }
 
-      // Swap in local stream
       videoTrack.stop();
       this.localStream.removeTrack(videoTrack);
       this.localStream.addTrack(newVideoTrack);
 
-      // Re-attach local preview
       if (this.onLocalTrackCallback) this.onLocalTrackCallback(this.localStream);
     } catch {
       // Browser doesn't support exact facingMode — silently skip
@@ -211,7 +217,7 @@ export class CallService {
         break;
 
       case 'call_accept': {
-        // We're the caller — callee accepted, now build PC and send offer
+        // We're the caller — callee accepted. Build PC, add tracks, send offer.
         if (this.state !== 'ringing_out' || !this.currentCall) return;
         this.setState('connecting');
         try {
@@ -219,28 +225,20 @@ export class CallService {
           this.localStream = stream;
           this.pc = this.createPeerConnection();
 
-          await this.attachLocalStream(stream, this.currentCall.isVideo, 'caller');
-
-          // Explicitly verify directions — some browser/app pairings leave
-          // the first audio transceiver in a receive-only state.
-          this.pc.getTransceivers().forEach(tr => {
-            console.log(`[CallService] pre-offer transceiver: mid=${tr.mid} direction=${tr.direction} kind=${tr.receiver.track?.kind}`);
-            if (tr.direction !== 'sendrecv') {
-              tr.direction = 'sendrecv';
-            }
-          });
+          // Caller adds tracks BEFORE createOffer — this is correct for the caller.
+          // The caller is the one building the offer; its transceivers define the m-lines.
+          this.addTracksToPC(stream, this.currentCall.isVideo);
 
           const offer = await this.pc.createOffer();
           await this.pc.setLocalDescription(offer);
 
-          // Verify audio direction in offer SDP
-          const audioDirections = offer.sdp?.match(/a=(sendrecv|sendonly|recvonly|inactive)/g);
-          console.log('[CallService] offer audio directions:', audioDirections);
-          if (audioDirections?.every(d => d === 'a=recvonly')) {
-            console.warn('[CallService] WARNING: offer has only recvonly audio — web mic may not be captured');
-          }
+          console.log('[CallService] caller offer SDP directions:',
+            offer.sdp?.match(/a=(sendrecv|sendonly|recvonly|inactive)/g));
 
-          this.send({ type: 'call_offer', payload: { callId: this.currentCall.callId, toDevice: this.currentCall.remoteDeviceId, data: offer } });
+          this.send({
+            type: 'call_offer',
+            payload: { callId: this.currentCall.callId, toDevice: this.currentCall.remoteDeviceId, data: offer },
+          });
         } catch (err) {
           console.error('[CallService] call_accept handler failed:', err);
           this.cleanup('setup_failed');
@@ -264,7 +262,7 @@ export class CallService {
         if (!this.currentCall) return;
 
         if (!this.pc) {
-          // acceptCall hasn't finished setting up PC yet — buffer it
+          // acceptCall hasn't finished yet — buffer the offer
           this.pendingOffer = offerDesc;
           return;
         }
@@ -302,29 +300,70 @@ export class CallService {
 
   // ── Internal helpers ──────────────────────────────────────────────────
 
+  /**
+   * Callee-side offer processing.
+   *
+   * Order matters critically:
+   * 1. setRemoteDescription(offer) — browser creates transceivers for each m-line
+   * 2. addTrack() for each local track — browser matches each track to an existing
+   *    m-line transceiver (because the m-lines already exist). This sets the sender.
+   * 3. Force all transceivers to sendrecv (in case any ended up recvonly after
+   *    matching — can happen when the offer m-line was sendonly)
+   * 4. createAnswer() — now the answer will include our local tracks as send
+   * 5. setLocalDescription(answer)
+   * 6. send call_answer
+   */
   private async applyRemoteOffer(offerDesc: RTCSessionDescriptionInit) {
-    if (!this.pc) return;
+    if (!this.pc || !this.localStream) return;
+
+    // Step 1: establish the remote description first
     await this.pc.setRemoteDescription(offerDesc);
     this.remoteDescSet = true;
     this.drainCandidates();
 
-    // After setting remote description, ensure all transceivers are sendrecv
-    // so this side actually sends audio/video back to the caller
+    // Step 2: add our local tracks NOW — after setRemoteDescription.
+    // The browser matches each addTrack() call to an existing m-line transceiver
+    // rather than creating a new one. This ensures our audio/video is sent back.
+    const isVideo = this.currentCall?.isVideo ?? false;
+    this.addTracksToPC(this.localStream, isVideo);
+
+    // Step 3: ensure every transceiver is sendrecv so our answer advertises sending
     this.pc.getTransceivers().forEach(tr => {
-      if (tr.direction === 'recvonly') {
+      if (tr.direction === 'recvonly' || tr.direction === 'inactive') {
         tr.direction = 'sendrecv';
-      } else if (tr.direction === 'inactive') {
-        tr.direction = 'sendrecv';
+        console.log(`[CallService] callee: forced transceiver ${tr.mid} to sendrecv`);
       }
     });
 
+    // Step 4+5: create and apply the answer
     const answer = await this.pc.createAnswer();
     await this.pc.setLocalDescription(answer);
-    console.log('[CallService] callee sending answer, SDP audio direction check:',
+
+    console.log('[CallService] callee answer SDP directions:',
       answer.sdp?.match(/a=(sendrecv|sendonly|recvonly|inactive)/g));
+
+    // Step 6: send to caller
     this.send({
       type: 'call_answer',
       payload: { callId: this.currentCall!.callId, toDevice: this.currentCall!.remoteDeviceId, data: answer },
+    });
+  }
+
+  /**
+   * Add local media tracks to the peer connection.
+   * Only call this at the right time:
+   *   - CALLER: before createOffer()
+   *   - CALLEE: after setRemoteDescription()
+   */
+  private addTracksToPC(stream: MediaStream, isVideo: boolean) {
+    if (!this.pc) return;
+    stream.getTracks().forEach(track => {
+      if (track.kind === 'video' && !isVideo) return;
+      // Guard against double-adding (e.g. on reconnect)
+      const alreadyAdded = this.pc!.getSenders().some(s => s.track?.id === track.id);
+      if (alreadyAdded) return;
+      this.pc!.addTrack(track, stream);
+      console.log(`[CallService] addTrack: kind=${track.kind} enabled=${track.enabled} readyState=${track.readyState}`);
     });
   }
 
@@ -335,69 +374,28 @@ export class CallService {
     });
   }
 
-  private ensureTransceiver(kind: 'audio' | 'video'): RTCRtpTransceiver {
-    if (!this.pc) throw new Error('Peer connection is not ready');
-    const existing = this.pc.getTransceivers().find((tr) => {
-      const transceiverKind = tr.sender.track?.kind || tr.receiver.track?.kind;
-      return transceiverKind === kind;
-    });
-
-    if (existing) {
-      if (existing.direction !== 'sendrecv') {
-        existing.direction = 'sendrecv';
-      }
-      return existing;
-    }
-
-    return this.pc.addTransceiver(kind, { direction: 'sendrecv' });
-  }
-
-  private async attachLocalStream(stream: MediaStream, isVideo: boolean, role: 'caller' | 'callee') {
-    if (!this.pc) throw new Error('Peer connection is not ready');
-
-    const audioTrack = stream.getAudioTracks()[0];
-    const videoTrack = isVideo ? stream.getVideoTracks()[0] : null;
-
-    const audioTransceiver = audioTrack ? this.ensureTransceiver('audio') : null;
-    const videoTransceiver = videoTrack ? this.ensureTransceiver('video') : null;
-
-    if (audioTrack && audioTransceiver) {
-      await audioTransceiver.sender.replaceTrack(audioTrack);
-      console.log(`[CallService] ${role} attachTrack: kind=${audioTrack.kind} enabled=${audioTrack.enabled} readyState=${audioTrack.readyState} direction=${audioTransceiver.direction}`);
-    }
-
-    if (videoTrack && videoTransceiver) {
-      await videoTransceiver.sender.replaceTrack(videoTrack);
-      console.log(`[CallService] ${role} attachTrack: kind=${videoTrack.kind} enabled=${videoTrack.enabled} readyState=${videoTrack.readyState} direction=${videoTransceiver.direction}`);
-    }
-
-    stream.getTracks().forEach((track) => {
-      const alreadyAttached = this.pc!.getSenders().some((sender) => sender.track?.id === track.id);
-      if (!alreadyAttached) {
-        this.pc!.addTrack(track, stream);
-        console.log(`[CallService] ${role} fallback addTrack: kind=${track.kind} enabled=${track.enabled} readyState=${track.readyState}`);
-      }
-    });
-  }
-
   private createPeerConnection(): RTCPeerConnection {
     const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
     this.remoteStream = new MediaStream();
 
     pc.ontrack = (e) => {
-      // Add the track directly from the event — don't rely on e.streams[0]
-      // which can be undefined in Unified Plan (Android WebRTC)
       const track = e.track;
-      this.remoteStream!.addTrack(track);
 
-      // Also add from stream if present (belt-and-suspenders)
+      // Guard: don't add the same track twice (ontrack can fire multiple times)
+      if (!this.remoteStream!.getTracks().find(t => t.id === track.id)) {
+        this.remoteStream!.addTrack(track);
+      }
+
+      // Also harvest from e.streams[0] for browsers that bundle tracks into a stream
       e.streams[0]?.getTracks().forEach(t => {
         if (!this.remoteStream!.getTracks().find(x => x.id === t.id)) {
           this.remoteStream!.addTrack(t);
         }
       });
 
-      // Notify CallModal to re-attach the stream
+      console.log(`[CallService] ontrack: kind=${track.kind} id=${track.id} remote tracks now: ${this.remoteStream!.getTracks().map(t=>t.kind).join(',')}`);
+
+      // Always notify so CallModal re-attaches the updated stream to the elements
       if (this.onTrackCallback) this.onTrackCallback(this.remoteStream!);
       if (this.state !== 'active') this.setState('active');
     };
@@ -435,7 +433,6 @@ export class CallService {
   private async getUserMedia(video: boolean): Promise<MediaStream> {
     let stream: MediaStream;
 
-    // Step 1: try with processing constraints (no invalid sampleRate/channelCount)
     try {
       stream = await navigator.mediaDevices.getUserMedia({
         audio: {
@@ -449,7 +446,6 @@ export class CallService {
       });
     } catch (err) {
       console.warn('[CallService] getUserMedia with constraints failed, retrying basic:', err);
-      // Step 2: absolute minimum — just get any audio
       try {
         stream = await navigator.mediaDevices.getUserMedia({ audio: true, video });
       } catch (err2) {
@@ -458,8 +454,7 @@ export class CallService {
       }
     }
 
-    // Ensure all audio tracks are explicitly enabled — some browsers give
-    // back a track with enabled=false when constraints were partially rejected
+    // Ensure audio tracks are enabled (some browsers return disabled tracks on constraint failure)
     stream.getAudioTracks().forEach(t => {
       t.enabled = true;
       console.log(`[CallService] audio track: id=${t.id} enabled=${t.enabled} muted=${t.muted} readyState=${t.readyState}`);
@@ -480,8 +475,7 @@ export class CallService {
     this.pendingCandidates = [];
     this.remoteDescSet = false;
     // NOTE: do NOT null out onTrackCallback / onLocalTrackCallback here.
-    // CallModal registers them once on mount; clearing them here breaks
-    // subsequent calls in the same session.
+    // CallModal registers them once on mount; clearing them would break the next call.
     const prevCall = this.currentCall;
     this.currentCall = null;
     this.setState('ended');

@@ -140,6 +140,7 @@ function Shell() {
       }));
       wsRef.current = ws;
       (window as any).appWebSocket = ws;
+      (window as any).__flowlink_username = (username || '').toLowerCase();
       setIsConnected(true);
       if (invitationServiceRef.current) invitationServiceRef.current.setWebSocket(ws);
       // Give CallService the live websocket and identity

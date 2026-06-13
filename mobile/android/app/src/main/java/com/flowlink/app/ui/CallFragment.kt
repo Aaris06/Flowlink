@@ -1,4 +1,4 @@
-﻿package com.flowlink.app.ui
+package com.flowlink.app.ui
 
 import android.Manifest
 import android.annotation.SuppressLint
@@ -95,6 +95,19 @@ class CallFragment : Fragment() {
     // ── Main thread handler ───────────────────────────────────────────────
     private val mainHandler = Handler(Looper.getMainLooper())
 
+    // ── Ringtone ──────────────────────────────────────────────────────────
+    private var activeRingtone: android.media.Ringtone? = null
+
+    private fun startRingtone() {
+        stopRingtone()
+        activeRingtone = SettingsFragment.playRingtone(requireContext())
+    }
+
+    private fun stopRingtone() {
+        activeRingtone?.stop()
+        activeRingtone = null
+    }
+
     // ── Views ─────────────────────────────────────────────────────────────
     private var remoteVideoView : SurfaceViewRenderer? = null
     private var localVideoView  : SurfaceViewRenderer? = null
@@ -114,9 +127,9 @@ class CallFragment : Fragment() {
     private val durationTick = object : Runnable {
         override fun run() {
             if (CallSession.state == CallSession.State.ACTIVE && isAdded) {
-                CallSession.durationSec++
-                tvStatus?.text = fmt(CallSession.durationSec)
-                mainActivity.updateBubbleTimer(fmt(CallSession.durationSec))
+                val duration = CallSession.currentDurationSec()
+                tvStatus?.text = fmt(duration)
+                mainActivity.updateBubbleTimer(fmt(duration))
                 mainHandler.postDelayed(this, 1000)
             }
         }
@@ -190,23 +203,51 @@ class CallFragment : Fragment() {
             attachVideoSinks()
             // Resume timer if active
             if (CallSession.state == CallSession.State.ACTIVE) {
-                tvStatus?.text = fmt(CallSession.durationSec)
+                tvStatus?.text = fmt(CallSession.currentDurationSec())
                 mainHandler.post(durationTick)
+                syncOngoingCallNotification("Connected")
+            } else if (CallSession.state == CallSession.State.CONNECTING) {
+                tvStatus?.text = "Connecting…"
+                syncOngoingCallNotification("Connecting…")
+                activity?.volumeControlStream = AudioManager.STREAM_VOICE_CALL
+                if (CallSession.peerConnection == null) {
+                    lifecycleScope.launch { initWebRTCAsync() }
+                }
             }
             updateUI()
         } else {
+            // Stop any background ringtone that was playing while app was backgrounded
+            mainActivity.stopBackgroundRingtone()
             updateUI()
-            if (CallSession.direction == "outbound") {
-                activity?.volumeControlStream = AudioManager.STREAM_VOICE_CALL
-                wsManager.sendCallSignal("call_invite", CallSession.callId, CallSession.remoteDevice,
-                    JSONObject().apply { put("isVideo", CallSession.isVideo) })
-                if (CallSession.isVideo) lifecycleScope.launch { startLocalPreviewOnly() }
+            when (CallSession.direction) {
+                "outbound" -> {
+                    activity?.volumeControlStream = AudioManager.STREAM_VOICE_CALL
+                    wsManager.sendCallSignal("call_invite", CallSession.callId, CallSession.remoteDevice,
+                        JSONObject().apply { put("isVideo", CallSession.isVideo) })
+                    if (CallSession.isVideo) lifecycleScope.launch { startLocalPreviewOnly() }
+                }
+                "inbound" -> {
+                    when (CallSession.state) {
+                        CallSession.State.RINGING_IN -> {
+                            // Normal incoming — play ringtone and wait for user input
+                            startRingtone()
+                        }
+                        CallSession.State.CONNECTING -> {
+                            // Pre-accepted from notification — start WebRTC immediately
+                            activity?.volumeControlStream = AudioManager.STREAM_VOICE_CALL
+                            syncOngoingCallNotification("Connecting…")
+                            lifecycleScope.launch { initWebRTCAsync() }
+                        }
+                        else -> { /* already handled */ }
+                    }
+                }
             }
         }
     }
 
     override fun onDestroyView() {
         super.onDestroyView()
+        stopRingtone()
         mainHandler.removeCallbacks(durationTick)
         // Detach video sinks from views that are being destroyed
         // (tracks stay alive in CallSession)
@@ -232,17 +273,20 @@ class CallFragment : Fragment() {
                         CallSession.setState(CallSession.State.CONNECTING)
                         tvStatus?.text = "Connecting…"
                         mainActivity.updateBubbleTimer("Connecting…")
+                        syncOngoingCallNotification("Connecting…")
                         lifecycleScope.launch { initWebRTCAndSendOffer() }
                     }
                 }
                 is WebSocketManager.CallEvent.Rejected -> {
                     if (event.callId == CallSession.callId) {
+                        stopRingtone()
                         tvStatus?.text = if (event.reason == "busy") "Line is busy" else "Call declined"
                         scheduleClose(1500)
                     }
                 }
                 is WebSocketManager.CallEvent.Ended -> {
                     if (event.callId == CallSession.callId) {
+                        stopRingtone()
                         tvStatus?.text = "Call ended"
                         scheduleClose(1500)
                     }
@@ -262,16 +306,21 @@ class CallFragment : Fragment() {
 
     private fun acceptCall() {
         if (CallSession.state != CallSession.State.RINGING_IN) return
+        stopRingtone()
+        mainActivity.notificationService.dismissIncomingCall()
         CallSession.setState(CallSession.State.CONNECTING)
         tvStatus?.text = "Connecting…"
         btnAccept?.visibility = View.GONE
         updateUI()
+        syncOngoingCallNotification("Connecting…")
         activity?.volumeControlStream = AudioManager.STREAM_VOICE_CALL
         wsManager.sendCallSignal("call_accept", CallSession.callId, CallSession.remoteDevice)
         lifecycleScope.launch { initWebRTCAsync() }
     }
 
     private fun rejectCall() {
+        stopRingtone()
+        mainActivity.notificationService.dismissIncomingCall()
         wsManager.sendCallSignal("call_reject", CallSession.callId, CallSession.remoteDevice,
             JSONObject().apply { put("reason", "rejected") })
         finishCall()
@@ -302,6 +351,8 @@ class CallFragment : Fragment() {
 
         if (CallSession.isVideo) {
             localVideoView?.apply {
+                // Always release before re-init to avoid EGL surface corruption
+                // when re-attaching to an existing track after fragment recreation.
                 runCatching { release() }
                 init(egl.eglBaseContext, null)
                 setMirror(CallSession.usingFrontCamera)
@@ -322,11 +373,15 @@ class CallFragment : Fragment() {
     }
 
     private fun detachVideoSinks() {
-        CallSession.localVideoTrack?.let  { t ->
-            runCatching { localVideoView?.let  { t.removeSink(it) } }
+        val localView = localVideoView
+        val remoteView = remoteVideoView
+        CallSession.localVideoTrack?.let { track ->
+            runCatching { localView?.let { track.removeSink(it) } }
+            runCatching { remoteView?.let { track.removeSink(it) } }
         }
-        CallSession.remoteVideoTrack?.let { t ->
-            runCatching { remoteVideoView?.let { t.removeSink(it) } }
+        CallSession.remoteVideoTrack?.let { track ->
+            runCatching { localView?.let { track.removeSink(it) } }
+            runCatching { remoteView?.let { track.removeSink(it) } }
         }
     }
 
@@ -338,16 +393,34 @@ class CallFragment : Fragment() {
         val rv = remoteVideoView ?: return
         val lTrack = CallSession.localVideoTrack
         val rTrack = CallSession.remoteVideoTrack
+        val egl    = CallSession.eglBase ?: return
 
         CallSession.isSwapped = !CallSession.isSwapped
 
+        // Detach ALL sinks from both tracks before releasing renderers.
+        // Releasing a renderer while it still has a sink attached can corrupt
+        // the EGL surface and freeze the render thread.
         lTrack?.removeSink(lv); lTrack?.removeSink(rv)
         rTrack?.removeSink(lv); rTrack?.removeSink(rv)
 
+        // Re-initialise both renderers so the EGL surface is clean.
+        // This is required on many Android WebRTC builds: reusing a renderer
+        // that previously had a different track attached without release()+init()
+        // causes the render thread to deadlock on the first new frame.
+        lv.release()
+        lv.init(egl.eglBaseContext, null)
+        lv.setEnableHardwareScaler(true)
+
+        rv.release()
+        rv.init(egl.eglBaseContext, null)
+        rv.setEnableHardwareScaler(true)
+
         if (CallSession.isSwapped) {
+            // swapped: local cam shows in the big (remote) view, remote in the small (local) view
             lTrack?.addSink(rv); rv.setMirror(CallSession.usingFrontCamera)
             rTrack?.addSink(lv); lv.setMirror(false)
         } else {
+            // normal: remote in big view, local cam in small view
             rTrack?.addSink(rv); rv.setMirror(false)
             lTrack?.addSink(lv); lv.setMirror(CallSession.usingFrontCamera)
         }
@@ -400,16 +473,40 @@ class CallFragment : Fragment() {
     }
 
     private fun switchCamera() {
-        CallSession.videoCapturer?.switchCamera(object : CameraVideoCapturer.CameraSwitchHandler {
-            override fun onCameraSwitchDone(isFront: Boolean) {
-                CallSession.usingFrontCamera = isFront
-                mainHandler.post {
-                    if (!CallSession.isSwapped) localVideoView?.setMirror(isFront)
-                    else remoteVideoView?.setMirror(isFront)
-                }
+        val capturer = CallSession.videoCapturer ?: return
+        // Camera2Capturer.switchCamera() must NOT be called on the main thread.
+        // It internally posts to a handler and waits, which deadlocks if the
+        // calling thread is also needed by the render pipeline.
+        // Additionally, detach the local sink first to avoid EGL frame-in-flight conflicts.
+        val localSurface = if (!CallSession.isSwapped) localVideoView else remoteVideoView
+
+        lifecycleScope.launch(Dispatchers.IO) {
+            // Detach on main thread before switching
+            withContext(Dispatchers.Main) {
+                CallSession.localVideoTrack?.removeSink(localSurface)
             }
-            override fun onCameraSwitchError(e: String?) { Log.e(TAG, "switchCamera: $e") }
-        })
+
+            capturer.switchCamera(object : CameraVideoCapturer.CameraSwitchHandler {
+                override fun onCameraSwitchDone(isFront: Boolean) {
+                    CallSession.usingFrontCamera = isFront
+                    mainHandler.post {
+                        if (!isAdded) return@post
+                        localSurface?.setMirror(isFront)
+                        CallSession.localVideoTrack?.addSink(localSurface)
+                        Log.d(TAG, "Camera switched → front=$isFront")
+                    }
+                }
+                override fun onCameraSwitchError(e: String?) {
+                    Log.e(TAG, "switchCamera failed: $e")
+                    mainHandler.post {
+                        // Re-attach even on error
+                        CallSession.localVideoTrack?.addSink(localSurface)
+                        if (isAdded) Toast.makeText(requireContext(),
+                            "Camera switch failed", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            })
+        }
     }
 
     // ── UI sync ───────────────────────────────────────────────────────────
@@ -661,20 +758,26 @@ class CallFragment : Fragment() {
                 if (!isAdded) return@post
                 if (track is VideoTrack) {
                     CallSession.remoteVideoTrack = track
-                    val rv = remoteVideoView
+                    val rv = remoteVideoView ?: run { onCallConnected(); return@post }
                     val lv = localVideoView
-                    if (rv != null) {
-                        if (!CallSession.isSwapped) track.addSink(rv)
-                        else lv?.let { track.addSink(it) }
+                    val lTrack = CallSession.localVideoTrack
+
+                    // Determine which surface the remote track should render on.
+                    // In normal (non-swapped) mode: remote → remoteVideoView (rv), local → localVideoView (lv)
+                    // In swapped mode:              remote → localVideoView  (lv), local → remoteVideoView (rv)
+                    val targetSurface = if (!CallSession.isSwapped) rv else lv
+
+                    if (targetSurface != null) {
+                        // Remove the local track from this surface first — it may have been
+                        // added during initWebRTCAsync and would otherwise render on top of
+                        // the remote track (causing "two host screens" appearance).
+                        lTrack?.removeSink(targetSurface)
+
+                        track.addSink(targetSurface)
                         rv.visibility = View.VISIBLE
                     }
                 }
-                if (CallSession.state != CallSession.State.ACTIVE) {
-                    CallSession.setState(CallSession.State.ACTIVE)
-                    updateUI()
-                    mainHandler.post(durationTick)
-                    if (CallSession.isVideo) showSwapHint()
-                }
+                onCallConnected()
             }
         }
 
@@ -684,16 +787,17 @@ class CallFragment : Fragment() {
                 when (state) {
                     PeerConnection.IceConnectionState.CONNECTED,
                     PeerConnection.IceConnectionState.COMPLETED -> {
-                        if (CallSession.state != CallSession.State.ACTIVE) {
-                            CallSession.setState(CallSession.State.ACTIVE)
-                            updateUI(); mainHandler.post(durationTick)
-                        }
+                        onCallConnected()
                     }
                     PeerConnection.IceConnectionState.FAILED -> {
+                        syncOngoingCallNotification("Connection failed")
                         tvStatus?.text = "Connection failed"; scheduleClose(2000)
                     }
                     PeerConnection.IceConnectionState.DISCONNECTED -> {
-                        if (CallSession.state == CallSession.State.ACTIVE) tvStatus?.text = "Reconnecting…"
+                        if (CallSession.state == CallSession.State.ACTIVE) {
+                            tvStatus?.text = "Reconnecting…"
+                            syncOngoingCallNotification("Reconnecting…")
+                        }
                     }
                     else -> {}
                 }
@@ -789,13 +893,18 @@ class CallFragment : Fragment() {
 
     private fun scheduleClose(delayMs: Long) {
         CallSession.setState(CallSession.State.ENDED)
+        mainActivity.notificationService.dismissOngoingCall()
+        mainActivity.notificationService.dismissIncomingCall()
         updateUI()
         mainHandler.removeCallbacks(durationTick)
         mainHandler.postDelayed({ finishCall() }, delayMs)
     }
 
     private fun finishCall() {
+        stopRingtone()
         mainActivity.hideBubbleAndRestoreIfNeeded()
+        mainActivity.notificationService.dismissOngoingCall()
+        mainActivity.notificationService.dismissIncomingCall()
         restoreAudio()
         CallSession.cleanup()
         if (!isAdded) return
@@ -815,6 +924,32 @@ class CallFragment : Fragment() {
     // ── Helpers ───────────────────────────────────────────────────────────
 
     private fun fmt(s: Int) = "%02d:%02d".format(s / 60, s % 60)
+
+    private fun syncOngoingCallNotification(status: String) {
+        mainActivity.notificationService.showOngoingCall(
+            callId = CallSession.callId,
+            callerName = CallSession.remoteUsername,
+            fromDevice = CallSession.remoteDevice,
+            isVideo = CallSession.isVideo,
+            status = status,
+            connectedAtElapsedMs = CallSession.getConnectedAtElapsedMs()
+        )
+    }
+
+    private fun onCallConnected() {
+        val wasActive = CallSession.state == CallSession.State.ACTIVE
+        if (!wasActive) {
+            CallSession.setState(CallSession.State.ACTIVE)
+        }
+        val duration = CallSession.currentDurationSec()
+        tvStatus?.text = fmt(duration)
+        mainActivity.updateBubbleTimer(fmt(duration))
+        updateUI()
+        mainHandler.removeCallbacks(durationTick)
+        mainHandler.post(durationTick)
+        syncOngoingCallNotification("Connected")
+        if (!wasActive && CallSession.isVideo) showSwapHint()
+    }
 
     private fun hasMicPermission() =
         ContextCompat.checkSelfPermission(requireContext(), Manifest.permission.RECORD_AUDIO) ==
