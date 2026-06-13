@@ -62,7 +62,6 @@ export class CallService {
 
   // Signaling race buffers
   private pendingOffer: RTCSessionDescriptionInit | null = null;
-  private pendingAnswer: RTCSessionDescriptionInit | null = null;
   private pendingCandidates: RTCIceCandidateInit[] = [];
   private remoteDescSet = false;
 
@@ -274,7 +273,7 @@ export class CallService {
         // We're the caller — received SDP answer from callee
         const answerDesc = payload.data as RTCSessionDescriptionInit;
         if (!this.pc) {
-          this.pendingAnswer = answerDesc;
+          console.warn('[CallService] call_answer: no PC yet, answer dropped');
           return;
         }
         if (this.pc.signalingState === 'have-local-offer') {
@@ -471,7 +470,6 @@ export class CallService {
     this.remoteStream = null;
     this.pc = null;
     this.pendingOffer = null;
-    this.pendingAnswer = null;
     this.pendingCandidates = [];
     this.remoteDescSet = false;
     // NOTE: do NOT null out onTrackCallback / onLocalTrackCallback here.
