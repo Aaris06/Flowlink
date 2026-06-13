@@ -595,6 +595,10 @@ class MainActivity : AppCompatActivity(), UsernameDialogFragment.UsernameDialogL
     fun joinSession(code: String) {
         lifecycleScope.launch {
             try {
+                if (code.length != 6) {
+                    Toast.makeText(this@MainActivity, "Please enter a 6-digit code", Toast.LENGTH_SHORT).show()
+                    return@launch
+                }
                 if (webSocketManager.connectionState.value is WebSocketManager.ConnectionState.Connected) {
                     webSocketManager.disconnect()
                     kotlinx.coroutines.delay(150)

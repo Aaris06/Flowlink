@@ -789,6 +789,28 @@ class WebSocketManager(private val mainActivity: MainActivity) {
                     val rawText = chat.optString("text", "")
                     val text = if (fileName != null && rawText == "📎 $fileName") "" else rawText
 
+                    if (text.startsWith("[[CALL_ACTIVITY]]")) {
+                        _chatEvents.tryEmit(
+                            ChatEvent.Message(
+                                messageId = messageId,
+                                text = text,
+                                username = title,
+                                sourceDevice = sourceDevice,
+                                targetDevice = sessionManager.getDeviceId(),
+                                sentAt = sentAt,
+                                fileId = null,
+                                fileName = null,
+                                fileType = null,
+                                fileSize = 0L,
+                                fileData = null,
+                                replyToId = null,
+                                replyToText = null,
+                                replyToUsername = null
+                            )
+                        )
+                        return
+                    }
+
                     _chatEvents.tryEmit(
                         ChatEvent.Message(
                             messageId = messageId,
@@ -1140,6 +1162,18 @@ class WebSocketManager(private val mainActivity: MainActivity) {
                     } else {
                         _sessionJoinState.value = SessionJoinState.Success(sessionManager.getCurrentSessionId() ?: "")
                     }
+
+                    if (devicesArray != null) {
+                        _sessionDevices.value = mutableListOf<DeviceInfo>().apply {
+                            val selfId = sessionManager.getDeviceId()
+                            for (i in 0 until devicesArray.length()) {
+                                val deviceJson = devicesArray.getJSONObject(i)
+                                val deviceInfo = buildDeviceInfo(deviceJson)
+                                if (deviceInfo.id.isNotBlank() && deviceInfo.id != selfId) add(deviceInfo)
+                            }
+                        }
+                        _deviceConnected.value = _sessionDevices.value.firstOrNull()
+                    }
                 }
                 "session_expired" -> {
                     val payload = json.optJSONObject("payload")
@@ -1165,6 +1199,64 @@ class WebSocketManager(private val mainActivity: MainActivity) {
                     // Gracefully disconnect without forcing error state
                     // The UI will handle the session being cleared
                     disconnect()
+                }
+                "chat_message" -> {
+                    val payload = json.getJSONObject("payload")
+                    val chat = payload.optJSONObject("chat") ?: return
+                    val messageId = chat.optString("messageId", "")
+                    val title = chat.optString("username", "Chat")
+                    val sourceDevice = payload.optString("sourceDevice", "")
+                    val sentAt = chat.optLong("sentAt", System.currentTimeMillis())
+
+                    val attachment = chat.optJSONObject("attachment")
+                    val fileId = chat.optString("fileId").ifEmpty { null }
+                        ?: attachment?.let { messageId }
+                    val fileName = chat.optString("fileName").ifEmpty { null }
+                        ?: attachment?.optString("name")?.ifEmpty { null }
+                    val fileType = chat.optString("fileType").ifEmpty { null }
+                        ?: attachment?.optString("type")?.ifEmpty { null }
+                    val fileSize = if (chat.has("fileSize")) chat.optLong("fileSize", 0L)
+                        else attachment?.optLong("size", 0L) ?: 0L
+                    val fileData = chat.optString("fileData").ifEmpty { null }
+                        ?: attachment?.optString("data")?.ifEmpty { null }
+
+                    val rawText = chat.optString("text", "")
+                    val text = if (fileName != null && rawText == "📎 $fileName") "" else rawText
+
+                    _chatEvents.tryEmit(
+                        ChatEvent.Message(
+                            messageId = messageId,
+                            text = text,
+                            username = title,
+                            sourceDevice = sourceDevice,
+                            targetDevice = sessionManager.getDeviceId(),
+                            sentAt = sentAt,
+                            fileId = fileId,
+                            fileName = fileName,
+                            fileType = fileType,
+                            fileSize = fileSize,
+                            fileData = fileData,
+                            replyToId = chat.optString("replyToId").ifEmpty { null },
+                            replyToText = chat.optString("replyToText").ifEmpty { null },
+                            replyToUsername = chat.optString("replyToUsername").ifEmpty { null }
+                        )
+                    )
+                }
+                "device_connected" -> {
+                    val payload = json.optJSONObject("payload") ?: return
+                    val deviceJson = payload.optJSONObject("device") ?: payload
+                    val info = buildDeviceInfo(deviceJson)
+                    if (info.id.isNotBlank() && info.id != sessionManager.getDeviceId()) {
+                        upsertSessionDevice(info)
+                        _deviceConnected.value = info
+                        _deviceConnectedEvents.tryEmit(info)
+                    }
+                }
+                "device_disconnected" -> {
+                    val payload = json.optJSONObject("payload") ?: return
+                    val deviceId = payload.optJSONObject("device")?.optString("id")
+                        ?: payload.optString("deviceId", "")
+                    removeSessionDevice(deviceId)
                 }
                 "clipboard_sync" -> {
                     val clipboardJson = json.getJSONObject("payload").optJSONObject("clipboard")

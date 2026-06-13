@@ -217,6 +217,30 @@ class DeviceTilesFragment : Fragment() {
             }
 
             viewLifecycleOwner.lifecycleScope.launch {
+                mainActivity.webSocketManager.deviceConnectedEvents.collect { info ->
+                    if (info.id != currentDeviceId) {
+                        connectedDevices[info.id] = Device(
+                            id = info.id,
+                            name = info.name,
+                            type = info.type,
+                            online = true,
+                            permissions = mapOf(
+                                "files" to false,
+                                "media" to false,
+                                "prompts" to false,
+                                "clipboard" to false,
+                                "remote_browse" to false
+                            ),
+                            joinedAt = System.currentTimeMillis(),
+                            lastSeen = System.currentTimeMillis()
+                        )
+                        updateDeviceList()
+                        updateStatus(code)
+                    }
+                }
+            }
+
+            viewLifecycleOwner.lifecycleScope.launch {
                 mainActivity.webSocketManager.fileTransferProgress.collect { progress ->
                     if (progress == null) {
                         transferStatuses.clear()
@@ -254,6 +278,23 @@ class DeviceTilesFragment : Fragment() {
                 mainActivity.webSocketManager.chatEvents.collect { event ->
                     when (event) {
                         is WebSocketManager.ChatEvent.Message -> {
+                            if (event.text.startsWith("[[CALL_ACTIVITY]]")) {
+                                chatMessages.add(
+                                    ChatMessage(
+                                        messageId = event.messageId,
+                                        text = event.text,
+                                        username = event.username,
+                                        sourceDevice = event.sourceDevice,
+                                        targetDevice = event.targetDevice,
+                                        sentAt = event.sentAt,
+                                        delivered = true,
+                                        seen = isChatOpen
+                                    )
+                                )
+                                renderChat()
+                                updateChatBadge()
+                                return@collect
+                            }
                             chatMessages.add(
                                 ChatMessage(
                                     messageId = event.messageId,

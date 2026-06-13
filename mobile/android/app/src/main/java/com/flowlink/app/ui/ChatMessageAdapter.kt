@@ -52,6 +52,10 @@ class ChatMessageAdapter(
         val tvFileMetaBubble: TextView = itemView.findViewById(R.id.tv_file_meta_bubble)
         val btnFileDownload: FrameLayout = itemView.findViewById(R.id.btn_file_download)
         val tvMessageText: TextView = itemView.findViewById(R.id.tv_message_text)
+        val callCard: LinearLayout = itemView.findViewById(R.id.call_card)
+        val tvCallTitle: TextView = itemView.findViewById(R.id.tv_call_title)
+        val tvCallSubtitle: TextView = itemView.findViewById(R.id.tv_call_subtitle)
+        val btnJoinCall: View = itemView.findViewById(R.id.btn_join_call)
         val tvMessageTime: TextView = itemView.findViewById(R.id.tv_message_time)
         val tvTicks: TextView = itemView.findViewById(R.id.tv_ticks)
         val rootLayout: LinearLayout = itemView as LinearLayout
@@ -75,6 +79,7 @@ class ChatMessageAdapter(
         }
 
         if (msg.fileId != null && msg.fileName != null) {
+            holder.callCard.visibility = View.GONE
             holder.fileCard.visibility = View.VISIBLE
             holder.tvMessageText.visibility = View.GONE
 
@@ -125,9 +130,26 @@ class ChatMessageAdapter(
                 }
             }
         } else {
+            holder.callCard.visibility = View.GONE
             holder.fileCard.visibility = View.GONE
             holder.tvMessageText.visibility = View.VISIBLE
-            holder.tvMessageText.text = msg.text
+            if (msg.text.startsWith("[[CALL_ACTIVITY]]")) {
+                holder.tvMessageText.visibility = View.GONE
+                holder.callCard.visibility = View.VISIBLE
+                try {
+                    val call = parseCallActivity(holder, msg.text)
+                    holder.tvCallTitle.text = call.title
+                    holder.tvCallSubtitle.text = call.subtitle
+                    holder.btnJoinCall.visibility = if (call.joinable) View.VISIBLE else View.GONE
+                    holder.btnJoinCall.setOnClickListener { call.onJoin() }
+                } catch (_: Exception) {
+                    holder.callCard.visibility = View.GONE
+                    holder.tvMessageText.visibility = View.VISIBLE
+                    holder.tvMessageText.text = msg.text
+                }
+            } else {
+                holder.tvMessageText.text = msg.text
+            }
         }
 
         holder.tvMessageTime.text = timeFormatter.format(Date(msg.sentAt))
@@ -150,6 +172,42 @@ class ChatMessageAdapter(
         }
 
         holder.bubble.setOnLongClickListener { onReply(msg); true }
+    }
+
+    private data class ParsedCallActivity(
+        val title: String,
+        val subtitle: String,
+        val joinable: Boolean,
+        val onJoin: () -> Unit
+    )
+
+    private fun parseCallActivity(holder: MessageViewHolder, text: String): ParsedCallActivity {
+        val json = org.json.JSONObject(text.removePrefix("[[CALL_ACTIVITY]]"))
+        val kind = json.optString("kind", "started")
+            val callId = json.optString("callId", "")
+        val callType = json.optString("callType", "audio")
+        val sourceUsername = json.optString("sourceUsername", "Someone")
+        val title = when (kind) {
+            "started" -> "$sourceUsername started a $callType call"
+            "joined" -> "$sourceUsername joined the call"
+            else -> "$sourceUsername ended the call"
+        }
+        val subtitle = if (kind == "ended") "Call ended" else "Tap to join the ongoing call"
+        return ParsedCallActivity(title, subtitle, kind != "ended") {
+            val mainActivity = holder.itemView.context as? com.flowlink.app.MainActivity ?: return@ParsedCallActivity
+            val sessionId = mainActivity.sessionManager.getCurrentSessionId() ?: return@ParsedCallActivity
+            mainActivity.webSocketManager.sendMessage(org.json.JSONObject().apply {
+                put("type", "call_accept")
+                put("sessionId", sessionId)
+                put("deviceId", mainActivity.sessionManager.getDeviceId())
+                put("payload", org.json.JSONObject().apply {
+                    put("callId", callId)
+                    put("toDevice", json.optString("remoteDeviceId", ""))
+                    put("fromUsername", sourceUsername)
+                })
+                put("timestamp", System.currentTimeMillis())
+            }.toString())
+        }
     }
 
     private fun playOrPauseVoice(msg: ChatMessage, holder: MessageViewHolder) {

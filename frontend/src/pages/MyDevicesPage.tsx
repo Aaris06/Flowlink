@@ -297,6 +297,18 @@ export default function MyDevicesPage({ ctx }: Props) {
 
   const deviceArr = Array.from(devices.values());
 
+  useEffect(() => {
+    if (!session) {
+      setDevices(new Map());
+      return;
+    }
+    const next = new Map<string, Device>();
+    session.devices.forEach((d, id) => {
+      if (id !== deviceId) next.set(id, d);
+    });
+    setDevices(next);
+  }, [session, deviceId]);
+
   if (!session) {
     return (
       <div className="md-no-session-wrap">

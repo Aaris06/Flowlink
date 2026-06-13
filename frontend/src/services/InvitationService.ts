@@ -107,14 +107,9 @@ export default class InvitationService {
   }
 
   /**
-   * Handle incoming invitation — stores the code immediately so acceptInvitation can find it
+   * Handle incoming invitation
    */
   handleIncomingInvitation(data: InvitationData) {
-    // Store the code RIGHT NOW before showing the notification, so it's available
-    // when the user taps Accept (which may happen asynchronously via notification action)
-    if (data.sessionId && data.sessionCode) {
-      this.storeInvitationData(data.sessionId, data.sessionCode);
-    }
     this.notificationService.showSessionInvitation(data);
   }
 
@@ -170,14 +165,10 @@ export default class InvitationService {
       timestamp: Date.now(),
     }));
 
-    // Get the session code — prefer sessionStorage (set by handleIncomingInvitation),
-    // then fall back to any cached key. The sessionCode is stored by storeInvitationData()
-    // which is called from App.tsx whenever a session_invitation message arrives.
+    // Get session code from stored invitations or prompt user
     const sessionCode = this.getSessionCodeForInvitation(sessionId);
     if (sessionCode && this.onInvitationAccepted) {
       this.onInvitationAccepted(sessionCode);
-    } else {
-      console.error('InvitationService: sessionCode not found for session', sessionId);
     }
   }
 

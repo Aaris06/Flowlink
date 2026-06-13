@@ -232,6 +232,41 @@
                 android:paddingTop="10dp"
                 android:paddingBottom="4dp" />
 
+            <!-- Call activity card -->
+            <LinearLayout
+                android:id="@+id/call_card"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:paddingHorizontal="12dp"
+                android:paddingTop="10dp"
+                android:paddingBottom="6dp"
+                android:visibility="gone">
+
+                <TextView
+                    android:id="@+id/tv_call_title"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:textColor="#FFFFFF"
+                    android:textStyle="bold"
+                    android:textSize="14sp" />
+
+                <TextView
+                    android:id="@+id/tv_call_subtitle"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="2dp"
+                    android:textColor="#AAFFFFFF"
+                    android:textSize="11sp" />
+
+                <Button
+                    android:id="@+id/btn_join_call"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:text="Join Call" />
+            </LinearLayout>
+
             <!-- Time + ticks row -->
             <LinearLayout
                 android:layout_width="wrap_content"

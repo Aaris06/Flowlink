@@ -229,6 +229,15 @@ class ChatFragment : Fragment() {
             mainActivity.webSocketManager.chatEvents.collect { event ->
                 when (event) {
                     is WebSocketManager.ChatEvent.Message -> {
+                        val isCallActivity = event.text.startsWith("[[CALL_ACTIVITY]]")
+                        if (isCallActivity) {
+                            val idx = chatMessages.indexOfFirst { it.messageId == event.messageId }
+                            if (idx >= 0) {
+                                chatAdapter?.notifyItemChanged(idx)
+                            }
+                            binding.rvChatMessages.scrollToPosition(chatMessages.size - 1)
+                            return@collect
+                        }
                         // MainActivity already added it to chatMessages — just notify adapter
                         val idx = chatMessages.indexOfFirst { it.messageId == event.messageId }
                         if (idx >= 0) {

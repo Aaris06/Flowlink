@@ -166,51 +166,83 @@ function Shell() {
     setNotifications(p => [{ id: Date.now(), title, message, type, time: Date.now() }, ...p].slice(0, 50));
   };
 
+  const normalizeDevice = (payload: any) => {
+    const raw = payload?.device || payload;
+    if (!raw?.id) return null;
+    return {
+      id: raw.id,
+      name: raw.name || raw.deviceName || 'Unknown Device',
+      username: raw.username || '',
+      type: raw.type || raw.deviceType || 'laptop',
+      online: typeof raw.online === 'boolean' ? raw.online : true,
+      permissions: raw.permissions || { files: false, media: false, prompts: false, clipboard: false, remote_browse: false },
+      joinedAt: raw.joinedAt || Date.now(),
+      lastSeen: raw.lastSeen || Date.now(),
+    };
+  };
+
+  const syncSessionDevices = (updater: (prev: Session | null) => Session | null) => {
+    setSession(prev => {
+      const next = updater(prev);
+      if (next?.devices) {
+        (window as any)._sessionDevices = Array.from(next.devices.values());
+      }
+      return next;
+    });
+  };
+
   const handleWebSocketMessage = (message: any) => {
     switch (message.type) {
       case 'session_created':
       case 'session_joined':
-        window.dispatchEvent(new CustomEvent('sessionMessage', { detail: { message } }));
-        // Keep a global snapshot of session devices for call routing
-        if (message.payload?.devices) {
-          (window as any)._sessionDevices = message.payload.devices;
-        }
-        break;
       case 'device_connected':
       case 'device_disconnected':
-      case 'device_status_update':
-        // Re-emit so OverviewPage, MyDevicesPage, etc. can update device lists
+      case 'session_expired':
         window.dispatchEvent(new CustomEvent('sessionMessage', { detail: { message } }));
-        // Keep session.devices Map in sync so pages that seed from it on re-mount
-        // (OverviewPage, MyDevicesPage) get the current list rather than the stale
-        // snapshot from initial join.
-        setSession(prev => {
-          if (!prev) return prev;
-          const updated = new Map(prev.devices);
-          if (message.type === 'device_connected' && message.payload?.device) {
-            const d = message.payload.device;
-            updated.set(d.id, { ...d, online: true });
-          } else if (message.type === 'device_disconnected' && message.payload?.deviceId) {
-            const existing = updated.get(message.payload.deviceId);
-            if (existing) updated.set(message.payload.deviceId, { ...existing, online: false });
-          } else if (message.type === 'device_status_update' && message.payload?.device) {
-            const d = message.payload.device;
-            updated.set(d.id, { ...(updated.get(d.id) || d), ...d });
+        if (message.type === 'session_created' || message.type === 'session_joined') {
+          // Keep a global snapshot of session devices for call routing
+          if (message.payload?.devices) {
+            (window as any)._sessionDevices = message.payload.devices;
           }
-          return { ...prev, devices: updated };
-        });
-        // Also keep the global session device snapshot up to date
-        if (message.type === 'device_connected' && message.payload?.device) {
-          const d = message.payload.device;
-          const existing: any[] = (window as any)._sessionDevices || [];
-          const idx = existing.findIndex((x: any) => x.id === d.id);
-          if (idx >= 0) existing[idx] = { ...existing[idx], ...d };
-          else existing.push(d);
-          (window as any)._sessionDevices = existing;
         }
-        if (message.type === 'device_disconnected' && message.payload?.deviceId) {
-          (window as any)._sessionDevices = ((window as any)._sessionDevices || [])
-            .filter((x: any) => x.id !== message.payload.deviceId);
+
+        if (message.type === 'session_joined' && Array.isArray(message.payload?.devices)) {
+          syncSessionDevices(prev => {
+            const devices = new Map<string, any>();
+            message.payload.devices.forEach((d: any) => {
+              const device = normalizeDevice(d);
+              if (device) devices.set(device.id, device);
+            });
+            return prev ? { ...prev, id: message.payload.sessionId || prev.id, devices } : prev;
+          });
+        }
+
+        if (message.type === 'device_connected') {
+          const device = normalizeDevice(message.payload);
+          if (device) {
+            syncSessionDevices(prev => {
+              if (!prev) return prev;
+              const devices = new Map(prev.devices);
+              devices.set(device.id, device);
+              return { ...prev, devices };
+            });
+          }
+        }
+
+        if (message.type === 'device_disconnected') {
+          const deviceId = message.payload?.deviceId || message.payload?.device?.id;
+          if (deviceId) {
+            syncSessionDevices(prev => {
+              if (!prev) return prev;
+              const devices = new Map(prev.devices);
+              devices.delete(deviceId);
+              return { ...prev, devices };
+            });
+          }
+        }
+
+        if (message.type === 'session_expired') {
+          syncSessionDevices(() => null);
         }
         break;
       case 'chat_message':
@@ -220,6 +252,10 @@ function Shell() {
         window.dispatchEvent(new CustomEvent('chatMessage', { detail: { message } }));
         if (message.type === 'chat_message') {
           setChatUnread(p => p + 1);
+          const chatText = message.payload?.chat?.text || '';
+          if (chatText.startsWith('[[CALL_ACTIVITY]]')) {
+            // call activity messages are displayed in chat, but don't duplicate into storage as plain text only
+          }
           // Buffer message in sessionStorage so MessagesPage gets it even if not mounted
           try {
             const chat = message.payload?.chat;
@@ -248,7 +284,6 @@ function Shell() {
                   seen: false,
                   replyTo: chat.replyTo,
                   attachment,
-                  ...(chat.callActivity ? { callActivity: chat.callActivity } : {}),
                 });
                 sessionStorage.setItem(key, JSON.stringify(msgs.slice(-200)));
               }
@@ -469,8 +504,6 @@ function Shell() {
       case 'call_offer':
       case 'call_answer':
       case 'call_ice':
-      case 'call_room_state':
-      case 'call_participant_joined':
         if (callServiceRef.current) {
           callServiceRef.current.handleMessage(message);
         }

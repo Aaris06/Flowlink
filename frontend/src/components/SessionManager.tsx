@@ -36,6 +36,8 @@ export default function SessionManager({
       setIsJoining(true);
       const ws = (window as any).appWebSocket;
       if (!ws || ws.readyState !== WebSocket.OPEN) { setError('Not connected to server'); setIsJoining(false); return; }
+      sessionStorage.setItem('pendingSessionCode', code);
+      sessionStorage.setItem('pendingJoinDeviceId', deviceId);
       ws.send(JSON.stringify({ type: 'session_join', payload: { code, deviceId, deviceName, deviceType, username }, timestamp: Date.now() }));
     } catch { setError('Failed to join session'); setIsJoining(false); }
   };
@@ -84,7 +86,23 @@ export default function SessionManager({
         sessionStorage.setItem('sessionId', joinedSession.id);
         sessionStorage.setItem('sessionCode', joinedSession.code);
         sessionStorage.setItem('deviceId', deviceId);
+        sessionStorage.removeItem('pendingSessionCode');
+        sessionStorage.removeItem('pendingJoinDeviceId');
         onSessionJoined(joinedSession);
+        break;
+      }
+      case 'device_connected': {
+        if (!createdSession && !sessionCode) break;
+        const device = message.payload?.device;
+        if (!device?.id) break;
+        const current = createdSession || null;
+        if (current && !current.devices.has(device.id)) {
+          const devices = new Map(current.devices);
+          devices.set(device.id, device);
+          const next = { ...current, devices };
+          setCreatedSession(next);
+          onSessionCreated(next);
+        }
         break;
       }
       case 'error':

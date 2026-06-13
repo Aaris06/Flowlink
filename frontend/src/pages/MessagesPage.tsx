@@ -3,13 +3,19 @@ import { AppContext } from '../App';
 import './MessagesPage.css';
 
 interface Attachment { name: string; type: string; size: number; data: string; }
-interface CallActivity { callId: string; callType: 'audio' | 'video'; hostUsername: string; status: 'started' | 'ended'; }
 interface ChatMsg {
   messageId: string; text: string; username: string; sourceDevice: string;
   sentAt: number; delivered: boolean; seen: boolean;
   replyTo?: string; edited?: boolean;
   attachment?: Attachment;
-  callActivity?: CallActivity;
+}
+
+interface CallActivity {
+  callId: string;
+  kind: 'started' | 'joined' | 'ended';
+  callType: 'audio' | 'video';
+  remoteUsername: string;
+  sourceUsername: string;
 }
 interface CtxMenu { msgId: string; x: number; y: number; own: boolean; }
 interface Props { ctx: AppContext; }
@@ -85,15 +91,12 @@ export default function MessagesPage({ ctx }: Props) {
           }
           // Strip the "📎 " prefix from text if it's a file message
           const text = attachment ? (chat.text?.replace(/^📎\s*/, '') === chat.fileName ? '' : (chat.text?.replace(/^📎\s*/, '') || '')) : (chat.text || '');
-          // Extract callActivity if present
-          const callActivity = chat.callActivity || null;
           return [...p, {
             messageId: chat.messageId, text, username: chat.username || 'Unknown',
             sourceDevice: msg.payload?.sourceDevice || '', sentAt: chat.sentAt || Date.now(),
             delivered: true, seen: true,
             replyTo: chat.replyTo, edited: chat.edited,
             attachment,
-            ...(callActivity ? { callActivity } : {}),
           }];
         });
         if (ws.readyState === WebSocket.OPEN && session) {
@@ -116,7 +119,6 @@ export default function MessagesPage({ ctx }: Props) {
             username: item.username || 'Unknown', sourceDevice: item.sourceDevice || '',
             sentAt: item.sentAt || Date.now(), delivered: true, seen: false,
             attachment,
-            ...(item.callActivity ? { callActivity: item.callActivity } : {}),
           };
         }));
         scrollToBottom();
@@ -195,33 +197,14 @@ export default function MessagesPage({ ctx }: Props) {
     closeCtxMenu();
   };
 
-  const renderCallActivity = (ca: CallActivity) => {
-    const icon = ca.callType === 'video' ? '🎥' : '📞';
-    const callService = ctx.callService;
-    return (
-      <div className="msg-call-activity">
-        <span className="msg-call-activity-icon">{icon}</span>
-        <div className="msg-call-activity-body">
-          <div className="msg-call-activity-title">
-            {ca.callType === 'video' ? 'Video call' : 'Voice call'} started by <strong>{ca.hostUsername}</strong>
-          </div>
-          {ca.status === 'started' && callService && (
-            <button
-              className="msg-call-activity-join"
-              onClick={() => callService.joinGroupCall(ca.callId, ca.callType === 'video')}
-            >
-              Join call
-            </button>
-          )}
-          {ca.status === 'ended' && (
-            <span className="msg-call-activity-ended">Call ended</span>
-          )}
-        </div>
-      </div>
-    );
-  };
-
   const renderText = (text: string) => {
+    if (text.startsWith('[[CALL_ACTIVITY]]')) {
+      try {
+        return renderCallActivity(JSON.parse(text.replace('[[CALL_ACTIVITY]]', '')) as CallActivity);
+      } catch {
+        return null;
+      }
+    }
     if (!text) return null;
     // Code block
     if (text.includes('```')) {
@@ -235,6 +218,41 @@ export default function MessagesPage({ ctx }: Props) {
     const urlRe = /(https?:\/\/[^\s]+)/g;
     const parts = text.split(urlRe);
     return <>{parts.map((p, i) => /^https?:\/\//.test(p) ? <a key={i} href={p} target="_blank" rel="noreferrer" className="msg-link">{p}</a> : <span key={i}>{p}</span>)}</>;
+  };
+
+  const renderCallActivity = (call: CallActivity) => {
+    const label = call.kind === 'started'
+      ? `${call.sourceUsername} started a ${call.callType} call`
+      : call.kind === 'joined'
+        ? `${call.sourceUsername} joined the call`
+        : `${call.sourceUsername} ended the call`;
+    const joinable = call.kind === 'started' || call.kind === 'joined';
+    return (
+      <div className="msg-call-card">
+        <div className="msg-call-title">{label}</div>
+        <div className="msg-call-sub">
+          {call.kind === 'started' ? 'Tap to join the ongoing call.' : 'Call activity update.'}
+        </div>
+        {joinable && (
+          <button
+            className="btn-primary msg-call-join-btn"
+            onClick={() => {
+              const ws = (window as any).appWebSocket as WebSocket | null;
+              if (!ws || ws.readyState !== WebSocket.OPEN || !session) return;
+              ws.send(JSON.stringify({
+                type: 'call_accept',
+                sessionId: session.id,
+                deviceId,
+                payload: { callId: call.callId, toDevice: '', fromUsername: username },
+                timestamp: Date.now(),
+              }));
+            }}
+          >
+            Join Call
+          </button>
+        )}
+      </div>
+    );
   };
 
   const startRecording = async () => {
@@ -417,16 +435,6 @@ export default function MessagesPage({ ctx }: Props) {
           {messages.map(m => {
             const own = m.sourceDevice === deviceId;
             const repliedMsg = m.replyTo ? messages.find(r => r.messageId === m.replyTo) : null;
-
-            // Call activity messages get a special centered banner — not a chat bubble
-            if (m.callActivity) {
-              return (
-                <div key={m.messageId} className="msg-row msg-row-activity">
-                  {renderCallActivity(m.callActivity)}
-                </div>
-              );
-            }
-
             return (
               <div key={m.messageId} className={`msg-row${own ? ' own' : ''}`} onContextMenu={e => handleContextMenu(e, m)}>
                 {!own && <div className="msg-avatar">{(m.username || '?')[0].toUpperCase()}</div>}

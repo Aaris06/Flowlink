@@ -35,6 +35,11 @@ class SessionManagerFragment : Fragment() {
             (activity as? MainActivity)?.scanQRCode()
         }
 
+        binding.btnJoinSession.setOnLongClickListener {
+            (activity as? MainActivity)?.joinSession(binding.etSessionCode.text.toString().trim())
+            true
+        }
+
         binding.btnEnterCode.setOnClickListener {
             val code = binding.etSessionCode.text.toString()
             if (code.length == 6) {

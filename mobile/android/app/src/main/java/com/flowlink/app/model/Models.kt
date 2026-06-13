@@ -61,7 +61,8 @@ data class ChatMessage(
     // reply/tag
     val replyToId: String? = null,
     val replyToText: String? = null,
-    val replyToUsername: String? = null
+    val replyToUsername: String? = null,
+    val callActivityJson: String? = null
 )
 
 data class DeviceGroup(

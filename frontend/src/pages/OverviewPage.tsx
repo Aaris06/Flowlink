@@ -14,13 +14,7 @@ export default function OverviewPage({ ctx }: Props) {
   const [isCreating, setIsCreating] = useState(false);
   const [isJoining, setIsJoining] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [devices, setDevices] = useState<Map<string, Device>>(() => {
-    // Seed from session on mount so navigating back doesn't blank the device list
-    if (!session) return new Map();
-    const m = new Map<string, Device>();
-    session.devices.forEach((d, id) => { if (id !== deviceId) m.set(id, d); });
-    return m;
-  });
+  const [devices, setDevices] = useState<Map<string, Device>>(new Map());
   const [showInvite, setShowInvite] = useState(false);
   const [remoteText, setRemoteText] = useState('');
   const [remoteEnabled, setRemoteEnabled] = useState(false);
@@ -76,14 +70,6 @@ export default function OverviewPage({ ctx }: Props) {
         onSessionJoined(s);
       }
       if (msg.type === 'error') { setError(msg.payload.message); setIsCreating(false); setIsJoining(false); }
-      // Keep device list in sync for late joiners detected via the re-emitted event
-      if (msg.type === 'device_connected') {
-        const device = normalizeDevice(msg.payload);
-        if (device && device.id !== deviceId) setDevices(p => { const m = new Map(p); m.set(device.id, device); return m; });
-      }
-      if (msg.type === 'device_disconnected') {
-        setDevices(p => { const m = new Map(p); m.delete(msg.payload?.deviceId); return m; });
-      }
     };
     const handleJoinInv = (e: Event) => joinWithCode((e as CustomEvent).detail.sessionCode);
     window.addEventListener('sessionMessage', handleSessionMsg);
@@ -158,6 +144,18 @@ export default function OverviewPage({ ctx }: Props) {
 
   const onlineCount = session ? Array.from(devices.values()).filter(d => d.online).length + 1 : 0;
   const deviceArr = Array.from(devices.values());
+
+  useEffect(() => {
+    if (!session) {
+      setDevices(new Map());
+      return;
+    }
+    const next = new Map<string, Device>();
+    session.devices.forEach((d, id) => {
+      if (id !== deviceId) next.set(id, d);
+    });
+    setDevices(next);
+  }, [session, deviceId]);
 
   // No session → session creation gate
   if (!session) {

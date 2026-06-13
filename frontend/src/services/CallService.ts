@@ -1,22 +1,28 @@
 /**
  * CallService - WebRTC audio/video call management
  *
- * Supports both 1-to-1 and group calls via a mesh topology.
- * In mesh mode each participant holds one RTCPeerConnection per remote peer.
+ * Architecture notes:
  *
- * CALLER flow (1-to-1 or group initiator):
- *   startCall() → call_invite → [remote accepts] → call_accept received →
- *   getUserMedia → createPeerForDevice → addTracksToPC → createOffer →
- *   setLocalDescription → call_offer → [call_answer] → setRemoteDescription → connected
+ * CALLER flow:
+ *   startCall() → [remote accepts] → call_accept received → getUserMedia →
+ *   createPC → addTrack (creates sendrecv transceivers) → createOffer →
+ *   setLocalDescription → send call_offer → [receive call_answer] →
+ *   setRemoteDescription → ICE connects
  *
  * CALLEE flow:
- *   call_invite → [user accepts] → acceptCall() → getUserMedia → createPeerForDevice →
- *   call_accept → [call_offer] → setRemoteDescription → addTracksToPC → sendrecv →
- *   createAnswer → setLocalDescription → call_answer → connected
+ *   call_invite → [user accepts] → acceptCall() → getUserMedia →
+ *   createPC → send call_accept → [receive call_offer] →
+ *   setRemoteDescription (creates transceivers from offer m-lines) →
+ *   addTrack for each local track (matched to existing m-lines) →
+ *   force sendrecv on all transceivers → createAnswer →
+ *   setLocalDescription → send call_answer → ICE connects
  *
- * LATE JOINER:
- *   call_join_room → call_room_state (server sends existing participant list) →
- *   for each existing participant: createPeerForDevice + createOffer → exchange SDP
+ * CRITICAL: The callee must NOT call addTrack() before setRemoteDescription().
+ * If addTrack() is called first it creates transceivers with no m-line binding.
+ * When setRemoteDescription() then runs, it creates NEW transceivers for the
+ * offer m-lines and the pre-created ones become orphaned — so the local audio/
+ * video tracks are never associated with the negotiated m-lines and nothing is
+ * sent back to the caller.
  */
 
 export type CallState = 'idle' | 'ringing_out' | 'ringing_in' | 'connecting' | 'active' | 'ended';
@@ -29,14 +35,7 @@ export interface CallInfo {
   direction: 'inbound' | 'outbound';
 }
 
-export interface RemoteParticipant {
-  deviceId: string;
-  username: string;
-  stream: MediaStream;
-}
-
 type CallEventHandler = (state: CallState, info: CallInfo | null) => void;
-type ParticipantsChangedHandler = (participants: RemoteParticipant[]) => void;
 
 const ICE_SERVERS: RTCIceServer[] = [
   { urls: 'stun:stun.l.google.com:19302' },
@@ -48,30 +47,23 @@ const ICE_SERVERS: RTCIceServer[] = [
   },
 ];
 
-interface PeerState {
-  pc: RTCPeerConnection;
-  stream: MediaStream;
-  pendingOffer: RTCSessionDescriptionInit | null;
-  pendingCandidates: RTCIceCandidateInit[];
-  remoteDescSet: boolean;
-  username: string;
-}
-
 export class CallService {
   private ws: WebSocket | null = null;
-  deviceId: string;
-  username: string;
+  private deviceId: string;
+  private username: string;
+  private pc: RTCPeerConnection | null = null;
+  private localStream: MediaStream | null = null;
+  private remoteStream: MediaStream | null = null;
   private state: CallState = 'idle';
   private currentCall: CallInfo | null = null;
   private onStateChange: CallEventHandler;
   private onTrackCallback: ((stream: MediaStream) => void) | null = null;
   private onLocalTrackCallback: ((stream: MediaStream) => void) | null = null;
-  private onParticipantsChanged: ParticipantsChangedHandler | null = null;
 
-  private localStream: MediaStream | null = null;
-
-  // Per-peer state: deviceId → PeerState
-  private peers = new Map<string, PeerState>();
+  // Signaling race buffers
+  private pendingOffer: RTCSessionDescriptionInit | null = null;
+  private pendingCandidates: RTCIceCandidateInit[] = [];
+  private remoteDescSet = false;
 
   constructor(deviceId: string, username: string, onStateChange: CallEventHandler) {
     this.deviceId = deviceId;
@@ -82,26 +74,10 @@ export class CallService {
   setWebSocket(ws: WebSocket) { this.ws = ws; }
   setOnRemoteTrack(cb: (stream: MediaStream) => void) { this.onTrackCallback = cb; }
   setOnLocalTrack(cb: (stream: MediaStream) => void) { this.onLocalTrackCallback = cb; }
-  setOnParticipantsChanged(cb: ParticipantsChangedHandler) { this.onParticipantsChanged = cb; }
-
   getState() { return this.state; }
   getCurrentCall() { return this.currentCall; }
+  getRemoteStream() { return this.remoteStream; }
   getLocalStream() { return this.localStream; }
-
-  /** Returns the remote stream for the first (or only) peer — used by the legacy 1-to-1 modal */
-  getRemoteStream(): MediaStream | null {
-    const first = this.peers.values().next().value as PeerState | undefined;
-    return first?.stream ?? null;
-  }
-
-  /** All current remote participants with their streams */
-  getParticipants(): RemoteParticipant[] {
-    return Array.from(this.peers.entries()).map(([deviceId, p]) => ({
-      deviceId,
-      username: p.username,
-      stream: p.stream,
-    }));
-  }
 
   private setState(state: CallState) {
     this.state = state;
@@ -115,6 +91,36 @@ export class CallService {
     }
   }
 
+  private sendCallActivityMessage(kind: 'started' | 'joined' | 'ended') {
+    const ws = this.ws || (window as any).appWebSocket;
+    const sessionId = sessionStorage.getItem('sessionId');
+    if (!ws || ws.readyState !== WebSocket.OPEN || !sessionId || !this.currentCall) return;
+
+    ws.send(JSON.stringify({
+      type: 'chat_message',
+      sessionId,
+      deviceId: this.deviceId,
+      payload: {
+        chat: {
+          messageId: `call-${this.currentCall.callId}-${kind}`,
+          text: `[[CALL_ACTIVITY]]${JSON.stringify({
+            callId: this.currentCall.callId,
+            kind,
+            callType: this.currentCall.isVideo ? 'video' : 'audio',
+            remoteUsername: this.currentCall.remoteUsername,
+            remoteDeviceId: this.currentCall.remoteDeviceId,
+            sourceUsername: this.username,
+            sourceDeviceId: this.deviceId,
+          })}`,
+          username: this.username,
+          sentAt: Date.now(),
+          format: 'plain',
+        },
+      },
+      timestamp: Date.now(),
+    }));
+  }
+
   // ── Public API ────────────────────────────────────────────────────────
 
   async startCall(toUsername: string, toDeviceId: string, isVideo: boolean): Promise<void> {
@@ -122,6 +128,7 @@ export class CallService {
     const callId = `call_${Date.now()}_${Math.random().toString(36).slice(2)}`;
     this.currentCall = { callId, remoteUsername: toUsername, remoteDeviceId: toDeviceId, isVideo, direction: 'outbound' };
     this.setState('ringing_out');
+    this.sendCallActivityMessage('started');
     this.send({
       type: 'call_invite',
       payload: { callId, toDevice: toDeviceId, toUsername, fromUsername: this.username, isVideo },
@@ -131,25 +138,30 @@ export class CallService {
   async acceptCall(): Promise<void> {
     if (!this.currentCall || this.state !== 'ringing_in') throw new Error('No incoming call');
     this.setState('connecting');
+    this.sendCallActivityMessage('joined');
 
     try {
+      // Acquire media first so we're ready to add tracks after setRemoteDescription
       const stream = await this.getUserMedia(this.currentCall.isVideo);
       this.localStream = stream;
 
-      // Create PC for the caller but do NOT add tracks yet (must happen after setRemoteDescription)
-      this.createPeerForDevice(this.currentCall.remoteDeviceId, this.currentCall.remoteUsername);
+      // Create the peer connection but do NOT add tracks yet.
+      // Tracks must be added AFTER setRemoteDescription so the browser can
+      // match them to the correct m-lines from the offer. Adding tracks before
+      // the offer creates orphaned transceivers that never get negotiated.
+      this.pc = this.createPeerConnection();
 
+      // Tell caller we're ready — they'll send us the offer
       this.send({
         type: 'call_accept',
         payload: { callId: this.currentCall.callId, toDevice: this.currentCall.remoteDeviceId, fromUsername: this.username },
       });
 
-      // Process buffered offer if it arrived before acceptCall finished
-      const peer = this.peers.get(this.currentCall.remoteDeviceId);
-      if (peer?.pendingOffer) {
-        const offer = peer.pendingOffer;
-        peer.pendingOffer = null;
-        await this.applyRemoteOffer(this.currentCall.remoteDeviceId, offer);
+      // If the offer arrived before acceptCall finished (race condition), process it now
+      if (this.pendingOffer) {
+        const offer = this.pendingOffer;
+        this.pendingOffer = null;
+        await this.applyRemoteOffer(offer);
       }
     } catch (err) {
       console.error('[CallService] acceptCall failed:', err);
@@ -165,37 +177,9 @@ export class CallService {
 
   endCall() {
     if (!this.currentCall) return;
+    this.sendCallActivityMessage('ended');
     this.send({ type: 'call_end', payload: { callId: this.currentCall.callId, toDevice: this.currentCall.remoteDeviceId } });
     this.cleanup('ended');
-  }
-
-  /** Leave a group call without ending it for others */
-  leaveCall() {
-    if (!this.currentCall) return;
-    this.send({ type: 'call_end', payload: { callId: this.currentCall.callId, toDevice: this.currentCall.remoteDeviceId } });
-    this.cleanup('ended');
-  }
-
-  /** Join an ongoing group call from a chat activity message */
-  async joinGroupCall(callId: string, isVideo: boolean): Promise<void> {
-    if (this.state !== 'idle') return;
-    this.currentCall = {
-      callId,
-      remoteUsername: '',
-      remoteDeviceId: '',
-      isVideo,
-      direction: 'inbound',
-    };
-    this.setState('connecting');
-    try {
-      const stream = await this.getUserMedia(isVideo);
-      this.localStream = stream;
-      // Ask server for the current room state (list of participants)
-      this.send({ type: 'call_join_room', payload: { callId } });
-    } catch (err) {
-      console.error('[CallService] joinGroupCall failed:', err);
-      this.cleanup('setup_failed');
-    }
   }
 
   toggleMute(): boolean {
@@ -218,7 +202,8 @@ export class CallService {
     if (!videoTrack) return;
 
     const settings = videoTrack.getSettings();
-    const nextFacing = (settings.facingMode ?? 'user') === 'user' ? 'environment' : 'user';
+    const currentFacing = settings.facingMode ?? 'user';
+    const nextFacing = currentFacing === 'user' ? 'environment' : 'user';
 
     try {
       const newStream = await navigator.mediaDevices.getUserMedia({
@@ -227,9 +212,8 @@ export class CallService {
       });
       const newVideoTrack = newStream.getVideoTracks()[0];
 
-      // Replace in all peer connections
-      for (const { pc } of this.peers.values()) {
-        const sender = pc.getSenders().find(s => s.track?.kind === 'video');
+      if (this.pc) {
+        const sender = this.pc.getSenders().find(s => s.track?.kind === 'video');
         if (sender) await sender.replaceTrack(newVideoTrack);
       }
 
@@ -239,7 +223,7 @@ export class CallService {
 
       if (this.onLocalTrackCallback) this.onLocalTrackCallback(this.localStream);
     } catch {
-      // facingMode exact not supported — skip silently
+      // Browser doesn't support exact facingMode — silently skip
     }
   }
 
@@ -265,29 +249,27 @@ export class CallService {
         break;
 
       case 'call_accept': {
+        // We're the caller — callee accepted. Build PC, add tracks, send offer.
         if (this.state !== 'ringing_out' || !this.currentCall) return;
         this.setState('connecting');
         try {
           const stream = await this.getUserMedia(this.currentCall.isVideo);
           this.localStream = stream;
+          this.pc = this.createPeerConnection();
 
-          const remoteDeviceId = payload.fromDevice;
-          const remoteUsername = payload.fromUsername || this.currentCall.remoteUsername;
-          this.currentCall.remoteDeviceId = remoteDeviceId;
-          this.currentCall.remoteUsername = remoteUsername;
+          // Caller adds tracks BEFORE createOffer — this is correct for the caller.
+          // The caller is the one building the offer; its transceivers define the m-lines.
+          this.addTracksToPC(stream, this.currentCall.isVideo);
 
-          const peer = this.createPeerForDevice(remoteDeviceId, remoteUsername);
-          this.addTracksToPC(peer.pc, stream, this.currentCall.isVideo);
-
-          const offer = await peer.pc.createOffer();
-          await peer.pc.setLocalDescription(offer);
+          const offer = await this.pc.createOffer();
+          await this.pc.setLocalDescription(offer);
 
           console.log('[CallService] caller offer SDP directions:',
             offer.sdp?.match(/a=(sendrecv|sendonly|recvonly|inactive)/g));
 
           this.send({
             type: 'call_offer',
-            payload: { callId: this.currentCall.callId, toDevice: remoteDeviceId, data: offer },
+            payload: { callId: this.currentCall.callId, toDevice: this.currentCall.remoteDeviceId, data: offer },
           });
         } catch (err) {
           console.error('[CallService] call_accept handler failed:', err);
@@ -302,101 +284,47 @@ export class CallService {
         }
         break;
 
-      case 'call_end': {
-        const leavingDevice = payload?.fromDevice;
-        if (leavingDevice && this.peers.has(leavingDevice)) {
-          // One participant left — remove their peer connection
-          this.removePeer(leavingDevice);
-          this.notifyParticipantsChanged();
-          // If no peers remain, end the call
-          if (this.peers.size === 0 && this.state !== 'idle') {
-            this.cleanup('ended');
-          }
-        } else if (this.state !== 'idle') {
-          this.cleanup('ended');
-        }
+      case 'call_end':
+        if (this.state !== 'idle') this.cleanup('ended');
         break;
-      }
 
       case 'call_offer': {
-        const fromDevice = payload.fromDevice;
+        // We're the callee — received SDP offer from caller
         const offerDesc = payload.data as RTCSessionDescriptionInit;
         if (!this.currentCall) return;
 
-        let peer = this.peers.get(fromDevice);
-        if (!peer) {
-          // New peer joining an existing group call
-          const username = (window as any)._sessionDevices?.find((d: any) => d.id === fromDevice)?.username || fromDevice;
-          peer = this.createPeerForDevice(fromDevice, username);
-        }
-
-        if (peer.pc.signalingState !== 'stable') {
-          peer.pendingOffer = offerDesc;
+        if (!this.pc) {
+          // acceptCall hasn't finished yet — buffer the offer
+          this.pendingOffer = offerDesc;
           return;
         }
-        await this.applyRemoteOffer(fromDevice, offerDesc);
+        await this.applyRemoteOffer(offerDesc);
         break;
       }
 
       case 'call_answer': {
-        const fromDevice = payload.fromDevice;
+        // We're the caller — received SDP answer from callee
         const answerDesc = payload.data as RTCSessionDescriptionInit;
-        const peer = this.peers.get(fromDevice);
-        if (!peer) {
-          console.warn('[CallService] call_answer: no peer for', fromDevice);
+        if (!this.pc) {
+          console.warn('[CallService] call_answer: no PC yet, answer dropped');
           return;
         }
-        if (peer.pc.signalingState === 'have-local-offer') {
-          await peer.pc.setRemoteDescription(answerDesc);
-          peer.remoteDescSet = true;
-          this.drainCandidates(fromDevice);
+        if (this.pc.signalingState === 'have-local-offer') {
+          await this.pc.setRemoteDescription(answerDesc);
+          this.remoteDescSet = true;
+          this.drainCandidates();
         }
         break;
       }
 
       case 'call_ice': {
-        const fromDevice = payload.fromDevice;
         const candidate = payload.data as RTCIceCandidateInit;
         if (!candidate) return;
-        const peer = this.peers.get(fromDevice);
-        if (peer && peer.remoteDescSet) {
-          try { await peer.pc.addIceCandidate(candidate); } catch { /* ignore */ }
-        } else if (peer) {
-          peer.pendingCandidates.push(candidate);
+        if (this.pc && this.remoteDescSet) {
+          try { await this.pc.addIceCandidate(candidate); } catch { /* ignore */ }
+        } else {
+          this.pendingCandidates.push(candidate);
         }
-        break;
-      }
-
-      case 'call_room_state': {
-        // Server sent current room participants after call_join_room
-        const { participants, isVideo, callId } = payload;
-        if (this.currentCall) {
-          this.currentCall.isVideo = isVideo;
-        }
-        // Create peer connections with each existing participant and send offers
-        for (const participant of (participants as { deviceId: string; username: string }[])) {
-          if (participant.deviceId === this.deviceId) continue;
-          if (!this.currentCall) break;
-          const peer = this.createPeerForDevice(participant.deviceId, participant.username);
-          if (this.localStream) this.addTracksToPC(peer.pc, this.localStream, isVideo);
-          const offer = await peer.pc.createOffer();
-          await peer.pc.setLocalDescription(offer);
-          this.send({
-            type: 'call_offer',
-            payload: { callId, toDevice: participant.deviceId, data: offer },
-          });
-        }
-        if (participants.length === 0 && this.state === 'connecting') {
-          // Empty room — we're the only one; transition to active so UI shows
-          this.setState('active');
-        }
-        break;
-      }
-
-      case 'call_participant_joined': {
-        // Another participant joined the group call — they'll send us an offer
-        // Nothing to do here; the offer will arrive via call_offer
-        console.log('[CallService] participant joined:', payload.deviceId, payload.username);
         break;
       }
     }
@@ -404,34 +332,103 @@ export class CallService {
 
   // ── Internal helpers ──────────────────────────────────────────────────
 
-  private createPeerForDevice(deviceId: string, username: string): PeerState {
-    if (this.peers.has(deviceId)) return this.peers.get(deviceId)!;
+  /**
+   * Callee-side offer processing.
+   *
+   * Order matters critically:
+   * 1. setRemoteDescription(offer) — browser creates transceivers for each m-line
+   * 2. addTrack() for each local track — browser matches each track to an existing
+   *    m-line transceiver (because the m-lines already exist). This sets the sender.
+   * 3. Force all transceivers to sendrecv (in case any ended up recvonly after
+   *    matching — can happen when the offer m-line was sendonly)
+   * 4. createAnswer() — now the answer will include our local tracks as send
+   * 5. setLocalDescription(answer)
+   * 6. send call_answer
+   */
+  private async applyRemoteOffer(offerDesc: RTCSessionDescriptionInit) {
+    if (!this.pc || !this.localStream) return;
 
+    // Step 1: establish the remote description first
+    await this.pc.setRemoteDescription(offerDesc);
+    this.remoteDescSet = true;
+    this.drainCandidates();
+
+    // Step 2: add our local tracks NOW — after setRemoteDescription.
+    // The browser matches each addTrack() call to an existing m-line transceiver
+    // rather than creating a new one. This ensures our audio/video is sent back.
+    const isVideo = this.currentCall?.isVideo ?? false;
+    this.addTracksToPC(this.localStream, isVideo);
+
+    // Step 3: ensure every transceiver is sendrecv so our answer advertises sending
+    this.pc.getTransceivers().forEach(tr => {
+      if (tr.direction === 'recvonly' || tr.direction === 'inactive') {
+        tr.direction = 'sendrecv';
+        console.log(`[CallService] callee: forced transceiver ${tr.mid} to sendrecv`);
+      }
+    });
+
+    // Step 4+5: create and apply the answer
+    const answer = await this.pc.createAnswer();
+    await this.pc.setLocalDescription(answer);
+
+    console.log('[CallService] callee answer SDP directions:',
+      answer.sdp?.match(/a=(sendrecv|sendonly|recvonly|inactive)/g));
+
+    // Step 6: send to caller
+    this.send({
+      type: 'call_answer',
+      payload: { callId: this.currentCall!.callId, toDevice: this.currentCall!.remoteDeviceId, data: answer },
+    });
+  }
+
+  /**
+   * Add local media tracks to the peer connection.
+   * Only call this at the right time:
+   *   - CALLER: before createOffer()
+   *   - CALLEE: after setRemoteDescription()
+   */
+  private addTracksToPC(stream: MediaStream, isVideo: boolean) {
+    if (!this.pc) return;
+    stream.getTracks().forEach(track => {
+      if (track.kind === 'video' && !isVideo) return;
+      // Guard against double-adding (e.g. on reconnect)
+      const alreadyAdded = this.pc!.getSenders().some(s => s.track?.id === track.id);
+      if (alreadyAdded) return;
+      this.pc!.addTrack(track, stream);
+      console.log(`[CallService] addTrack: kind=${track.kind} enabled=${track.enabled} readyState=${track.readyState}`);
+    });
+  }
+
+  private drainCandidates() {
+    const queued = this.pendingCandidates.splice(0);
+    queued.forEach(c => {
+      try { this.pc?.addIceCandidate(c); } catch { /* ignore */ }
+    });
+  }
+
+  private createPeerConnection(): RTCPeerConnection {
     const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
-    const stream = new MediaStream();
-
-    const peerState: PeerState = {
-      pc, stream, username,
-      pendingOffer: null,
-      pendingCandidates: [],
-      remoteDescSet: false,
-    };
-    this.peers.set(deviceId, peerState);
+    this.remoteStream = new MediaStream();
 
     pc.ontrack = (e) => {
       const track = e.track;
-      if (!stream.getTracks().find(t => t.id === track.id)) {
-        stream.addTrack(track);
+
+      // Guard: don't add the same track twice (ontrack can fire multiple times)
+      if (!this.remoteStream!.getTracks().find(t => t.id === track.id)) {
+        this.remoteStream!.addTrack(track);
       }
+
+      // Also harvest from e.streams[0] for browsers that bundle tracks into a stream
       e.streams[0]?.getTracks().forEach(t => {
-        if (!stream.getTracks().find(x => x.id === t.id)) stream.addTrack(t);
+        if (!this.remoteStream!.getTracks().find(x => x.id === t.id)) {
+          this.remoteStream!.addTrack(t);
+        }
       });
 
-      console.log(`[CallService] ontrack from ${deviceId}: kind=${track.kind}`);
+      console.log(`[CallService] ontrack: kind=${track.kind} id=${track.id} remote tracks now: ${this.remoteStream!.getTracks().map(t=>t.kind).join(',')}`);
 
-      // Always notify with the first peer's stream for backward compat
-      if (this.onTrackCallback) this.onTrackCallback(stream);
-      this.notifyParticipantsChanged();
+      // Always notify so CallModal re-attaches the updated stream to the elements
+      if (this.onTrackCallback) this.onTrackCallback(this.remoteStream!);
       if (this.state !== 'active') this.setState('active');
     };
 
@@ -439,108 +436,45 @@ export class CallService {
       if (e.candidate && this.currentCall) {
         this.send({
           type: 'call_ice',
-          payload: { callId: this.currentCall.callId, toDevice: deviceId, data: e.candidate.toJSON() },
+          payload: { callId: this.currentCall.callId, toDevice: this.currentCall.remoteDeviceId, data: e.candidate.toJSON() },
         });
       }
     };
 
     pc.onconnectionstatechange = () => {
-      console.log(`[CallService] ${deviceId} connection state:`, pc.connectionState);
+      console.log('[CallService] connection state:', pc.connectionState);
       if (pc.connectionState === 'connected' && this.state !== 'active') {
         this.setState('active');
       } else if (pc.connectionState === 'failed') {
-        this.removePeer(deviceId);
-        this.notifyParticipantsChanged();
-        if (this.peers.size === 0) this.cleanup('connection_failed');
+        this.cleanup('connection_failed');
       }
     };
 
     pc.oniceconnectionstatechange = () => {
+      console.log('[CallService] ICE state:', pc.iceConnectionState);
       if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') {
         if (this.state !== 'active') this.setState('active');
       } else if (pc.iceConnectionState === 'failed') {
-        this.removePeer(deviceId);
-        this.notifyParticipantsChanged();
-        if (this.peers.size === 0) this.cleanup('ice_failed');
+        this.cleanup('ice_failed');
       }
     };
 
-    return peerState;
-  }
-
-  private removePeer(deviceId: string) {
-    const peer = this.peers.get(deviceId);
-    if (peer) {
-      peer.pc.close();
-      this.peers.delete(deviceId);
-    }
-  }
-
-  private notifyParticipantsChanged() {
-    if (this.onParticipantsChanged) {
-      this.onParticipantsChanged(this.getParticipants());
-    }
-  }
-
-  /**
-   * Callee-side offer processing.
-   * MUST call setRemoteDescription BEFORE addTrack so transceivers are matched to offer m-lines.
-   */
-  private async applyRemoteOffer(fromDevice: string, offerDesc: RTCSessionDescriptionInit) {
-    const peer = this.peers.get(fromDevice);
-    if (!peer || !this.localStream) return;
-
-    await peer.pc.setRemoteDescription(offerDesc);
-    peer.remoteDescSet = true;
-    this.drainCandidates(fromDevice);
-
-    // Add local tracks AFTER setRemoteDescription so they bind to the offer m-lines
-    this.addTracksToPC(peer.pc, this.localStream, this.currentCall?.isVideo ?? false);
-
-    // Force sendrecv on all transceivers
-    peer.pc.getTransceivers().forEach(tr => {
-      if (tr.direction === 'recvonly' || tr.direction === 'inactive') {
-        tr.direction = 'sendrecv';
-      }
-    });
-
-    const answer = await peer.pc.createAnswer();
-    await peer.pc.setLocalDescription(answer);
-
-    console.log('[CallService] callee answer SDP directions:',
-      answer.sdp?.match(/a=(sendrecv|sendonly|recvonly|inactive)/g));
-
-    this.send({
-      type: 'call_answer',
-      payload: { callId: this.currentCall!.callId, toDevice: fromDevice, data: answer },
-    });
-  }
-
-  private addTracksToPC(pc: RTCPeerConnection, stream: MediaStream, isVideo: boolean) {
-    stream.getTracks().forEach(track => {
-      if (track.kind === 'video' && !isVideo) return;
-      const alreadyAdded = pc.getSenders().some(s => s.track?.id === track.id);
-      if (alreadyAdded) return;
-      pc.addTrack(track, stream);
-      console.log(`[CallService] addTrack: kind=${track.kind} enabled=${track.enabled}`);
-    });
-  }
-
-  private drainCandidates(deviceId: string) {
-    const peer = this.peers.get(deviceId);
-    if (!peer) return;
-    const queued = peer.pendingCandidates.splice(0);
-    queued.forEach(c => {
-      try { peer.pc.addIceCandidate(c); } catch { /* ignore */ }
-    });
+    return pc;
   }
 
   private async getUserMedia(video: boolean): Promise<MediaStream> {
     let stream: MediaStream;
+
     try {
       stream = await navigator.mediaDevices.getUserMedia({
-        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
-        video: video ? { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user' } : false,
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
+        video: video
+          ? { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user' }
+          : false,
       });
     } catch (err) {
       console.warn('[CallService] getUserMedia with constraints failed, retrying basic:', err);
@@ -552,9 +486,10 @@ export class CallService {
       }
     }
 
+    // Ensure audio tracks are enabled (some browsers return disabled tracks on constraint failure)
     stream.getAudioTracks().forEach(t => {
       t.enabled = true;
-      console.log(`[CallService] audio track: id=${t.id} enabled=${t.enabled}`);
+      console.log(`[CallService] audio track: id=${t.id} enabled=${t.enabled} muted=${t.muted} readyState=${t.readyState}`);
     });
 
     if (this.onLocalTrackCallback) this.onLocalTrackCallback(stream);
@@ -563,9 +498,15 @@ export class CallService {
 
   private cleanup(reason?: string) {
     this.localStream?.getTracks().forEach(t => t.stop());
-    for (const [deviceId] of this.peers) this.removePeer(deviceId);
-    this.peers.clear();
+    this.pc?.close();
     this.localStream = null;
+    this.remoteStream = null;
+    this.pc = null;
+    this.pendingOffer = null;
+    this.pendingCandidates = [];
+    this.remoteDescSet = false;
+    // NOTE: do NOT null out onTrackCallback / onLocalTrackCallback here.
+    // CallModal registers them once on mount; clearing them would break the next call.
     const prevCall = this.currentCall;
     this.currentCall = null;
     this.setState('ended');

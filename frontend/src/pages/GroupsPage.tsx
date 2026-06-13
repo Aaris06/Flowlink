@@ -30,6 +30,7 @@ export default function GroupsPage({ ctx }: Props) {
 
   useEffect(() => {
     if (!session) return;
+    setDevices(Array.from(session.devices.values()).filter(d => d.id !== deviceId));
     const ws = (window as any).appWebSocket as WebSocket | null;
     groupService.initialize(ws!, session.id, deviceId);
     groupService.subscribe(setGroups);
