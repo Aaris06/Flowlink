@@ -11,13 +11,23 @@ interface GroupCallModalProps {
   localUsername: string;
 }
 
-/** Attach a MediaStream to a video/audio element safely */
 function attachStream(el: HTMLMediaElement | null, stream: MediaStream | null) {
   if (!el || !stream) return;
   if (el.srcObject !== stream) el.srcObject = stream;
   el.play().catch((e) => {
     if (e?.name !== 'NotAllowedError') console.warn('[GroupCallModal] play error:', e);
   });
+}
+
+// ── Compute the best grid layout for N remote participants ─────────────────
+function getGridClass(count: number): string {
+  if (count <= 1) return 'gcm-grid-1';
+  if (count === 2) return 'gcm-grid-2';
+  if (count === 3) return 'gcm-grid-3';
+  if (count === 4) return 'gcm-grid-4';
+  if (count <= 6) return 'gcm-grid-6';
+  if (count <= 9) return 'gcm-grid-9';
+  return 'gcm-grid-9'; // cap at 3×3
 }
 
 export default function GroupCallModal({
@@ -32,9 +42,10 @@ export default function GroupCallModal({
   const [duration, setDuration] = useState(0);
   const [minimized, setMinimized] = useState(false);
 
+  // Local PiP video
   const localVideoRef = useRef<HTMLVideoElement | null>(null);
 
-  // Ringtone: play when ringing_in, stop otherwise
+  // Ringtone
   useEffect(() => {
     if (state === 'ringing_in') {
       startRingtone((window as any).__flowlink_username ?? 'default');
@@ -64,18 +75,7 @@ export default function GroupCallModal({
     if (state === 'idle' || state === 'ended') setMinimized(false);
   }, [state]);
 
-  // Attach local stream to local video element
-  useEffect(() => {
-    if (state === 'active') {
-      const local = groupCallService.getLocalStream();
-      if (localVideoRef.current && local) {
-        localVideoRef.current.srcObject = local;
-        localVideoRef.current.muted = true;
-        localVideoRef.current.play().catch(() => {});
-      }
-    }
-  }, [state, groupCallService]);
-
+  // Attach local stream to the PiP video
   const attachLocalVideo = useCallback((el: HTMLVideoElement | null) => {
     localVideoRef.current = el;
     if (el) {
@@ -84,24 +84,39 @@ export default function GroupCallModal({
     }
   }, [groupCallService]);
 
+  useEffect(() => {
+    if (state === 'active') {
+      const stream = groupCallService.getLocalStream();
+      if (localVideoRef.current && stream) {
+        localVideoRef.current.srcObject = stream;
+        localVideoRef.current.muted = true;
+        localVideoRef.current.play().catch(() => {});
+      }
+    }
+  }, [state, participants, groupCallService]);
+
   const fmt = (s: number) =>
     `${Math.floor(s / 60).toString().padStart(2, '0')}:${(s % 60).toString().padStart(2, '0')}`;
 
   if (state === 'idle' || !roomInfo) return null;
-  if (minimized) return <MinimizedBubble roomInfo={roomInfo} duration={duration} state={state} fmt={fmt} onRestore={() => setMinimized(false)} onLeave={() => groupCallService.leaveCall()} />;
+  if (minimized) return (
+    <MinimizedBubble
+      roomInfo={roomInfo}
+      duration={duration}
+      state={state}
+      fmt={fmt}
+      onRestore={() => setMinimized(false)}
+      onLeave={() => groupCallService.leaveCall()}
+    />
+  );
 
   const isVideo = roomInfo.callType === 'video';
-  const allParticipants: GroupCallParticipant[] = [
-    // Local participant tile (first)
-    { peerId: '__local__', peerUsername: localUsername, stream: groupCallService.getLocalStream() },
-    ...participants,
-  ];
 
   return (
     <div className={`gcm-overlay${state === 'active' && isVideo ? ' gcm-video-mode' : ''}`}>
       <div className="gcm-modal">
 
-        {/* Header */}
+        {/* ── Header ──────────────────────────────────────────────────── */}
         <div className="gcm-header">
           <div className="gcm-header-info">
             <span className="gcm-header-icon">{isVideo ? '🎥' : '📞'}</span>
@@ -115,58 +130,85 @@ export default function GroupCallModal({
                     : `Group ${isVideo ? 'Video' : 'Audio'} Call`}
             </span>
             {state === 'active' && (
-              <span className="gcm-participant-count">{participants.length + 1} participant{participants.length + 1 !== 1 ? 's' : ''}</span>
+              <span className="gcm-participant-count">
+                {participants.length + 1} participant{participants.length + 1 !== 1 ? 's' : ''}
+              </span>
             )}
           </div>
           {(state === 'active' || state === 'ringing_out') && (
-            <button className="gcm-minimize-btn" onClick={() => setMinimized(true)} title="Minimize">
-              ⬇
-            </button>
+            <button className="gcm-minimize-btn" onClick={() => setMinimized(true)} title="Minimize">⬇</button>
           )}
         </div>
 
-        {/* Video grid (only when active and video) */}
+        {/* ── Active video call: remote grid + local PiP ──────────────── */}
         {isVideo && state === 'active' && (
-          <div className={`gcm-grid gcm-grid-${Math.min(allParticipants.length, 6)}`}>
-            {allParticipants.map(p => (
-              <ParticipantTile
-                key={p.peerId}
-                participant={p}
-                isLocal={p.peerId === '__local__'}
-                attachLocal={p.peerId === '__local__' ? attachLocalVideo : undefined}
-              />
-            ))}
+          <div className="gcm-video-area">
+            {/* Remote participants grid */}
+            <div className={`gcm-grid ${getGridClass(Math.max(participants.length, 1))}`}>
+              {participants.length === 0 ? (
+                // No remote peers yet — show waiting placeholder
+                <div className="gcm-tile gcm-tile-waiting">
+                  <div className="gcm-tile-avatar">👥</div>
+                  <div className="gcm-tile-label">Waiting for others…</div>
+                </div>
+              ) : (
+                participants.map(p => (
+                  <RemoteTile key={p.peerId} participant={p} />
+                ))
+              )}
+            </div>
+
+            {/* Local video: small floating PiP in bottom-right */}
+            <div className="gcm-pip">
+              {groupCallService.getLocalStream()?.getVideoTracks().length ? (
+                <video
+                  ref={attachLocalVideo}
+                  className="gcm-pip-video"
+                  autoPlay
+                  playsInline
+                  muted
+                />
+              ) : (
+                <div className="gcm-pip-avatar">{(localUsername || 'Y')[0]?.toUpperCase()}</div>
+              )}
+              <div className="gcm-pip-label">You</div>
+            </div>
           </div>
         )}
 
-        {/* Audio-only: avatar grid */}
+        {/* ── Active audio call: avatar grid ──────────────────────────── */}
         {!isVideo && state === 'active' && (
           <div className="gcm-audio-grid">
-            {allParticipants.map(p => (
+            {/* Self tile */}
+            <div className="gcm-audio-tile gcm-audio-tile-self">
+              <div className="gcm-audio-avatar">{(localUsername || 'Y')[0]?.toUpperCase()}</div>
+              <div className="gcm-audio-name">You</div>
+            </div>
+            {/* Remote tiles */}
+            {participants.map(p => (
               <div key={p.peerId} className="gcm-audio-tile">
                 <div className="gcm-audio-avatar">{(p.peerUsername || '?')[0]?.toUpperCase()}</div>
-                <div className="gcm-audio-name">{p.peerUsername}{p.peerId === '__local__' ? ' (You)' : ''}</div>
-                {/* Invisible audio element for remote streams */}
-                {p.peerId !== '__local__' && p.stream && (
-                  <AudioPlayer stream={p.stream} />
-                )}
+                <div className="gcm-audio-name">{p.peerUsername}</div>
+                {p.stream && <AudioPlayer stream={p.stream} />}
               </div>
             ))}
           </div>
         )}
 
-        {/* Ringing states: simple info */}
+        {/* ── Ringing / calling states ─────────────────────────────────── */}
         {(state === 'ringing_in' || state === 'ringing_out') && (
           <div className="gcm-ringing-info">
             <div className="gcm-ringing-avatar">{roomInfo.initiatorUsername[0]?.toUpperCase()}</div>
             <div className="gcm-ringing-name">{roomInfo.initiatorUsername}</div>
             <div className="gcm-ringing-sub">
-              {state === 'ringing_in' ? `Incoming ${isVideo ? 'video' : 'audio'} group call` : 'Waiting for others to join…'}
+              {state === 'ringing_in'
+                ? `Incoming ${isVideo ? 'video' : 'audio'} group call`
+                : 'Waiting for others to join…'}
             </div>
           </div>
         )}
 
-        {/* Controls */}
+        {/* ── Controls ────────────────────────────────────────────────── */}
         <div className="gcm-controls">
           {state === 'ringing_in' && (
             <>
@@ -207,48 +249,43 @@ export default function GroupCallModal({
             </>
           )}
         </div>
+
       </div>
     </div>
   );
 }
 
-// ── Sub-components ──────────────────────────────────────────────────────────
+// ── Remote tile ──────────────────────────────────────────────────────────────
 
-interface ParticipantTileProps {
-  participant: GroupCallParticipant;
-  isLocal: boolean;
-  attachLocal?: (el: HTMLVideoElement | null) => void;
-}
-
-function ParticipantTile({ participant, isLocal, attachLocal }: ParticipantTileProps) {
+function RemoteTile({ participant }: { participant: GroupCallParticipant }) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
 
   useEffect(() => {
-    if (!isLocal && videoRef.current && participant.stream) {
+    if (videoRef.current && participant.stream) {
       attachStream(videoRef.current, participant.stream);
     }
-  }, [participant.stream, isLocal]);
+  }, [participant.stream]);
 
   const hasVideo = participant.stream && participant.stream.getVideoTracks().length > 0;
 
   return (
-    <div className={`gcm-tile${isLocal ? ' gcm-tile-local' : ''}`}>
+    <div className="gcm-tile">
       {hasVideo ? (
         <video
-          ref={isLocal ? attachLocal : (el) => { videoRef.current = el; if (el && participant.stream) attachStream(el, participant.stream); }}
+          ref={(el) => {
+            videoRef.current = el;
+            if (el && participant.stream) attachStream(el, participant.stream);
+          }}
           className="gcm-tile-video"
           autoPlay
           playsInline
-          muted={isLocal}
         />
       ) : (
         <div className="gcm-tile-avatar">{(participant.peerUsername || '?')[0]?.toUpperCase()}</div>
       )}
-      <div className="gcm-tile-label">
-        {participant.peerUsername}{isLocal ? ' (You)' : ''}
-      </div>
-      {/* Audio for remote participants */}
-      {!isLocal && participant.stream && <AudioPlayer stream={participant.stream} />}
+      <div className="gcm-tile-label">{participant.peerUsername}</div>
+      {/* Hidden audio player */}
+      {participant.stream && <AudioPlayer stream={participant.stream} />}
     </div>
   );
 }
@@ -265,6 +302,8 @@ function AudioPlayer({ stream }: { stream: MediaStream }) {
   }, [stream]);
   return <audio ref={ref} autoPlay playsInline style={{ display: 'none' }} />;
 }
+
+// ── Minimized bubble ─────────────────────────────────────────────────────────
 
 interface MinimizedBubbleProps {
   roomInfo: GroupCallInfo;

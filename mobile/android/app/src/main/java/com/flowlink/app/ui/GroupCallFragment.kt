@@ -61,6 +61,17 @@ class GroupCallFragment : Fragment() {
                     putString(ARG_INITIATOR, initiatorUsername)
                 }
             }
+
+        /** Late-join from the "Join Now" chat button — skips ringing, auto-accepts */
+        fun newJoinNow(roomId: String, isVideo: Boolean, creatorUsername: String) =
+            GroupCallFragment().apply {
+                arguments = Bundle().apply {
+                    putString(ARG_ROOM_ID,   roomId)
+                    putBoolean(ARG_IS_VIDEO, isVideo)
+                    putString(ARG_DIRECTION, "join_now")
+                    putString(ARG_INITIATOR, creatorUsername)
+                }
+            }
     }
 
     // ── Activity / manager refs ───────────────────────────────────────────
@@ -80,14 +91,15 @@ class GroupCallFragment : Fragment() {
     private var isActive = false
 
     // ── Views ─────────────────────────────────────────────────────────────
-    private var tvStatus       : TextView?    = null
-    private var tvParticipants : TextView?    = null
-    private var btnAccept      : ImageButton? = null
-    private var btnEnd         : ImageButton? = null
-    private var btnMute        : ImageButton? = null
-    private var btnSpeaker     : ImageButton? = null
-    private var btnCameraOff   : ImageButton? = null
-    private var videoGrid      : LinearLayout? = null
+    private var tvStatus       : TextView?             = null
+    private var tvParticipants : TextView?             = null
+    private var btnAccept      : ImageButton?          = null
+    private var btnEnd         : ImageButton?          = null
+    private var btnMute        : ImageButton?          = null
+    private var btnSpeaker     : ImageButton?          = null
+    private var btnCameraOff   : ImageButton?          = null
+    private var videoGrid      : LinearLayout?         = null
+    private var localPip       : SurfaceViewRenderer? = null  // local camera PiP overlay
 
     // ── WebRTC shared resources ───────────────────────────────────────────
     private var factory          : PeerConnectionFactory? = null
@@ -144,6 +156,7 @@ class GroupCallFragment : Fragment() {
         btnSpeaker     = view.findViewById(R.id.gcf_btn_speaker)
         btnCameraOff   = view.findViewById(R.id.gcf_btn_camera)
         videoGrid      = view.findViewById(R.id.gcf_video_grid)
+        localPip       = view.findViewById(R.id.gcf_local_pip)
 
         view.findViewById<TextView>(R.id.gcf_title)?.text =
             "${if (isVideo) "Video" else "Audio"} Group Call"
@@ -169,6 +182,19 @@ class GroupCallFragment : Fragment() {
                 activity?.volumeControlStream = AudioManager.STREAM_VOICE_CALL
                 lifecycleScope.launch { initWebRTC() }
             }
+            "join_now" -> {
+                // Late join from chat "Join Now" button — skip ringing, auto-join
+                tvStatus?.text = "Joining…"
+                btnAccept?.visibility = View.GONE
+                activity?.volumeControlStream = AudioManager.STREAM_VOICE_CALL
+                lifecycleScope.launch {
+                    initWebRTC()
+                    // Send join after WebRTC is ready and fragment is attached
+                    wsManager.sendRoomSignal("call_room_join", JSONObject().apply {
+                        put("roomId", roomId)
+                    })
+                }
+            }
         }
     }
 
@@ -176,6 +202,12 @@ class GroupCallFragment : Fragment() {
         super.onDestroyView()
         stopRingtone()
         mainHandler.removeCallbacks(durationTick)
+    }
+
+    override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
+        super.onConfigurationChanged(newConfig)
+        // Reflow grid on orientation change
+        mainHandler.post { rebuildVideoGrid() }
     }
 
     // ── Ringtone ──────────────────────────────────────────────────────────
@@ -346,6 +378,16 @@ class GroupCallFragment : Fragment() {
                 videoCapturer!!.initialize(surfaceHelper, ctx, localVideoSource!!.capturerObserver)
                 videoCapturer!!.startCapture(640, 480, 24)
                 localVideoTrack = factory!!.createVideoTrack("gcVideo0", localVideoSource)
+
+                // Attach local track to the PiP view on main thread
+                withContext(Dispatchers.Main) {
+                    val pip = localPip ?: return@withContext
+                    pip.init(eglBase!!.eglBaseContext, null)
+                    pip.setEnableHardwareScaler(true)
+                    pip.setMirror(true)
+                    localVideoTrack?.addSink(pip)
+                    pip.visibility = View.VISIBLE
+                }
             }
         }
     }
@@ -533,20 +575,37 @@ class GroupCallFragment : Fragment() {
                 setEnableHardwareScaler(true)
             }
             val vv = videoView
+            val username = peerUsername
             mainHandler.post {
-                val params = LinearLayout.LayoutParams(0, 280).apply {
-                    weight = 1f; setMargins(4, 4, 4, 4)
+                // Wrap in a FrameLayout so the label can overlay the video
+                val tileFrame = android.widget.FrameLayout(requireContext()).apply {
+                    setBackgroundColor(android.graphics.Color.parseColor("#1A1A2E"))
                 }
-                videoGrid?.addView(vv, params)
-                // Peer label overlay
-                val tv = android.widget.TextView(requireContext()).apply {
-                    text = peerUsername
+                // Video fills the tile
+                val videoParams = android.widget.FrameLayout.LayoutParams(
+                    android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
+                    android.widget.FrameLayout.LayoutParams.MATCH_PARENT
+                )
+                tileFrame.addView(vv, videoParams)
+                // Label at bottom
+                val label = android.widget.TextView(requireContext()).apply {
+                    text = username
                     setTextColor(android.graphics.Color.WHITE)
                     textSize = 11f
-                    setPadding(8, 4, 8, 4)
-                    setBackgroundColor(android.graphics.Color.parseColor("#88000000"))
+                    setPadding(8, 4, 8, 6)
+                    setBackgroundColor(android.graphics.Color.parseColor("#AA000000"))
+                    gravity = android.view.Gravity.CENTER_HORIZONTAL
                 }
-                videoGrid?.addView(tv)
+                val labelParams = android.widget.FrameLayout.LayoutParams(
+                    android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
+                    android.widget.FrameLayout.LayoutParams.WRAP_CONTENT,
+                    android.view.Gravity.BOTTOM
+                )
+                tileFrame.addView(label, labelParams)
+
+                // Add tile to the grid; rebuildVideoGrid will lay it out properly
+                videoGrid?.addView(tileFrame)
+                rebuildVideoGrid()
             }
         }
 
@@ -615,9 +674,25 @@ class GroupCallFragment : Fragment() {
                     .mapNotNull { it.track() as? VideoTrack }
                     .forEach { it.removeSink(view) }
             }
-            mainHandler.post { videoGrid?.removeView(conn.videoView) }
             conn.videoView?.release()
             conn.pc.close()
+            // Find and remove the parent FrameLayout tile that contains this videoView
+            mainHandler.post {
+                val grid = videoGrid ?: return@post
+                // Walk rows to find and remove the tile containing this videoView
+                val toRemove = mutableListOf<android.view.View>()
+                for (i in 0 until grid.childCount) {
+                    val row = grid.getChildAt(i) as? android.widget.LinearLayout ?: continue
+                    for (j in 0 until row.childCount) {
+                        val tile = row.getChildAt(j) as? android.widget.FrameLayout ?: continue
+                        if (tile.getChildAt(0) === conn.videoView) toRemove.add(tile)
+                    }
+                }
+                toRemove.forEach { tile ->
+                    (tile.parent as? android.widget.LinearLayout)?.removeView(tile)
+                }
+                rebuildVideoGrid()
+            }
         } catch (_: Exception) {}
     }
 
@@ -629,6 +704,9 @@ class GroupCallFragment : Fragment() {
         isActive = false
         for ((_, conn) in peers) {
             try {
+                conn.videoView?.let { v ->
+                    localVideoTrack?.removeSink(v)
+                }
                 conn.videoView?.release()
                 conn.pc.close()
             } catch (_: Exception) {}
@@ -636,6 +714,13 @@ class GroupCallFragment : Fragment() {
         peers.clear()
         try { videoCapturer?.stopCapture() } catch (_: Exception) {}
         try { videoCapturer?.dispose() } catch (_: Exception) {}
+        // Release local PiP view
+        try {
+            localPip?.let { pip ->
+                localVideoTrack?.removeSink(pip)
+                pip.release()
+            }
+        } catch (_: Exception) {}
         localVideoTrack?.dispose()
         localAudioTrack?.dispose()
         localVideoSource?.dispose()
@@ -656,6 +741,75 @@ class GroupCallFragment : Fragment() {
     private fun updateParticipantCount(remoteCount: Int) {
         val total = remoteCount + 1
         tvParticipants?.text = "$total participant${if (total != 1) "s" else ""}"
+    }
+
+    /**
+     * Rebuild the video grid layout using all available space.
+     * Collects all FrameLayout tile views (from direct children or nested rows),
+     * clears the grid, then rebuilds it as a vertical LinearLayout of horizontal rows.
+     *
+     *  1 tile  → 1×1 full screen
+     *  2 tiles → 2 rows (portrait) or 2 columns (landscape handled by orientation change)
+     *  3 tiles → 1 on top (full width), 2 on bottom
+     *  4 tiles → 2×2
+     *  5–6     → 2 rows of 3
+     *  7–9     → 3 rows of 3
+     */
+    private fun rebuildVideoGrid() {
+        val grid = videoGrid ?: return
+
+        // Collect ALL FrameLayout tiles — they may be direct children (first build)
+        // or nested inside horizontal row LinearLayouts (subsequent rebuilds)
+        val tiles = mutableListOf<android.widget.FrameLayout>()
+        for (i in 0 until grid.childCount) {
+            val child = grid.getChildAt(i)
+            when (child) {
+                is android.widget.FrameLayout -> tiles.add(child)
+                is android.widget.LinearLayout -> {
+                    for (j in 0 until child.childCount) {
+                        val inner = child.getChildAt(j)
+                        if (inner is android.widget.FrameLayout) tiles.add(inner)
+                    }
+                }
+            }
+        }
+        grid.removeAllViews()
+        val n = tiles.size
+        if (n == 0) return
+
+        // Determine grid dimensions
+        val (cols, rows) = when {
+            n == 1 -> 1 to 1
+            n == 2 -> 1 to 2   // portrait: stack vertically
+            n == 3 -> 2 to 2   // top row spans full width, bottom row has 2
+            n == 4 -> 2 to 2
+            n <= 6 -> 3 to 2
+            else   -> 3 to 3
+        }
+
+        var idx = 0
+        for (row in 0 until rows) {
+            if (idx >= n) break
+            val remaining = n - idx
+            // For 3-tile layout: first row is 1 full-width tile
+            val colsThisRow = if (n == 3 && row == 0) 1 else minOf(cols, remaining)
+
+            val rowLayout = android.widget.LinearLayout(requireContext()).apply {
+                orientation = android.widget.LinearLayout.HORIZONTAL
+                layoutParams = android.widget.LinearLayout.LayoutParams(
+                    android.widget.LinearLayout.LayoutParams.MATCH_PARENT, 0
+                ).apply { weight = 1f }
+            }
+            for (col in 0 until colsThisRow) {
+                if (idx >= n) break
+                val tile = tiles[idx++]
+                tile.layoutParams = android.widget.LinearLayout.LayoutParams(0,
+                    android.widget.LinearLayout.LayoutParams.MATCH_PARENT
+                ).apply { weight = 1f; setMargins(2, 2, 2, 2) }
+                rowLayout.addView(tile)
+            }
+            grid.addView(rowLayout)
+        }
     }
 
     private fun fmt(secs: Int) =

@@ -7,7 +7,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(0, 0, 0, 0.65);
+  background: rgba(0, 0, 0, 0.75);
   backdrop-filter: blur(6px);
 }
 
@@ -20,33 +20,34 @@
   background: linear-gradient(145deg, #1e1b4b, #312e81);
   border: 1px solid rgba(139, 92, 246, 0.3);
   border-radius: 20px;
-  width: min(96vw, 920px);
+  width: min(96vw, 960px);
   max-height: 92vh;
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  gap: 0;
   box-shadow: 0 24px 80px rgba(0, 0, 0, 0.6);
 }
 
+/* Video mode: go fullscreen */
 .gcm-video-mode .gcm-modal {
   width: 100vw;
-  height: 100vh;
-  max-height: 100vh;
+  height: 100dvh;
+  max-height: 100dvh;
   border-radius: 0;
-  background: #111;
+  background: #0a0a0a;
 }
 
-/* ── Header ────────────────────────────────────────────────────────────────── */
+/* ── Header ─────────────────────────────────────────────────────────────── */
 
 .gcm-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 16px 20px 12px;
-  background: rgba(255, 255, 255, 0.04);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  padding: 14px 18px 12px;
+  background: rgba(0, 0, 0, 0.35);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
   flex-shrink: 0;
+  z-index: 2;
 }
 
 .gcm-header-info {
@@ -57,10 +58,10 @@
   min-width: 0;
 }
 
-.gcm-header-icon { font-size: 1.2rem; }
+.gcm-header-icon { font-size: 1.15rem; }
 
 .gcm-header-title {
-  font-size: 1rem;
+  font-size: 0.95rem;
   font-weight: 600;
   color: #e2e8f0;
   white-space: nowrap;
@@ -69,9 +70,9 @@
 }
 
 .gcm-participant-count {
-  font-size: 0.78rem;
+  font-size: 0.75rem;
   color: #94a3b8;
-  background: rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.1);
   border-radius: 12px;
   padding: 2px 8px;
   white-space: nowrap;
@@ -90,75 +91,109 @@
 }
 .gcm-minimize-btn:hover { background: rgba(255, 255, 255, 0.2); }
 
-/* ── Video Grid ────────────────────────────────────────────────────────────── */
+/* ── Video area: remote grid + local PiP ──────────────────────────────────── */
 
-.gcm-grid {
+.gcm-video-area {
   flex: 1;
-  display: grid;
-  gap: 4px;
-  padding: 8px;
+  position: relative;
   overflow: hidden;
+  background: #0a0a0a;
+  min-height: 0;
 }
 
-/* 1 participant: full size */
-.gcm-grid-1 { grid-template-columns: 1fr; grid-template-rows: 1fr; }
-/* 2 participants: side by side */
-.gcm-grid-2 { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr; }
-/* 3 participants: 2+1 */
-.gcm-grid-3 { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; }
-.gcm-grid-3 .gcm-tile:first-child { grid-column: 1 / -1; }
-/* 4 participants: 2×2 */
-.gcm-grid-4 { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; }
-/* 5-6 participants: 3×2 */
-.gcm-grid-5,
-.gcm-grid-6 { grid-template-columns: 1fr 1fr 1fr; grid-template-rows: 1fr 1fr; }
+/* ── Remote grid: fills the entire video area ──────────────────────────── */
 
-/* ── Participant Tile ──────────────────────────────────────────────────────── */
+.gcm-grid {
+  width: 100%;
+  height: 100%;
+  display: grid;
+  gap: 3px;
+  padding: 3px;
+  background: #111;
+  box-sizing: border-box;
+}
+
+/* 1 remote: full area */
+.gcm-grid-1 {
+  grid-template-columns: 1fr;
+  grid-template-rows: 1fr;
+}
+
+/* 2 remotes: stacked vertically on portrait, side-by-side on landscape */
+.gcm-grid-2 {
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr;
+}
+
+/* 3 remotes: one large on top, two below */
+.gcm-grid-3 {
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr;
+}
+.gcm-grid-3 .gcm-tile:first-child {
+  grid-column: 1 / -1;
+}
+
+/* 4 remotes: 2×2 */
+.gcm-grid-4 {
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr;
+}
+
+/* 5–6 remotes: 3×2 */
+.gcm-grid-6 {
+  grid-template-columns: 1fr 1fr 1fr;
+  grid-template-rows: 1fr 1fr;
+}
+
+/* 7–9 remotes: 3×3 */
+.gcm-grid-9 {
+  grid-template-columns: 1fr 1fr 1fr;
+  grid-template-rows: 1fr 1fr 1fr;
+}
+
+/* ── Participant tile ──────────────────────────────────────────────────── */
 
 .gcm-tile {
   position: relative;
   background: #1a1a2e;
-  border-radius: 12px;
   overflow: hidden;
   display: flex;
   align-items: center;
   justify-content: center;
-  min-height: 120px;
-}
-
-.gcm-tile-local {
-  border: 2px solid rgba(139, 92, 246, 0.5);
+  border-radius: 6px;
 }
 
 .gcm-tile-video {
   width: 100%;
   height: 100%;
   object-fit: cover;
+  display: block;
 }
 
 .gcm-tile-avatar {
-  width: 64px;
-  height: 64px;
+  width: 72px;
+  height: 72px;
   border-radius: 50%;
   background: linear-gradient(135deg, #6d28d9, #2563eb);
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 1.8rem;
+  font-size: 2rem;
   font-weight: 700;
   color: #fff;
 }
 
 .gcm-tile-label {
   position: absolute;
-  bottom: 8px;
+  bottom: 6px;
   left: 8px;
-  background: rgba(0, 0, 0, 0.55);
+  background: rgba(0, 0, 0, 0.6);
   color: #fff;
-  font-size: 0.75rem;
+  font-size: 0.72rem;
   font-weight: 600;
-  padding: 3px 8px;
-  border-radius: 8px;
+  padding: 2px 8px;
+  border-radius: 6px;
   backdrop-filter: blur(4px);
   max-width: calc(100% - 16px);
   white-space: nowrap;
@@ -166,16 +201,87 @@
   text-overflow: ellipsis;
 }
 
-/* ── Audio-only Grid ──────────────────────────────────────────────────────── */
+/* Waiting placeholder tile */
+.gcm-tile-waiting {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px dashed rgba(255, 255, 255, 0.15);
+}
+.gcm-tile-waiting .gcm-tile-avatar {
+  background: rgba(255, 255, 255, 0.1);
+  font-size: 2.2rem;
+}
+.gcm-tile-waiting .gcm-tile-label {
+  position: static;
+  margin-top: 10px;
+  background: transparent;
+  color: #64748b;
+  font-size: 0.8rem;
+}
+
+/* ── Local PiP overlay ────────────────────────────────────────────────── */
+
+.gcm-pip {
+  position: absolute;
+  bottom: 14px;
+  right: 14px;
+  width: 110px;
+  height: 80px;
+  border-radius: 10px;
+  overflow: hidden;
+  background: #2a2a3e;
+  border: 2px solid rgba(139, 92, 246, 0.7);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.gcm-pip-video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.gcm-pip-avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #7c3aed, #2563eb);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.2rem;
+  font-weight: 700;
+  color: #fff;
+}
+
+.gcm-pip-label {
+  position: absolute;
+  bottom: 3px;
+  left: 0;
+  right: 0;
+  text-align: center;
+  font-size: 0.65rem;
+  color: rgba(255, 255, 255, 0.85);
+  font-weight: 600;
+  text-shadow: 0 1px 3px rgba(0,0,0,0.8);
+}
+
+/* ── Audio-only grid ──────────────────────────────────────────────────── */
 
 .gcm-audio-grid {
   flex: 1;
   display: flex;
   flex-wrap: wrap;
-  align-content: flex-start;
-  gap: 12px;
-  padding: 20px;
+  align-content: center;
+  justify-content: center;
+  gap: 16px;
+  padding: 24px;
   overflow-y: auto;
+  min-height: 0;
 }
 
 .gcm-audio-tile {
@@ -183,25 +289,34 @@
   flex-direction: column;
   align-items: center;
   gap: 8px;
-  padding: 16px 20px;
+  padding: 20px 24px;
   background: rgba(255, 255, 255, 0.05);
-  border-radius: 16px;
+  border-radius: 18px;
   border: 1px solid rgba(255, 255, 255, 0.1);
-  min-width: 100px;
+  min-width: 110px;
   flex: 0 0 auto;
+  transition: border-color 0.2s;
+}
+
+.gcm-audio-tile-self {
+  border-color: rgba(139, 92, 246, 0.45);
 }
 
 .gcm-audio-avatar {
-  width: 56px;
-  height: 56px;
+  width: 60px;
+  height: 60px;
   border-radius: 50%;
   background: linear-gradient(135deg, #7c3aed, #2563eb);
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 1.5rem;
+  font-size: 1.6rem;
   font-weight: 700;
   color: #fff;
+}
+
+.gcm-audio-tile-self .gcm-audio-avatar {
+  background: linear-gradient(135deg, #4f46e5, #7c3aed);
 }
 
 .gcm-audio-name {
@@ -209,13 +324,13 @@
   font-weight: 600;
   color: #e2e8f0;
   text-align: center;
-  max-width: 100px;
+  max-width: 110px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-/* ── Ringing states ─────────────────────────────────────────────────────────  */
+/* ── Ringing states ───────────────────────────────────────────────────── */
 
 .gcm-ringing-info {
   flex: 1;
@@ -223,19 +338,19 @@
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 12px;
-  padding: 32px 20px;
+  gap: 14px;
+  padding: 40px 20px;
 }
 
 .gcm-ringing-avatar {
-  width: 80px;
-  height: 80px;
+  width: 88px;
+  height: 88px;
   border-radius: 50%;
   background: linear-gradient(135deg, #7c3aed, #2563eb);
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 2.2rem;
+  font-size: 2.4rem;
   font-weight: 700;
   color: #fff;
   animation: gcm-pulse 1.5s ease-in-out infinite;
@@ -243,11 +358,11 @@
 
 @keyframes gcm-pulse {
   0%, 100% { box-shadow: 0 0 0 0 rgba(124, 58, 237, 0.4); }
-  50% { box-shadow: 0 0 0 16px rgba(124, 58, 237, 0); }
+  50%       { box-shadow: 0 0 0 20px rgba(124, 58, 237, 0); }
 }
 
 .gcm-ringing-name {
-  font-size: 1.3rem;
+  font-size: 1.4rem;
   font-weight: 700;
   color: #e2e8f0;
 }
@@ -257,15 +372,16 @@
   color: #94a3b8;
 }
 
-/* ── Controls ─────────────────────────────────────────────────────────────── */
+/* ── Controls ─────────────────────────────────────────────────────────── */
 
 .gcm-controls {
   display: flex;
   justify-content: center;
   gap: 16px;
-  padding: 16px 20px 20px;
+  padding: 14px 20px 18px;
   flex-shrink: 0;
-  background: rgba(0, 0, 0, 0.15);
+  background: rgba(0, 0, 0, 0.3);
+  z-index: 2;
 }
 
 .gcm-btn {
@@ -278,24 +394,24 @@
   align-items: center;
   justify-content: center;
   font-size: 1.3rem;
-  transition: transform 0.1s, opacity 0.2s;
-  background: rgba(255, 255, 255, 0.12);
+  transition: transform 0.1s, opacity 0.15s;
+  background: rgba(255, 255, 255, 0.13);
   color: #fff;
 }
-.gcm-btn:hover { transform: scale(1.08); opacity: 0.9; }
-.gcm-btn.active { background: rgba(139, 92, 246, 0.4); }
+.gcm-btn:hover  { transform: scale(1.08); }
+.gcm-btn.active { background: rgba(139, 92, 246, 0.45); }
 
-.gcm-btn-accept { background: #22c55e; }
+.gcm-btn-accept       { background: #22c55e; }
 .gcm-btn-accept:hover { background: #16a34a; }
 
 .gcm-btn-reject,
-.gcm-btn-end { background: #ef4444; }
+.gcm-btn-end           { background: #ef4444; }
 .gcm-btn-reject:hover,
-.gcm-btn-end:hover { background: #dc2626; }
+.gcm-btn-end:hover     { background: #dc2626; }
 
 .gcm-btn-icon { pointer-events: none; }
 
-/* ── Minimized bubble ─────────────────────────────────────────────────────── */
+/* ── Minimized bubble ─────────────────────────────────────────────────── */
 
 .gcm-bubble {
   position: fixed;
@@ -310,15 +426,11 @@
   border: 1px solid rgba(139, 92, 246, 0.4);
   border-radius: 40px;
   padding: 8px 12px 8px 8px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
   user-select: none;
 }
 
-.gcm-bubble-circle {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
+.gcm-bubble-circle  { display: flex; align-items: center; gap: 8px; }
 
 .gcm-bubble-avatar {
   width: 40px;
@@ -334,21 +446,9 @@
   flex-shrink: 0;
 }
 
-.gcm-bubble-info {
-  display: flex;
-  flex-direction: column;
-}
-
-.gcm-bubble-name {
-  font-size: 0.82rem;
-  font-weight: 600;
-  color: #e2e8f0;
-}
-
-.gcm-bubble-timer {
-  font-size: 0.72rem;
-  color: #94a3b8;
-}
+.gcm-bubble-info   { display: flex; flex-direction: column; }
+.gcm-bubble-name   { font-size: 0.82rem; font-weight: 600; color: #e2e8f0; }
+.gcm-bubble-timer  { font-size: 0.72rem; color: #94a3b8; }
 
 .gcm-bubble-end {
   background: #ef4444;
@@ -363,29 +463,46 @@
   align-items: center;
   justify-content: center;
   margin-left: 4px;
-  transition: background 0.15s;
   flex-shrink: 0;
+  transition: background 0.15s;
 }
 .gcm-bubble-end:hover { background: #dc2626; }
 
-/* ── Responsive ───────────────────────────────────────────────────────────── */
+/* ── Responsive ───────────────────────────────────────────────────────── */
 
 @media (max-width: 600px) {
-  .gcm-modal {
-    width: 100vw;
-    height: 100vh;
-    max-height: 100vh;
-    border-radius: 0;
+  /* Audio-only: flex wraps nicely on small screens already */
+
+  /* On portrait mobile, 2-column grid is more natural than landscape */
+  .gcm-grid-2 {
+    grid-template-columns: 1fr;
+    grid-template-rows: 1fr 1fr;
   }
 
-  .gcm-grid-5,
+  /* 6-tile grid: 2 cols on mobile instead of 3 */
   .gcm-grid-6 {
     grid-template-columns: 1fr 1fr;
-    grid-template-rows: auto;
+    grid-template-rows: 1fr 1fr 1fr;
+  }
+
+  /* PiP smaller on mobile */
+  .gcm-pip {
+    width: 80px;
+    height: 56px;
+    bottom: 8px;
+    right: 8px;
   }
 
   .gcm-bubble {
     bottom: 80px;
     right: 12px;
+  }
+}
+
+@media (orientation: landscape) and (max-height: 500px) {
+  /* Landscape phone: 2-col side by side */
+  .gcm-grid-2 {
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: 1fr;
   }
 }

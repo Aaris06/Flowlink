@@ -243,21 +243,17 @@ class ChatMessageAdapter(
 
         return ParsedCallActivity(title, subtitle, joinable) {
             val mainActivity = holder.itemView.context as? com.flowlink.app.MainActivity ?: return@ParsedCallActivity
-            // Show GroupCallFragment in "join" mode
-            val fragment = GroupCallFragment.newIncomingRoom(
-                roomId       = roomId,
-                fromUsername = creatorUser,
-                isVideo      = callType == "video"
+            // Show GroupCallFragment in "join now" mode — it auto-sends call_room_join internally
+            val fragment = GroupCallFragment.newJoinNow(
+                roomId         = roomId,
+                isVideo        = callType == "video",
+                creatorUsername = creatorUser
             )
             try {
                 mainActivity.supportFragmentManager.beginTransaction()
                     .replace(com.flowlink.app.R.id.fragment_container, fragment, "group_call")
                     .addToBackStack("group_call")
                     .commitAllowingStateLoss()
-                // Immediately accept (since user clicked Join Now)
-                mainActivity.webSocketManager.sendRoomSignal("call_room_join", org.json.JSONObject().apply {
-                    put("roomId", roomId)
-                })
             } catch (e: Exception) {
                 android.util.Log.e("ChatAdapter", "Failed to join room: ${e.message}")
             }
