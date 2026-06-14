@@ -1713,6 +1713,8 @@ class WebSocketManager(private val mainActivity: MainActivity) {
                         reason = payload.optString("reason", "unknown")
                     ))
                 }
+            }
+        } catch (e: Exception) {
             Log.e("FlowLink", "Error handling message", e)
         }
     }

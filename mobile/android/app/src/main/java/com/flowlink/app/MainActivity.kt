@@ -1655,10 +1655,10 @@ class MainActivity : AppCompatActivity(), UsernameDialogFragment.UsernameDialogL
             // Show a heads-up notification if in background
             if (!isAppInForeground) {
                 notificationService.showIncomingCall(
-                    callId     = "room_$roomId",
-                    fromUser   = fromUsername,
-                    isVideo    = callType == "video",
-                    fromDevice = ""
+                    callId       = "room_$roomId",
+                    fromUsername = fromUsername,
+                    fromDevice   = "",
+                    isVideo      = callType == "video"
                 )
             }
         }

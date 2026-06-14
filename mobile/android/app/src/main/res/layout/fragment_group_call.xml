@@ -55,7 +55,6 @@
         android:layout_height="0dp"
         android:layout_weight="1"
         android:orientation="horizontal"
-        android:flexWrap="wrap"
         android:padding="4dp"
         android:background="#1A0D0D1A"/>
 
