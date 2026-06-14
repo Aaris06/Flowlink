@@ -1,282 +1,296 @@
-import { useEffect, useRef, useState } from 'react';
-import { GroupCallService, GroupCallState, GroupCallRoom, GroupCallParticipant } from '../services/GroupCallService';
+import { useEffect, useRef, useState, useCallback } from 'react';
+import { GroupCallService, GroupCallState, GroupCallInfo, GroupCallParticipant } from '../services/GroupCallService';
 import { startRingtone, stopRingtone } from '../services/RingtoneService';
 import './GroupCallModal.css';
 
-interface Props {
+interface GroupCallModalProps {
   groupCallService: GroupCallService;
   state: GroupCallState;
-  room: GroupCallRoom | null;
+  roomInfo: GroupCallInfo | null;
+  participants: GroupCallParticipant[];
+  localUsername: string;
 }
 
-// ── Participant tile ───────────────────────────────────────────────────────
-
-function ParticipantTile({ participant, isVideo }: { participant: GroupCallParticipant; isVideo: boolean }) {
-  const videoRef = useRef<HTMLVideoElement | null>(null);
-  const audioRef = useRef<HTMLAudioElement | null>(null);
-
-  // Attach stream to video/audio element whenever it changes
-  useEffect(() => {
-    const stream = participant.stream;
-    if (!stream) return;
-
-    if (isVideo && !participant.isSelf && videoRef.current) {
-      if (videoRef.current.srcObject !== stream) {
-        videoRef.current.srcObject = stream;
-        videoRef.current.play().catch(() => {});
-      }
-    }
-
-    if (!participant.isSelf && audioRef.current) {
-      if (audioRef.current.srcObject !== stream) {
-        audioRef.current.srcObject = stream;
-        audioRef.current.play().catch(() => {});
-      }
-    }
-
-    if (participant.isSelf && isVideo && videoRef.current) {
-      if (videoRef.current.srcObject !== stream) {
-        videoRef.current.srcObject = stream;
-        // Self preview is muted
-      }
-    }
-  }, [participant.stream, isVideo, participant.isSelf]);
-
-  const initials = (participant.username[0] || '?').toUpperCase();
-  const hasVideo = isVideo && !!participant.stream;
-
-  return (
-    <div className={`gcall-tile${hasVideo ? ' has-video' : ''}${participant.isSelf ? ' self' : ''}`}>
-      {/* Audio element — always present for remote peers */}
-      {!participant.isSelf && (
-        <audio
-          ref={audioRef}
-          autoPlay
-          playsInline
-          style={{ display: 'none' }}
-        />
-      )}
-
-      {/* Video stream */}
-      {hasVideo ? (
-        <video
-          ref={videoRef}
-          className="gcall-tile-video"
-          autoPlay
-          playsInline
-          muted={participant.isSelf}
-        />
-      ) : (
-        <div className="gcall-tile-avatar">
-          <span>{initials}</span>
-        </div>
-      )}
-
-      {/* Name label */}
-      <div className="gcall-tile-label">
-        <span className="gcall-tile-name">{participant.username}{participant.isSelf ? ' (You)' : ''}</span>
-        {participant.muted && <span className="gcall-tile-muted">🔇</span>}
-        {isVideo && participant.cameraOff && <span className="gcall-tile-camoff">📷</span>}
-      </div>
-    </div>
-  );
+/** Attach a MediaStream to a video/audio element safely */
+function attachStream(el: HTMLMediaElement | null, stream: MediaStream | null) {
+  if (!el || !stream) return;
+  if (el.srcObject !== stream) el.srcObject = stream;
+  el.play().catch((e) => {
+    if (e?.name !== 'NotAllowedError') console.warn('[GroupCallModal] play error:', e);
+  });
 }
 
-// ── Main GroupCallModal ────────────────────────────────────────────────────
-
-export default function GroupCallModal({ groupCallService, state, room }: Props) {
+export default function GroupCallModal({
+  groupCallService,
+  state,
+  roomInfo,
+  participants,
+  localUsername,
+}: GroupCallModalProps) {
   const [muted, setMuted] = useState(false);
   const [cameraOff, setCameraOff] = useState(false);
   const [duration, setDuration] = useState(0);
-  const [participants, setParticipants] = useState<GroupCallParticipant[]>(room?.participants ?? []);
   const [minimized, setMinimized] = useState(false);
 
-  const isVideo = room?.callType === 'video';
+  const localVideoRef = useRef<HTMLVideoElement | null>(null);
 
-  // ── Ringtone ──────────────────────────────────────────────────────────
+  // Ringtone: play when ringing_in, stop otherwise
   useEffect(() => {
-    const username = (window as any).__flowlink_username ?? 'default';
     if (state === 'ringing_in') {
-      startRingtone(username);
+      startRingtone((window as any).__flowlink_username ?? 'default');
     } else {
       stopRingtone();
     }
     return () => stopRingtone();
   }, [state]);
 
-  // ── Sync participants from service ────────────────────────────────────
-  useEffect(() => {
-    groupCallService.setOnParticipantsChange(p => setParticipants([...p]));
-    return () => groupCallService.setOnParticipantsChange(() => {});
-  }, [groupCallService]);
-
-  useEffect(() => {
-    if (room?.participants) setParticipants([...room.participants]);
-  }, [room]);
-
-  // ── Duration timer ────────────────────────────────────────────────────
+  // Duration counter
   useEffect(() => {
     if (state !== 'active') { setDuration(0); return; }
     const t = setInterval(() => setDuration(d => d + 1), 1000);
     return () => clearInterval(t);
   }, [state]);
 
-  // ── Reset state on new call ───────────────────────────────────────────
+  // Reset UI on new call
   useEffect(() => {
-    if (state === 'ringing_in' || state === 'joining') {
+    if (state === 'ringing_in' || state === 'ringing_out') {
       setMuted(false);
       setCameraOff(false);
       setMinimized(false);
     }
+  }, [state]);
+
+  useEffect(() => {
     if (state === 'idle' || state === 'ended') setMinimized(false);
   }, [state]);
+
+  // Attach local stream to local video element
+  useEffect(() => {
+    if (state === 'active') {
+      const local = groupCallService.getLocalStream();
+      if (localVideoRef.current && local) {
+        localVideoRef.current.srcObject = local;
+        localVideoRef.current.muted = true;
+        localVideoRef.current.play().catch(() => {});
+      }
+    }
+  }, [state, groupCallService]);
+
+  const attachLocalVideo = useCallback((el: HTMLVideoElement | null) => {
+    localVideoRef.current = el;
+    if (el) {
+      const stream = groupCallService.getLocalStream();
+      if (stream) { el.srcObject = stream; el.muted = true; el.play().catch(() => {}); }
+    }
+  }, [groupCallService]);
 
   const fmt = (s: number) =>
     `${Math.floor(s / 60).toString().padStart(2, '0')}:${(s % 60).toString().padStart(2, '0')}`;
 
-  // ── Render guard ──────────────────────────────────────────────────────
-  if (state === 'idle' || !room) return null;
+  if (state === 'idle' || !roomInfo) return null;
+  if (minimized) return <MinimizedBubble roomInfo={roomInfo} duration={duration} state={state} fmt={fmt} onRestore={() => setMinimized(false)} onLeave={() => groupCallService.leaveCall()} />;
 
-  const otherCount = participants.filter(p => !p.isSelf).length;
+  const isVideo = roomInfo.callType === 'video';
+  const allParticipants: GroupCallParticipant[] = [
+    // Local participant tile (first)
+    { peerId: '__local__', peerUsername: localUsername, stream: groupCallService.getLocalStream() },
+    ...participants,
+  ];
 
-  // ── Minimized bubble ──────────────────────────────────────────────────
-  if (minimized) {
-    return (
-      <div className="gcall-bubble" onClick={() => setMinimized(false)} title="Click to restore group call">
-        <div className="gcall-bubble-circle">
-          <span className="gcall-bubble-icon">{isVideo ? '🎥' : '📞'}</span>
-          <span className="gcall-bubble-count">{participants.length}</span>
-        </div>
-        <div className="gcall-bubble-info">
-          <span>{state === 'active' ? fmt(duration) : 'Calling…'}</span>
-        </div>
-        <button
-          className="gcall-bubble-end"
-          onClick={e => { e.stopPropagation(); groupCallService.leaveCall(); }}
-          title="Leave call"
-        >✕</button>
-      </div>
-    );
-  }
-
-  // ── Incoming ring screen ──────────────────────────────────────────────
-  if (state === 'ringing_in') {
-    return (
-      <div className="gcall-overlay">
-        <div className="gcall-modal gcall-ring-modal">
-          <div className="gcall-ring-icon">{isVideo ? '🎥' : '📞'}</div>
-          <div className="gcall-ring-title">
-            Group {isVideo ? 'Video' : 'Voice'} Call
-          </div>
-          <div className="gcall-ring-sub">
-            <strong>{room.hostUsername}</strong> is starting a group call
-          </div>
-          <div className="gcall-ring-controls">
-            <button
-              className="call-btn call-btn-accept"
-              onClick={() => groupCallService.acceptGroupCall()}
-              title="Join"
-            >
-              <span className="call-icon">📞</span>
-            </button>
-            <button
-              className="call-btn call-btn-end"
-              onClick={() => groupCallService.rejectGroupCall()}
-              title="Decline"
-            >
-              <span className="call-icon">📵</span>
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  // ── Joining / active ──────────────────────────────────────────────────
   return (
-    <div className={`gcall-overlay${state === 'active' && isVideo ? ' gcall-video-mode' : ''}`}>
-      <div className="gcall-modal">
+    <div className={`gcm-overlay${state === 'active' && isVideo ? ' gcm-video-mode' : ''}`}>
+      <div className="gcm-modal">
 
         {/* Header */}
-        <div className="gcall-header">
-          <div className="gcall-header-left">
-            <span className="gcall-header-icon">{isVideo ? '🎥' : '📞'}</span>
-            <span className="gcall-header-title">
-              Group {isVideo ? 'Video' : 'Voice'} Call
+        <div className="gcm-header">
+          <div className="gcm-header-info">
+            <span className="gcm-header-icon">{isVideo ? '🎥' : '📞'}</span>
+            <span className="gcm-header-title">
+              {state === 'ringing_in'
+                ? `${roomInfo.initiatorUsername} is inviting you`
+                : state === 'ringing_out'
+                  ? 'Calling participants…'
+                  : state === 'active'
+                    ? `Group ${isVideo ? 'Video' : 'Audio'} Call · ${fmt(duration)}`
+                    : `Group ${isVideo ? 'Video' : 'Audio'} Call`}
             </span>
-            <span className="gcall-header-count">{participants.length} participant{participants.length !== 1 ? 's' : ''}</span>
-          </div>
-          <div className="gcall-header-right">
             {state === 'active' && (
-              <span className="gcall-header-timer">{fmt(duration)}</span>
+              <span className="gcm-participant-count">{participants.length + 1} participant{participants.length + 1 !== 1 ? 's' : ''}</span>
             )}
-            {state === 'joining' && (
-              <span className="gcall-header-connecting">Connecting…</span>
-            )}
-            <button
-              className="gcall-minimize-btn"
-              onClick={() => setMinimized(true)}
-              title="Minimize"
-            >⬇</button>
           </div>
-        </div>
-
-        {/* Participant Grid */}
-        <div className={`gcall-grid gcall-grid-${Math.min(participants.length, 6)}`}>
-          {participants.map(p => (
-            <ParticipantTile
-              key={p.deviceId}
-              participant={p}
-              isVideo={!!isVideo}
-            />
-          ))}
-          {otherCount === 0 && state === 'active' && (
-            <div className="gcall-waiting">
-              <div className="gcall-waiting-icon">👥</div>
-              <div className="gcall-waiting-text">Waiting for others to join…</div>
-              <div className="gcall-waiting-sub">Share the call link or invite from the session</div>
-            </div>
+          {(state === 'active' || state === 'ringing_out') && (
+            <button className="gcm-minimize-btn" onClick={() => setMinimized(true)} title="Minimize">
+              ⬇
+            </button>
           )}
         </div>
 
-        {/* Controls */}
-        <div className="gcall-controls">
-          <button
-            className={`call-btn call-btn-mute${muted ? ' active' : ''}`}
-            onClick={() => setMuted(groupCallService.toggleMute())}
-            title={muted ? 'Unmute' : 'Mute'}
-          >
-            <span className="call-icon">{muted ? '🔇' : '🎙️'}</span>
-          </button>
+        {/* Video grid (only when active and video) */}
+        {isVideo && state === 'active' && (
+          <div className={`gcm-grid gcm-grid-${Math.min(allParticipants.length, 6)}`}>
+            {allParticipants.map(p => (
+              <ParticipantTile
+                key={p.peerId}
+                participant={p}
+                isLocal={p.peerId === '__local__'}
+                attachLocal={p.peerId === '__local__' ? attachLocalVideo : undefined}
+              />
+            ))}
+          </div>
+        )}
 
-          {isVideo && (
+        {/* Audio-only: avatar grid */}
+        {!isVideo && state === 'active' && (
+          <div className="gcm-audio-grid">
+            {allParticipants.map(p => (
+              <div key={p.peerId} className="gcm-audio-tile">
+                <div className="gcm-audio-avatar">{(p.peerUsername || '?')[0]?.toUpperCase()}</div>
+                <div className="gcm-audio-name">{p.peerUsername}{p.peerId === '__local__' ? ' (You)' : ''}</div>
+                {/* Invisible audio element for remote streams */}
+                {p.peerId !== '__local__' && p.stream && (
+                  <AudioPlayer stream={p.stream} />
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Ringing states: simple info */}
+        {(state === 'ringing_in' || state === 'ringing_out') && (
+          <div className="gcm-ringing-info">
+            <div className="gcm-ringing-avatar">{roomInfo.initiatorUsername[0]?.toUpperCase()}</div>
+            <div className="gcm-ringing-name">{roomInfo.initiatorUsername}</div>
+            <div className="gcm-ringing-sub">
+              {state === 'ringing_in' ? `Incoming ${isVideo ? 'video' : 'audio'} group call` : 'Waiting for others to join…'}
+            </div>
+          </div>
+        )}
+
+        {/* Controls */}
+        <div className="gcm-controls">
+          {state === 'ringing_in' && (
             <>
-              <button
-                className={`call-btn call-btn-camera${cameraOff ? ' active' : ''}`}
-                onClick={() => setCameraOff(groupCallService.toggleCamera())}
-                title={cameraOff ? 'Camera on' : 'Camera off'}
-              >
-                <span className="call-icon">{cameraOff ? '📷' : '🎥'}</span>
+              <button className="gcm-btn gcm-btn-accept" onClick={() => groupCallService.acceptGroupCall()} title="Accept">
+                <span className="gcm-btn-icon">📞</span>
               </button>
-              <button
-                className="call-btn call-btn-switch"
-                onClick={() => groupCallService.switchCamera()}
-                title="Switch camera"
-              >
-                <span className="call-icon">🔄</span>
+              <button className="gcm-btn gcm-btn-reject" onClick={() => groupCallService.rejectGroupCall()} title="Decline">
+                <span className="gcm-btn-icon">📵</span>
               </button>
             </>
           )}
-
-          <button
-            className="call-btn call-btn-end"
-            onClick={() => groupCallService.leaveCall()}
-            title="Leave call"
-          >
-            <span className="call-icon">📵</span>
-          </button>
+          {state === 'ringing_out' && (
+            <button className="gcm-btn gcm-btn-end" onClick={() => groupCallService.leaveCall()} title="Cancel">
+              <span className="gcm-btn-icon">📵</span>
+            </button>
+          )}
+          {state === 'active' && (
+            <>
+              <button
+                className={`gcm-btn gcm-btn-mute${muted ? ' active' : ''}`}
+                onClick={() => setMuted(groupCallService.toggleMute())}
+                title={muted ? 'Unmute' : 'Mute'}
+              >
+                <span className="gcm-btn-icon">{muted ? '🔇' : '🎙️'}</span>
+              </button>
+              {isVideo && (
+                <button
+                  className={`gcm-btn gcm-btn-camera${cameraOff ? ' active' : ''}`}
+                  onClick={() => setCameraOff(groupCallService.toggleCamera())}
+                  title={cameraOff ? 'Camera on' : 'Camera off'}
+                >
+                  <span className="gcm-btn-icon">{cameraOff ? '📷' : '🎥'}</span>
+                </button>
+              )}
+              <button className="gcm-btn gcm-btn-end" onClick={() => groupCallService.leaveCall()} title="Leave call">
+                <span className="gcm-btn-icon">📵</span>
+              </button>
+            </>
+          )}
         </div>
       </div>
+    </div>
+  );
+}
+
+// ── Sub-components ──────────────────────────────────────────────────────────
+
+interface ParticipantTileProps {
+  participant: GroupCallParticipant;
+  isLocal: boolean;
+  attachLocal?: (el: HTMLVideoElement | null) => void;
+}
+
+function ParticipantTile({ participant, isLocal, attachLocal }: ParticipantTileProps) {
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+
+  useEffect(() => {
+    if (!isLocal && videoRef.current && participant.stream) {
+      attachStream(videoRef.current, participant.stream);
+    }
+  }, [participant.stream, isLocal]);
+
+  const hasVideo = participant.stream && participant.stream.getVideoTracks().length > 0;
+
+  return (
+    <div className={`gcm-tile${isLocal ? ' gcm-tile-local' : ''}`}>
+      {hasVideo ? (
+        <video
+          ref={isLocal ? attachLocal : (el) => { videoRef.current = el; if (el && participant.stream) attachStream(el, participant.stream); }}
+          className="gcm-tile-video"
+          autoPlay
+          playsInline
+          muted={isLocal}
+        />
+      ) : (
+        <div className="gcm-tile-avatar">{(participant.peerUsername || '?')[0]?.toUpperCase()}</div>
+      )}
+      <div className="gcm-tile-label">
+        {participant.peerUsername}{isLocal ? ' (You)' : ''}
+      </div>
+      {/* Audio for remote participants */}
+      {!isLocal && participant.stream && <AudioPlayer stream={participant.stream} />}
+    </div>
+  );
+}
+
+function AudioPlayer({ stream }: { stream: MediaStream }) {
+  const ref = useRef<HTMLAudioElement | null>(null);
+  useEffect(() => {
+    if (ref.current) {
+      ref.current.srcObject = stream;
+      ref.current.volume = 1;
+      ref.current.muted = false;
+      ref.current.play().catch(() => {});
+    }
+  }, [stream]);
+  return <audio ref={ref} autoPlay playsInline style={{ display: 'none' }} />;
+}
+
+interface MinimizedBubbleProps {
+  roomInfo: GroupCallInfo;
+  duration: number;
+  state: GroupCallState;
+  fmt: (s: number) => string;
+  onRestore: () => void;
+  onLeave: () => void;
+}
+
+function MinimizedBubble({ roomInfo, duration, state, fmt, onRestore, onLeave }: MinimizedBubbleProps) {
+  return (
+    <div className="gcm-bubble" onClick={onRestore} title="Click to restore call">
+      <div className="gcm-bubble-circle">
+        <div className="gcm-bubble-avatar">{roomInfo.initiatorUsername[0]?.toUpperCase()}</div>
+        <div className="gcm-bubble-info">
+          <span className="gcm-bubble-name">{roomInfo.initiatorUsername}</span>
+          <span className="gcm-bubble-timer">{state === 'active' ? fmt(duration) : 'Calling…'}</span>
+        </div>
+      </div>
+      <button
+        className="gcm-bubble-end"
+        onMouseDown={(e) => e.stopPropagation()}
+        onClick={(e) => { e.stopPropagation(); onLeave(); }}
+        title="Leave call"
+      >✕</button>
     </div>
   );
 }

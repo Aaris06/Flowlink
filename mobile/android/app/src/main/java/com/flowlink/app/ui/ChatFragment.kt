@@ -157,7 +157,7 @@ class ChatFragment : Fragment() {
         binding.btnAttach.setOnClickListener { pickFileLauncher.launch(arrayOf("*/*")) }
         binding.btnCancelReply.setOnClickListener { clearReply() }
 
-        // Audio call button — group call: calls ALL other devices in the session
+        // Audio call button — group call: creates a room and invites ALL other devices
         binding.root.findViewById<android.widget.ImageButton?>(R.id.btn_audio_call)?.setOnClickListener {
             val selfId = sessionManager?.getDeviceId()
             val devices = mainActivity.webSocketManager.sessionDevices.value
@@ -165,19 +165,39 @@ class ChatFragment : Fragment() {
             if (devices.isEmpty()) {
                 Toast.makeText(requireContext(), "No other devices in session", Toast.LENGTH_SHORT).show()
             } else if (devices.size == 1) {
-                // 1-on-1 call
+                // 1-on-1 call — use existing CallFragment
                 val target = devices.first()
                 mainActivity.startOutgoingCall(target.username.ifEmpty { target.name }, target.id, false)
             } else {
-                // Group call — call each device individually (mesh)
-                devices.forEach { target ->
-                    mainActivity.startOutgoingCall(target.username.ifEmpty { target.name }, target.id, false)
+                // Group call — create a room and invite all
+                val roomId = "room_${System.currentTimeMillis()}"
+                val sessionId = sessionManager?.getCurrentSessionId() ?: ""
+                val invitees = org.json.JSONArray().apply {
+                    devices.forEach { d -> put(org.json.JSONObject().apply {
+                        put("deviceId", d.id)
+                        put("username", d.username.ifEmpty { d.name })
+                    }) }
                 }
+                mainActivity.webSocketManager.sendRoomSignal("call_room_create", org.json.JSONObject().apply {
+                    put("roomId", roomId)
+                    put("callType", "audio")
+                    put("invitees", invitees)
+                    put("sessionId", sessionId)
+                })
+                // Open GroupCallFragment as outbound
+                val fragment = GroupCallFragment.newOutgoingRoom(
+                    roomId = roomId, isVideo = false,
+                    initiatorUsername = sessionManager?.getUsername() ?: "You"
+                )
+                requireActivity().supportFragmentManager.beginTransaction()
+                    .replace(com.flowlink.app.R.id.fragment_container, fragment, "group_call")
+                    .addToBackStack("group_call")
+                    .commitAllowingStateLoss()
                 Toast.makeText(requireContext(), "Starting group audio call with ${devices.size} devices", Toast.LENGTH_SHORT).show()
             }
         }
 
-        // Video call button — group call: calls ALL other devices in the session
+        // Video call button — group call: creates a room and invites ALL other devices
         binding.root.findViewById<android.widget.ImageButton?>(R.id.btn_video_call)?.setOnClickListener {
             val selfId = sessionManager?.getDeviceId()
             val devices = mainActivity.webSocketManager.sessionDevices.value
@@ -185,14 +205,33 @@ class ChatFragment : Fragment() {
             if (devices.isEmpty()) {
                 Toast.makeText(requireContext(), "No other devices in session", Toast.LENGTH_SHORT).show()
             } else if (devices.size == 1) {
-                // 1-on-1 video call
+                // 1-on-1 video call — use existing CallFragment
                 val target = devices.first()
                 mainActivity.startOutgoingCall(target.username.ifEmpty { target.name }, target.id, true)
             } else {
-                // Group video call — call each device individually
-                devices.forEach { target ->
-                    mainActivity.startOutgoingCall(target.username.ifEmpty { target.name }, target.id, true)
+                // Group video call — create a room and invite all
+                val roomId = "room_${System.currentTimeMillis()}"
+                val sessionId = sessionManager?.getCurrentSessionId() ?: ""
+                val invitees = org.json.JSONArray().apply {
+                    devices.forEach { d -> put(org.json.JSONObject().apply {
+                        put("deviceId", d.id)
+                        put("username", d.username.ifEmpty { d.name })
+                    }) }
                 }
+                mainActivity.webSocketManager.sendRoomSignal("call_room_create", org.json.JSONObject().apply {
+                    put("roomId", roomId)
+                    put("callType", "video")
+                    put("invitees", invitees)
+                    put("sessionId", sessionId)
+                })
+                val fragment = GroupCallFragment.newOutgoingRoom(
+                    roomId = roomId, isVideo = true,
+                    initiatorUsername = sessionManager?.getUsername() ?: "You"
+                )
+                requireActivity().supportFragmentManager.beginTransaction()
+                    .replace(com.flowlink.app.R.id.fragment_container, fragment, "group_call")
+                    .addToBackStack("group_call")
+                    .commitAllowingStateLoss()
                 Toast.makeText(requireContext(), "Starting group video call with ${devices.size} devices", Toast.LENGTH_SHORT).show()
             }
         }
@@ -229,7 +268,8 @@ class ChatFragment : Fragment() {
             mainActivity.webSocketManager.chatEvents.collect { event ->
                 when (event) {
                     is WebSocketManager.ChatEvent.Message -> {
-                        val isCallActivity = event.text.startsWith("[[CALL_ACTIVITY]]")
+                        val isCallActivity = event.text.startsWith("[[CALL_ACTIVITY]]") ||
+                                             event.text.startsWith("[[CALL_ROOM_ACTIVITY]]")
                         if (isCallActivity) {
                             val idx = chatMessages.indexOfFirst { it.messageId == event.messageId }
                             if (idx >= 0) {

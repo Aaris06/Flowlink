@@ -147,6 +147,20 @@ class ChatMessageAdapter(
                     holder.tvMessageText.visibility = View.VISIBLE
                     holder.tvMessageText.text = msg.text
                 }
+            } else if (msg.text.startsWith("[[CALL_ROOM_ACTIVITY]]")) {
+                holder.tvMessageText.visibility = View.GONE
+                holder.callCard.visibility = View.VISIBLE
+                try {
+                    val call = parseCallRoomActivity(holder, msg.text)
+                    holder.tvCallTitle.text = call.title
+                    holder.tvCallSubtitle.text = call.subtitle
+                    holder.btnJoinCall.visibility = if (call.joinable) View.VISIBLE else View.GONE
+                    holder.btnJoinCall.setOnClickListener { call.onJoin() }
+                } catch (_: Exception) {
+                    holder.callCard.visibility = View.GONE
+                    holder.tvMessageText.visibility = View.VISIBLE
+                    holder.tvMessageText.text = msg.text
+                }
             } else {
                 holder.tvMessageText.text = msg.text
             }
@@ -207,6 +221,46 @@ class ChatMessageAdapter(
                 })
                 put("timestamp", System.currentTimeMillis())
             }.toString())
+        }
+    }
+
+    private fun parseCallRoomActivity(holder: MessageViewHolder, text: String): ParsedCallActivity {
+        val json = org.json.JSONObject(text.removePrefix("[[CALL_ROOM_ACTIVITY]]"))
+        val kind         = json.optString("kind", "started")
+        val roomId       = json.optString("roomId", "")
+        val callType     = json.optString("callType", "audio")
+        val creatorUser  = json.optString("creatorUsername", json.optString("joinUsername", "Someone"))
+        val sessionId    = json.optString("sessionId", "")
+
+        val title = when (kind) {
+            "started" -> "$creatorUser started a group $callType call"
+            "joined"  -> "${json.optString("joinUsername", "Someone")} joined the group call"
+            "left"    -> "${json.optString("leaveUsername", "Someone")} left the group call"
+            else      -> "Group call ended"
+        }
+        val joinable = kind == "started" || kind == "joined"
+        val subtitle = if (joinable) "Group call is ongoing — tap to join" else "Group call update"
+
+        return ParsedCallActivity(title, subtitle, joinable) {
+            val mainActivity = holder.itemView.context as? com.flowlink.app.MainActivity ?: return@ParsedCallActivity
+            // Show GroupCallFragment in "join" mode
+            val fragment = GroupCallFragment.newIncomingRoom(
+                roomId       = roomId,
+                fromUsername = creatorUser,
+                isVideo      = callType == "video"
+            )
+            try {
+                mainActivity.supportFragmentManager.beginTransaction()
+                    .replace(com.flowlink.app.R.id.fragment_container, fragment, "group_call")
+                    .addToBackStack("group_call")
+                    .commitAllowingStateLoss()
+                // Immediately accept (since user clicked Join Now)
+                mainActivity.webSocketManager.sendRoomSignal("call_room_join", org.json.JSONObject().apply {
+                    put("roomId", roomId)
+                })
+            } catch (e: Exception) {
+                android.util.Log.e("ChatAdapter", "Failed to join room: ${e.message}")
+            }
         }
     }
 

@@ -1,395 +1,391 @@
-/* ── Group Call Modal ── */
-.gcall-overlay {
+/* ── Group Call Modal ─────────────────────────────────────────────────────── */
+
+.gcm-overlay {
   position: fixed;
   inset: 0;
-  z-index: 9999;
+  z-index: 9000;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(0, 0, 0, 0.82);
-  backdrop-filter: blur(8px);
-  animation: gcallFadeIn 0.2s ease;
+  background: rgba(0, 0, 0, 0.65);
+  backdrop-filter: blur(6px);
 }
 
-@keyframes gcallFadeIn {
-  from { opacity: 0; }
-  to   { opacity: 1; }
+.gcm-overlay.gcm-video-mode {
+  background: #000;
 }
 
-.gcall-modal {
+.gcm-modal {
   position: relative;
-  width: min(860px, 96vw);
-  max-height: 92vh;
-  background: linear-gradient(145deg, #0f0c29, #1e1b4b);
+  background: linear-gradient(145deg, #1e1b4b, #312e81);
+  border: 1px solid rgba(139, 92, 246, 0.3);
   border-radius: 20px;
+  width: min(96vw, 920px);
+  max-height: 92vh;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
-  box-shadow: 0 32px 80px rgba(0, 0, 0, 0.7);
-  overflow: hidden;
+  gap: 0;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.6);
 }
 
-/* ── Video mode stretches the modal ── */
-.gcall-video-mode .gcall-modal {
-  width: min(1100px, 98vw);
-  max-height: 96vh;
+.gcm-video-mode .gcm-modal {
+  width: 100vw;
+  height: 100vh;
+  max-height: 100vh;
+  border-radius: 0;
+  background: #111;
 }
 
-/* ── Incoming ring ── */
-.gcall-ring-modal {
-  width: min(360px, 94vw);
-  align-items: center;
-  padding: 2.5rem 2rem;
-  gap: 1rem;
-  background: linear-gradient(145deg, #1e1b4b, #312e81);
-}
+/* ── Header ────────────────────────────────────────────────────────────────── */
 
-.gcall-ring-icon {
-  font-size: 3rem;
-  animation: gcallPulse 1.4s ease-in-out infinite;
-}
-
-@keyframes gcallPulse {
-  0%, 100% { transform: scale(1); }
-  50%       { transform: scale(1.15); }
-}
-
-.gcall-ring-title {
-  font-size: 1.4rem;
-  font-weight: 700;
-  color: #fff;
-}
-
-.gcall-ring-sub {
-  font-size: 0.9rem;
-  color: rgba(255,255,255,0.7);
-  text-align: center;
-}
-
-.gcall-ring-controls {
-  display: flex;
-  gap: 1.5rem;
-  margin-top: 0.5rem;
-}
-
-/* ── Header ── */
-.gcall-header {
+.gcm-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0.9rem 1.25rem;
-  background: rgba(0,0,0,0.3);
-  border-bottom: 1px solid rgba(255,255,255,0.08);
+  padding: 16px 20px 12px;
+  background: rgba(255, 255, 255, 0.04);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
   flex-shrink: 0;
 }
 
-.gcall-header-left {
+.gcm-header-info {
   display: flex;
   align-items: center;
-  gap: 0.6rem;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
 }
 
-.gcall-header-icon { font-size: 1.1rem; }
+.gcm-header-icon { font-size: 1.2rem; }
 
-.gcall-header-title {
+.gcm-header-title {
   font-size: 1rem;
-  font-weight: 700;
-  color: #fff;
-}
-
-.gcall-header-count {
-  font-size: 0.78rem;
-  color: rgba(255,255,255,0.55);
-  background: rgba(255,255,255,0.1);
-  padding: 2px 8px;
-  border-radius: 20px;
-}
-
-.gcall-header-right {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-}
-
-.gcall-header-timer {
-  font-size: 0.9rem;
-  color: #a3e635;
   font-weight: 600;
-  letter-spacing: 0.5px;
-  font-variant-numeric: tabular-nums;
+  color: #e2e8f0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-.gcall-header-connecting {
-  font-size: 0.85rem;
-  color: rgba(255,255,255,0.6);
-  animation: blink 1.2s ease-in-out infinite;
+.gcm-participant-count {
+  font-size: 0.78rem;
+  color: #94a3b8;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  padding: 2px 8px;
+  white-space: nowrap;
 }
 
-@keyframes blink {
-  0%, 100% { opacity: 1; }
-  50%       { opacity: 0.3; }
-}
-
-.gcall-minimize-btn {
-  width: 28px;
-  height: 28px;
-  border-radius: 50%;
+.gcm-minimize-btn {
+  background: rgba(255, 255, 255, 0.1);
   border: none;
+  color: #e2e8f0;
+  border-radius: 8px;
+  padding: 6px 10px;
   cursor: pointer;
-  background: rgba(255,255,255,0.15);
-  color: #fff;
   font-size: 0.9rem;
-  display: grid;
-  place-items: center;
-  transition: background 0.15s, transform 0.15s;
+  flex-shrink: 0;
+  transition: background 0.15s;
 }
-.gcall-minimize-btn:hover { background: rgba(255,255,255,0.28); transform: scale(1.1); }
+.gcm-minimize-btn:hover { background: rgba(255, 255, 255, 0.2); }
 
-/* ── Participant Grid ── */
-.gcall-grid {
+/* ── Video Grid ────────────────────────────────────────────────────────────── */
+
+.gcm-grid {
   flex: 1;
   display: grid;
-  gap: 6px;
-  padding: 10px;
-  overflow-y: auto;
-  min-height: 200px;
+  gap: 4px;
+  padding: 8px;
+  overflow: hidden;
 }
 
-/* Dynamic grid columns based on participant count */
-.gcall-grid-1 { grid-template-columns: 1fr; }
-.gcall-grid-2 { grid-template-columns: repeat(2, 1fr); }
-.gcall-grid-3 { grid-template-columns: repeat(2, 1fr); }
-.gcall-grid-4 { grid-template-columns: repeat(2, 1fr); }
-.gcall-grid-5 { grid-template-columns: repeat(3, 1fr); }
-.gcall-grid-6 { grid-template-columns: repeat(3, 1fr); }
+/* 1 participant: full size */
+.gcm-grid-1 { grid-template-columns: 1fr; grid-template-rows: 1fr; }
+/* 2 participants: side by side */
+.gcm-grid-2 { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr; }
+/* 3 participants: 2+1 */
+.gcm-grid-3 { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; }
+.gcm-grid-3 .gcm-tile:first-child { grid-column: 1 / -1; }
+/* 4 participants: 2×2 */
+.gcm-grid-4 { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; }
+/* 5-6 participants: 3×2 */
+.gcm-grid-5,
+.gcm-grid-6 { grid-template-columns: 1fr 1fr 1fr; grid-template-rows: 1fr 1fr; }
 
-/* 3-participant: first tile spans full width */
-.gcall-grid-3 .gcall-tile:first-child {
-  grid-column: 1 / -1;
-}
+/* ── Participant Tile ──────────────────────────────────────────────────────── */
 
-/* For 5: last row has 2, not 3 — wrap naturally */
-@media (max-width: 600px) {
-  .gcall-grid-3,
-  .gcall-grid-4,
-  .gcall-grid-5,
-  .gcall-grid-6 { grid-template-columns: repeat(2, 1fr); }
-  .gcall-grid-3 .gcall-tile:first-child { grid-column: auto; }
-}
-
-/* ── Individual tile ── */
-.gcall-tile {
+.gcm-tile {
   position: relative;
-  background: #1e1b4b;
+  background: #1a1a2e;
   border-radius: 12px;
   overflow: hidden;
-  aspect-ratio: 4/3;
   display: flex;
   align-items: center;
   justify-content: center;
-  border: 2px solid transparent;
-  transition: border-color 0.2s;
+  min-height: 120px;
 }
 
-.gcall-tile.self {
-  border-color: rgba(99, 102, 241, 0.4);
+.gcm-tile-local {
+  border: 2px solid rgba(139, 92, 246, 0.5);
 }
 
-.gcall-tile-video {
-  position: absolute;
-  inset: 0;
+.gcm-tile-video {
   width: 100%;
   height: 100%;
   object-fit: cover;
 }
 
-.gcall-tile-avatar {
+.gcm-tile-avatar {
   width: 64px;
   height: 64px;
   border-radius: 50%;
-  background: linear-gradient(135deg, #6366f1, #8b5cf6);
-  display: grid;
-  place-items: center;
-  font-size: 1.6rem;
+  background: linear-gradient(135deg, #6d28d9, #2563eb);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.8rem;
   font-weight: 700;
   color: #fff;
-  box-shadow: 0 0 0 4px rgba(99,102,241,0.25);
-  animation: gcallAvatarPulse 2s ease-in-out infinite;
 }
 
-@keyframes gcallAvatarPulse {
-  0%, 100% { box-shadow: 0 0 0 4px rgba(99,102,241,0.25); }
-  50%       { box-shadow: 0 0 0 10px rgba(99,102,241,0.08); }
-}
-
-.gcall-tile-label {
+.gcm-tile-label {
   position: absolute;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  background: linear-gradient(to top, rgba(0,0,0,0.7), transparent);
-  padding: 1.25rem 0.5rem 0.4rem;
-  display: flex;
-  align-items: center;
-  gap: 0.3rem;
-  z-index: 2;
-}
-
-.gcall-tile-name {
-  font-size: 0.78rem;
-  font-weight: 600;
+  bottom: 8px;
+  left: 8px;
+  background: rgba(0, 0, 0, 0.55);
   color: #fff;
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: 8px;
+  backdrop-filter: blur(4px);
+  max-width: calc(100% - 16px);
+  white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
+}
+
+/* ── Audio-only Grid ──────────────────────────────────────────────────────── */
+
+.gcm-audio-grid {
   flex: 1;
+  display: flex;
+  flex-wrap: wrap;
+  align-content: flex-start;
+  gap: 12px;
+  padding: 20px;
+  overflow-y: auto;
 }
 
-.gcall-tile-muted,
-.gcall-tile-camoff {
-  font-size: 0.75rem;
-  flex-shrink: 0;
-}
-
-/* ── Waiting state ── */
-.gcall-waiting {
-  grid-column: 1 / -1;
+.gcm-audio-tile {
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
-  padding: 3rem 1rem;
-  gap: 0.5rem;
-  color: rgba(255,255,255,0.5);
+  gap: 8px;
+  padding: 16px 20px;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  min-width: 100px;
+  flex: 0 0 auto;
 }
 
-.gcall-waiting-icon { font-size: 2.5rem; margin-bottom: 0.25rem; }
-.gcall-waiting-text { font-size: 1rem; font-weight: 600; color: rgba(255,255,255,0.7); }
-.gcall-waiting-sub  { font-size: 0.82rem; }
-
-/* ── Controls ── */
-.gcall-controls {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 1.25rem;
-  padding: 0.85rem 1rem;
-  background: rgba(0,0,0,0.3);
-  border-top: 1px solid rgba(255,255,255,0.08);
-  flex-shrink: 0;
-}
-
-/* Reuse 1-to-1 call button styles */
-.gcall-controls .call-btn { width: 52px; height: 52px; }
-
-/* ── Minimized bubble ── */
-.gcall-bubble {
-  position: fixed;
-  bottom: 90px;
-  right: 20px;
-  width: 100px;
-  cursor: pointer;
-  z-index: 99999;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 4px;
-  animation: bubbleIn 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
-  user-select: none;
-}
-
-.gcall-bubble-circle {
-  width: 64px;
-  height: 64px;
+.gcm-audio-avatar {
+  width: 56px;
+  height: 56px;
   border-radius: 50%;
-  background: linear-gradient(145deg, #312e81, #4c1d95);
-  box-shadow: 0 8px 32px rgba(0,0,0,0.55), 0 0 0 2px rgba(99,102,241,0.4);
+  background: linear-gradient(135deg, #7c3aed, #2563eb);
   display: flex;
-  flex-direction: column;
   align-items: center;
   justify-content: center;
   font-size: 1.5rem;
-  position: relative;
-}
-
-.gcall-bubble-count {
-  font-size: 0.65rem;
-  background: #6366f1;
-  color: #fff;
-  border-radius: 20px;
-  padding: 1px 5px;
   font-weight: 700;
-  position: absolute;
-  bottom: -2px;
-  right: -2px;
-}
-
-.gcall-bubble-info {
-  font-size: 0.72rem;
-  color: rgba(255,255,255,0.85);
-  font-weight: 600;
-  background: rgba(0,0,0,0.5);
-  border-radius: 8px;
-  padding: 2px 6px;
-}
-
-.gcall-bubble-end {
-  position: absolute;
-  top: 0;
-  right: 8px;
-  width: 22px;
-  height: 22px;
-  border-radius: 50%;
-  border: 2px solid #fff;
-  background: #ef4444;
   color: #fff;
-  font-size: 10px;
-  font-weight: 700;
-  cursor: pointer;
-  display: grid;
-  place-items: center;
-  box-shadow: 0 2px 8px rgba(239,68,68,0.6);
-  transition: transform 0.15s;
-}
-.gcall-bubble-end:hover { transform: scale(1.15); }
-
-/* ── "Join Now" in chat ── */
-.gcall-join-now-msg {
-  display: flex;
-  align-items: center;
-  gap: 0.6rem;
-  background: linear-gradient(135deg, rgba(99,102,241,0.15), rgba(139,92,246,0.1));
-  border: 1px solid rgba(99,102,241,0.3);
-  border-radius: 10px;
-  padding: 0.6rem 0.8rem;
 }
 
-.gcall-join-now-icon { font-size: 1.25rem; }
-
-.gcall-join-now-text {
-  flex: 1;
-  font-size: 0.85rem;
-  color: rgba(255,255,255,0.85);
-  line-height: 1.35;
-}
-
-.gcall-join-now-text strong {
-  color: #fff;
-  display: block;
-  font-size: 0.9rem;
-}
-
-.gcall-join-now-btn {
-  background: linear-gradient(135deg, #6366f1, #8b5cf6);
-  color: #fff;
-  border: none;
-  border-radius: 8px;
-  padding: 0.45rem 0.85rem;
+.gcm-audio-name {
   font-size: 0.8rem;
-  font-weight: 700;
-  cursor: pointer;
-  transition: opacity 0.15s, transform 0.15s;
+  font-weight: 600;
+  color: #e2e8f0;
+  text-align: center;
+  max-width: 100px;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
-.gcall-join-now-btn:hover { opacity: 0.88; transform: scale(1.04); }
-.gcall-join-now-btn:active { transform: scale(0.96); }
-.gcall-join-now-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+
+/* ── Ringing states ─────────────────────────────────────────────────────────  */
+
+.gcm-ringing-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 32px 20px;
+}
+
+.gcm-ringing-avatar {
+  width: 80px;
+  height: 80px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #7c3aed, #2563eb);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 2.2rem;
+  font-weight: 700;
+  color: #fff;
+  animation: gcm-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes gcm-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(124, 58, 237, 0.4); }
+  50% { box-shadow: 0 0 0 16px rgba(124, 58, 237, 0); }
+}
+
+.gcm-ringing-name {
+  font-size: 1.3rem;
+  font-weight: 700;
+  color: #e2e8f0;
+}
+
+.gcm-ringing-sub {
+  font-size: 0.9rem;
+  color: #94a3b8;
+}
+
+/* ── Controls ─────────────────────────────────────────────────────────────── */
+
+.gcm-controls {
+  display: flex;
+  justify-content: center;
+  gap: 16px;
+  padding: 16px 20px 20px;
+  flex-shrink: 0;
+  background: rgba(0, 0, 0, 0.15);
+}
+
+.gcm-btn {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  border: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.3rem;
+  transition: transform 0.1s, opacity 0.2s;
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+}
+.gcm-btn:hover { transform: scale(1.08); opacity: 0.9; }
+.gcm-btn.active { background: rgba(139, 92, 246, 0.4); }
+
+.gcm-btn-accept { background: #22c55e; }
+.gcm-btn-accept:hover { background: #16a34a; }
+
+.gcm-btn-reject,
+.gcm-btn-end { background: #ef4444; }
+.gcm-btn-reject:hover,
+.gcm-btn-end:hover { background: #dc2626; }
+
+.gcm-btn-icon { pointer-events: none; }
+
+/* ── Minimized bubble ─────────────────────────────────────────────────────── */
+
+.gcm-bubble {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  z-index: 9999;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: linear-gradient(135deg, #1e1b4b, #312e81);
+  border: 1px solid rgba(139, 92, 246, 0.4);
+  border-radius: 40px;
+  padding: 8px 12px 8px 8px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
+  user-select: none;
+}
+
+.gcm-bubble-circle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.gcm-bubble-avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #7c3aed, #2563eb);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: #fff;
+  flex-shrink: 0;
+}
+
+.gcm-bubble-info {
+  display: flex;
+  flex-direction: column;
+}
+
+.gcm-bubble-name {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: #e2e8f0;
+}
+
+.gcm-bubble-timer {
+  font-size: 0.72rem;
+  color: #94a3b8;
+}
+
+.gcm-bubble-end {
+  background: #ef4444;
+  border: none;
+  color: #fff;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  cursor: pointer;
+  font-size: 0.8rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-left: 4px;
+  transition: background 0.15s;
+  flex-shrink: 0;
+}
+.gcm-bubble-end:hover { background: #dc2626; }
+
+/* ── Responsive ───────────────────────────────────────────────────────────── */
+
+@media (max-width: 600px) {
+  .gcm-modal {
+    width: 100vw;
+    height: 100vh;
+    max-height: 100vh;
+    border-radius: 0;
+  }
+
+  .gcm-grid-5,
+  .gcm-grid-6 {
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: auto;
+  }
+
+  .gcm-bubble {
+    bottom: 80px;
+    right: 12px;
+  }
+}

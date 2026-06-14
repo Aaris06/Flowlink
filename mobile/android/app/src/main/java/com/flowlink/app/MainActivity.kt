@@ -1620,8 +1620,46 @@ class MainActivity : AppCompatActivity(), UsernameDialogFragment.UsernameDialogL
                         notificationService.dismissIncomingCall()
                         notificationService.dismissOngoingCall()
                     }
+                    // ── Group call room invite ────────────────────────────────
+                    is com.flowlink.app.service.WebSocketManager.CallEvent.RoomInvite -> {
+                        // Show the room-based incoming call UI
+                        showIncomingGroupCall(event.roomId, event.fromUsername, event.callType)
+                    }
                     else -> {}
                 }
+            }
+        }
+    }
+
+    /**
+     * Show incoming group call notification / fragment.
+     * On the mobile side we show the same CallFragment but pre-configured for room mode.
+     * The fragment handles accept → call_room_join.
+     */
+    private fun showIncomingGroupCall(roomId: String, fromUsername: String, callType: String) {
+        runOnUiThread {
+            // Stop any existing background ringtone
+            stopBackgroundRingtone()
+
+            // Create a CallFragment in room-inbound mode
+            val fragment = com.flowlink.app.ui.GroupCallFragment.newIncomingRoom(
+                roomId = roomId,
+                fromUsername = fromUsername,
+                isVideo = callType == "video"
+            )
+            supportFragmentManager.beginTransaction()
+                .replace(R.id.fragment_container, fragment, "group_call")
+                .addToBackStack("group_call")
+                .commitAllowingStateLoss()
+
+            // Show a heads-up notification if in background
+            if (!isAppInForeground) {
+                notificationService.showIncomingCall(
+                    callId     = "room_$roomId",
+                    fromUser   = fromUsername,
+                    isVideo    = callType == "video",
+                    fromDevice = ""
+                )
             }
         }
     }

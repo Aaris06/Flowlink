@@ -279,13 +279,19 @@ export class CallService {
       }
 
       case 'call_reject':
-        if (this.state === 'ringing_out' || this.state === 'connecting') {
+        if (
+          this.currentCall &&
+          payload?.callId === this.currentCall.callId &&
+          (this.state === 'ringing_out' || this.state === 'connecting')
+        ) {
           this.cleanup(payload?.reason === 'busy' ? 'busy' : 'rejected');
         }
         break;
 
       case 'call_end':
-        if (this.state !== 'idle') this.cleanup('ended');
+        if (this.state !== 'idle' && this.currentCall && payload?.callId === this.currentCall.callId) {
+          this.cleanup('ended');
+        }
         break;
 
       case 'call_offer': {

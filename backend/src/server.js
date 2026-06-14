@@ -43,9 +43,6 @@ const sessions = new Map();
 const deviceConnections = new Map();
 const pendingCallInvites = new Map(); // deviceId -> Array<call invite messages>
 
-// Group call rooms: roomId -> { roomId, callType, sessionId, hostDeviceId, hostUsername, participants: Map<deviceId, { username }> }
-const groupCallRooms = new Map();
-
 // Global device registry (tracks all devices regardless of session)
 // Structure: deviceId -> { device: DeviceInfo, connections: Set<WebSocket>, lastSeen: timestamp }
 const globalDevices = new Map();
@@ -54,6 +51,29 @@ const globalDevices = new Map();
 // Structure: deviceId|username -> { fingerprint: string, timestamp: number }
 const clipboardDedupeCache = new Map();
 const CLIPBOARD_DEDUPE_TTL_MS = 5000; // 5 second dedupe window
+
+// ── Group Call Rooms ──────────────────────────────────────────────────────────
+// Persistent room-based call state (room survives individual rejections/leaves)
+// Structure: roomId -> {
+//   roomId, callType, sessionId, creatorDeviceId, creatorUsername,
+//   participants: Map<deviceId, { deviceId, username, joinedAt, ws }>,
+//   createdAt, active
+// }
+const callRooms = new Map();
+const CALL_ROOM_IDLE_TIMEOUT_MS = 4 * 60 * 60 * 1000; // 4 hours
+
+// Cleanup idle call rooms periodically
+setInterval(() => {
+  const now = Date.now();
+  for (const [roomId, room] of callRooms.entries()) {
+    const allLeft = room.participants.size === 0;
+    const expired = now - room.createdAt > CALL_ROOM_IDLE_TIMEOUT_MS;
+    if (allLeft || expired) {
+      callRooms.delete(roomId);
+      console.log(`Call room ${roomId} cleaned up (empty=${allLeft}, expired=${expired})`);
+    }
+  }
+}, 60 * 1000); // every minute
 
 // Admin config
 const ADMIN_USERNAME = process.env.ADMIN_USERNAME || 'flowlink_admin';
@@ -518,7 +538,7 @@ wss.on('connection', (ws, req) => {
           }
           break;
 
-        // ── 1-to-1 call signaling ───────────────────────────────────────
+        // ── Call signaling ──────────────────────────────────────────────
         case 'call_invite':
         case 'call_accept':
         case 'call_reject':
@@ -529,24 +549,20 @@ wss.on('connection', (ws, req) => {
           handleCallSignal(ws, message);
           break;
 
-        // ── Group call room signaling ────────────────────────────────────
-        case 'group_call_create':
-          handleGroupCallCreate(ws, message);
+        // ── Group call room signaling ───────────────────────────────────
+        case 'call_room_create':
+          handleCallRoomCreate(ws, message);
           break;
-        case 'group_call_join':
-          handleGroupCallJoin(ws, message);
+        case 'call_room_join':
+          handleCallRoomJoin(ws, message);
           break;
-        case 'group_call_leave':
-          handleGroupCallLeave(ws, message);
+        case 'call_room_leave':
+          handleCallRoomLeave(ws, message);
           break;
-        case 'group_call_reject':
-          // Just log — no server action needed; caller handles UI
-          console.log(`Group call reject from ${message.deviceId || ws.deviceId} for room ${message.payload?.roomId}`);
-          break;
-        case 'group_call_offer':
-        case 'group_call_answer':
-        case 'group_call_ice':
-          handleGroupCallSignal(ws, message);
+        case 'call_room_offer':
+        case 'call_room_answer':
+        case 'call_room_ice':
+          handleCallRoomSignal(ws, message);
           break;
 
         case 'session_report': {
@@ -1265,6 +1281,245 @@ function handleWebRTCSignal(ws, message) {
 }
 
 /**
+ * ── GROUP CALL ROOM HANDLERS ─────────────────────────────────────────────────
+ *
+ * Room-based architecture: a persistent call room is created once, participants
+ * join/leave independently. No single rejection ends the room.
+ */
+
+/**
+ * Create a new call room and invite participants.
+ * Called by the initiator who clicks "Group Call".
+ *
+ * message.payload: { roomId, callType, invitees: [{deviceId,username}], sessionId, fromUsername }
+ */
+function handleCallRoomCreate(ws, message) {
+  const fromDeviceId = message.deviceId || ws.deviceId;
+  const { roomId, callType, invitees = [], sessionId, fromUsername } = message.payload || {};
+  if (!roomId || !callType) return;
+
+  // Create or replace room
+  const room = {
+    roomId,
+    callType,
+    sessionId,
+    creatorDeviceId: fromDeviceId,
+    creatorUsername: fromUsername || '',
+    participants: new Map(), // deviceId -> { deviceId, username }
+    createdAt: Date.now(),
+    active: true,
+  };
+  callRooms.set(roomId, room);
+
+  console.log(`Call room ${roomId} created by ${fromUsername} (${callType}), inviting ${invitees.length} users`);
+
+  // Auto-add creator as first participant
+  room.participants.set(fromDeviceId, { deviceId: fromDeviceId, username: fromUsername || '' });
+
+  // Broadcast "Group call started" chat message to the session
+  if (sessionId) {
+    const activityMsg = createCallRoomActivityMessage(sessionId, roomId, 'started', {
+      roomId, callType, creatorUsername: fromUsername || '', sessionId,
+    });
+    broadcastToSession(sessionId, activityMsg, null);
+  }
+
+  // Send call_room_invite to each invitee individually
+  for (const invitee of invitees) {
+    const invDeviceId = invitee.deviceId || findDeviceIdByUsername(invitee.username);
+    const targetWs = invDeviceId ? deviceConnections.get(invDeviceId) : null;
+    if (!targetWs || targetWs.readyState !== targetWs.OPEN) {
+      // Queue for when they come online
+      if (invDeviceId) {
+        queuePendingCallInvite(invDeviceId, {
+          type: 'call_room_invite',
+          payload: { roomId, callType, fromUsername, fromDevice: fromDeviceId, sessionId },
+          timestamp: Date.now(),
+        });
+      }
+      continue;
+    }
+    targetWs.send(JSON.stringify({
+      type: 'call_room_invite',
+      payload: { roomId, callType, fromUsername, fromDevice: fromDeviceId, sessionId },
+      timestamp: Date.now(),
+    }));
+  }
+
+  // Confirm to creator
+  ws.send(JSON.stringify({
+    type: 'call_room_created',
+    payload: { roomId, callType, sessionId, participants: serializeRoomParticipants(room) },
+    timestamp: Date.now(),
+  }));
+}
+
+/**
+ * Join an existing call room.
+ * Can be called by: an invitee accepting, or a late-joiner clicking "Join Now".
+ *
+ * message.payload: { roomId, fromUsername }
+ */
+function handleCallRoomJoin(ws, message) {
+  const fromDeviceId = message.deviceId || ws.deviceId;
+  const { roomId, fromUsername } = message.payload || {};
+  const room = callRooms.get(roomId);
+
+  if (!room) {
+    ws.send(JSON.stringify({
+      type: 'call_room_error',
+      payload: { roomId, reason: 'room_not_found' },
+      timestamp: Date.now(),
+    }));
+    return;
+  }
+
+  const alreadyIn = room.participants.has(fromDeviceId);
+  if (!alreadyIn) {
+    room.participants.set(fromDeviceId, { deviceId: fromDeviceId, username: fromUsername || '' });
+  }
+
+  const existingParticipants = Array.from(room.participants.entries())
+    .filter(([id]) => id !== fromDeviceId)
+    .map(([, p]) => p);
+
+  console.log(`Device ${fromUsername} joined call room ${roomId}. Total participants: ${room.participants.size}`);
+
+  // Tell new joiner who is already in the room (so they can initiate offers to each)
+  ws.send(JSON.stringify({
+    type: 'call_room_joined',
+    payload: {
+      roomId,
+      callType: room.callType,
+      participants: existingParticipants,
+      sessionId: room.sessionId,
+    },
+    timestamp: Date.now(),
+  }));
+
+  // Tell every existing participant about the new joiner
+  for (const [pDeviceId] of room.participants.entries()) {
+    if (pDeviceId === fromDeviceId) continue;
+    const pWs = deviceConnections.get(pDeviceId);
+    if (!pWs || pWs.readyState !== pWs.OPEN) continue;
+    pWs.send(JSON.stringify({
+      type: 'call_room_peer_joined',
+      payload: {
+        roomId,
+        peerId: fromDeviceId,
+        peerUsername: fromUsername || '',
+        participants: serializeRoomParticipants(room),
+      },
+      timestamp: Date.now(),
+    }));
+  }
+
+  // Broadcast join activity to session chat
+  if (room.sessionId && !alreadyIn) {
+    broadcastToSession(room.sessionId, createCallRoomActivityMessage(room.sessionId, roomId, 'joined', {
+      roomId, callType: room.callType, joinUsername: fromUsername || '', sessionId: room.sessionId,
+    }), null);
+  }
+}
+
+/**
+ * Leave a call room. Room stays alive as long as ≥1 participant remains.
+ *
+ * message.payload: { roomId, fromUsername }
+ */
+function handleCallRoomLeave(ws, message) {
+  const fromDeviceId = message.deviceId || ws.deviceId;
+  const { roomId, fromUsername } = message.payload || {};
+  const room = callRooms.get(roomId);
+  if (!room) return;
+
+  room.participants.delete(fromDeviceId);
+  console.log(`Device ${fromUsername} left call room ${roomId}. Remaining: ${room.participants.size}`);
+
+  // Notify remaining participants
+  for (const [pDeviceId] of room.participants.entries()) {
+    const pWs = deviceConnections.get(pDeviceId);
+    if (!pWs || pWs.readyState !== pWs.OPEN) continue;
+    pWs.send(JSON.stringify({
+      type: 'call_room_peer_left',
+      payload: {
+        roomId,
+        peerId: fromDeviceId,
+        peerUsername: fromUsername || '',
+        participants: serializeRoomParticipants(room),
+      },
+      timestamp: Date.now(),
+    }));
+  }
+
+  // Broadcast leave activity if room still has people (otherwise let it silently expire)
+  if (room.participants.size > 0 && room.sessionId) {
+    broadcastToSession(room.sessionId, createCallRoomActivityMessage(room.sessionId, roomId, 'left', {
+      roomId, callType: room.callType, leaveUsername: fromUsername || '', sessionId: room.sessionId,
+    }), null);
+  }
+
+  // Delete room if empty
+  if (room.participants.size === 0) {
+    callRooms.delete(roomId);
+    // Broadcast ended activity message
+    if (room.sessionId) {
+      broadcastToSession(room.sessionId, createCallRoomActivityMessage(room.sessionId, roomId, 'ended', {
+        roomId, callType: room.callType, sessionId: room.sessionId,
+      }), null);
+    }
+  }
+}
+
+/**
+ * Route WebRTC signaling between room participants.
+ * Each message targets a specific peer within the room.
+ *
+ * message.payload: { roomId, toPeerId, data (SDP/ICE) }
+ */
+function handleCallRoomSignal(ws, message) {
+  const fromDeviceId = message.deviceId || ws.deviceId;
+  const { roomId, toPeerId } = message.payload || {};
+  const room = callRooms.get(roomId);
+  if (!room) return;
+
+  const targetWs = deviceConnections.get(toPeerId);
+  if (!targetWs || targetWs.readyState !== targetWs.OPEN) return;
+
+  targetWs.send(JSON.stringify({
+    ...message,
+    payload: { ...message.payload, fromPeerId: fromDeviceId },
+    timestamp: Date.now(),
+  }));
+}
+
+/** Helper: serialize participants map to array */
+function serializeRoomParticipants(room) {
+  return Array.from(room.participants.values());
+}
+
+/**
+ * Create a [[CALL_ROOM_ACTIVITY]] chat message for group call events.
+ * These are broadcast to the session so all members see call state in chat.
+ */
+function createCallRoomActivityMessage(sessionId, roomId, kind, payload) {
+  return {
+    type: 'chat_message',
+    sessionId,
+    payload: {
+      chat: {
+        messageId: `callroom-${roomId}-${kind}-${Date.now()}`,
+        text: `[[CALL_ROOM_ACTIVITY]]${JSON.stringify({ roomId, kind, ...payload })}`,
+        username: payload.creatorUsername || payload.joinUsername || payload.leaveUsername || 'System',
+        sentAt: Date.now(),
+        format: 'plain',
+      },
+    },
+    timestamp: Date.now(),
+  };
+}
+
+/**
  * Handle call signaling (invite/accept/reject/end/offer/answer/ice)
  * Routes call messages between devices via global registry (works outside sessions too)
  */
@@ -1350,124 +1605,19 @@ function handleCallSignal(ws, message) {
   console.log(`Call signal [${message.type}] routed from ${fromDeviceId} to ${toDeviceId || toUsername}`);
 }
 
-// ── Group call room handlers ──────────────────────────────────────────────
-
-function handleGroupCallCreate(ws, message) {
-  const fromDeviceId = message.deviceId || ws.deviceId;
-  const { roomId, callType, sessionId, invitees, hostUsername } = message.payload || {};
-  if (!roomId || !callType || !sessionId) return;
-
-  const room = {
-    roomId, callType, sessionId,
-    hostDeviceId: fromDeviceId,
-    hostUsername: hostUsername || '',
-    participants: new Map([[fromDeviceId, { deviceId: fromDeviceId, username: hostUsername || '' }]]),
-    createdAt: Date.now(),
-  };
-  groupCallRooms.set(roomId, room);
-  console.log(`[GroupCall] Room ${roomId} created by ${hostUsername}. Inviting ${invitees?.length || 0}.`);
-
-  if (Array.isArray(invitees)) {
-    for (const invitee of invitees) {
-      const targetWs = invitee.deviceId ? deviceConnections.get(invitee.deviceId) : findWsByUsername(invitee.username);
-      const inviteMsg = { type: 'group_call_invite', payload: { roomId, callType, sessionId, hostUsername, hostDeviceId: fromDeviceId }, timestamp: Date.now() };
-      if (targetWs && targetWs.readyState === targetWs.OPEN) {
-        targetWs.send(JSON.stringify(inviteMsg));
-      } else {
-        const tid = invitee.deviceId || findDeviceIdByUsername(invitee.username);
-        if (tid) { const q = pendingCallInvites.get(`gcall_${tid}`) || []; q.push(inviteMsg); pendingCallInvites.set(`gcall_${tid}`, q.slice(-10)); }
-      }
-    }
-  }
-
-  // Broadcast a "Join Now" chat message to the session
-  broadcastToSession(sessionId, {
-    type: 'chat_message', sessionId,
-    payload: { chat: { messageId: `gcall-start-${roomId}`, text: `[[GROUP_CALL_START]]${JSON.stringify({ roomId, callType, hostUsername })}`, username: hostUsername, sentAt: Date.now(), format: 'plain' } },
-    timestamp: Date.now(),
-  }, null);
-}
-
-function handleGroupCallJoin(ws, message) {
-  const fromDeviceId = message.deviceId || ws.deviceId;
-  const { roomId, sessionId, username } = message.payload || {};
-  const room = groupCallRooms.get(roomId);
-  if (!room) {
-    ws.send(JSON.stringify({ type: 'group_call_error', payload: { roomId, reason: 'room_not_found' }, timestamp: Date.now() }));
-    return;
-  }
-  room.participants.set(fromDeviceId, { deviceId: fromDeviceId, username: username || '' });
-  const participantList = Array.from(room.participants.values());
-  console.log(`[GroupCall] ${username} joined room ${roomId}. Total: ${participantList.length}`);
-
-  ws.send(JSON.stringify({
-    type: 'group_call_room_state',
-    payload: { roomId, callType: room.callType, sessionId: room.sessionId, hostUsername: room.hostUsername, participants: participantList },
-    timestamp: Date.now(),
-  }));
-
-  for (const [existingDeviceId] of room.participants.entries()) {
-    if (existingDeviceId === fromDeviceId) continue;
-    const ews = deviceConnections.get(existingDeviceId);
-    if (ews && ews.readyState === ews.OPEN) {
-      ews.send(JSON.stringify({ type: 'group_call_peer_joined', payload: { roomId, deviceId: fromDeviceId, username: username || '' }, timestamp: Date.now() }));
-    }
-  }
-}
-
-function handleGroupCallLeave(ws, message) {
-  const fromDeviceId = message.deviceId || ws.deviceId;
-  const { roomId } = message.payload || {};
-  const room = groupCallRooms.get(roomId);
-  if (!room) return;
-  room.participants.delete(fromDeviceId);
-  console.log(`[GroupCall] ${fromDeviceId} left room ${roomId}. Remaining: ${room.participants.size}`);
-  for (const [eid] of room.participants.entries()) {
-    const ews = deviceConnections.get(eid);
-    if (ews && ews.readyState === ews.OPEN) {
-      ews.send(JSON.stringify({ type: 'group_call_peer_left', payload: { roomId, deviceId: fromDeviceId }, timestamp: Date.now() }));
-    }
-  }
-  if (room.participants.size === 0) { groupCallRooms.delete(roomId); console.log(`[GroupCall] Room ${roomId} deleted (empty)`); }
-}
-
-function handleGroupCallSignal(ws, message) {
-  const fromDeviceId = message.deviceId || ws.deviceId;
-  const { toDeviceId, roomId } = message.payload || {};
-  if (!toDeviceId || !roomId) return;
-  const targetWs = deviceConnections.get(toDeviceId);
-  if (!targetWs || targetWs.readyState !== targetWs.OPEN) return;
-  targetWs.send(JSON.stringify({ ...message, payload: { ...message.payload, fromDeviceId }, timestamp: Date.now() }));
-}
-
-function findWsByUsername(username) {
-  if (!username) return null;
-  const normalized = String(username).trim().toLowerCase();
-  for (const [devId, entry] of globalDevices.entries()) {
-    if ((entry.device?.username || '').toLowerCase() === normalized) return deviceConnections.get(devId) || null;
-  }
-  return null;
-}
-
-// ── End Group call room handlers ──────────────────────────────────────────
-
-function queuePendingCallInvite(deviceId, message) {  const queue = pendingCallInvites.get(deviceId) || [];
+function queuePendingCallInvite(deviceId, message) {
+  const queue = pendingCallInvites.get(deviceId) || [];
   queue.push(message);
   pendingCallInvites.set(deviceId, queue.slice(-20));
 }
 
 function deliverPendingCallInvites(deviceId, ws) {
   const queue = pendingCallInvites.get(deviceId);
-  if (queue && queue.length && ws && ws.readyState === ws.OPEN) {
-    queue.forEach(msg => { try { ws.send(JSON.stringify(msg)); } catch (_) {} });
-    pendingCallInvites.delete(deviceId);
-  }
-  // Also deliver pending group call invites
-  const gcQueue = pendingCallInvites.get(`gcall_${deviceId}`);
-  if (gcQueue && gcQueue.length && ws && ws.readyState === ws.OPEN) {
-    gcQueue.forEach(msg => { try { ws.send(JSON.stringify(msg)); } catch (_) {} });
-    pendingCallInvites.delete(`gcall_${deviceId}`);
-  }
+  if (!queue || !queue.length || !ws || ws.readyState !== ws.OPEN) return;
+  queue.forEach(msg => {
+    try { ws.send(JSON.stringify(msg)); } catch (_) {}
+  });
+  pendingCallInvites.delete(deviceId);
 }
 
 function findDeviceIdByUsername(username) {

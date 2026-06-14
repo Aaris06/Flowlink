@@ -17,6 +17,16 @@ interface CallActivity {
   remoteUsername: string;
   sourceUsername: string;
 }
+
+interface CallRoomActivity {
+  roomId: string;
+  kind: 'started' | 'joined' | 'left' | 'ended';
+  callType: 'audio' | 'video';
+  creatorUsername?: string;
+  joinUsername?: string;
+  leaveUsername?: string;
+  sessionId?: string;
+}
 interface CtxMenu { msgId: string; x: number; y: number; own: boolean; }
 interface Props { ctx: AppContext; }
 export default function MessagesPage({ ctx }: Props) {
@@ -205,10 +215,9 @@ export default function MessagesPage({ ctx }: Props) {
         return null;
       }
     }
-    if (text.startsWith('[[GROUP_CALL_START]]')) {
+    if (text.startsWith('[[CALL_ROOM_ACTIVITY]]')) {
       try {
-        const data = JSON.parse(text.replace('[[GROUP_CALL_START]]', ''));
-        return renderGroupCallStart(data);
+        return renderCallRoomActivity(JSON.parse(text.replace('[[CALL_ROOM_ACTIVITY]]', '')) as CallRoomActivity);
       } catch {
         return null;
       }
@@ -263,33 +272,51 @@ export default function MessagesPage({ ctx }: Props) {
     );
   };
 
-  const renderGroupCallStart = (data: { roomId: string; callType: 'audio' | 'video'; hostUsername: string }) => {
-    const icon = data.callType === 'video' ? '🎥' : '📞';
-    const label = data.callType === 'video' ? 'Group Video Call' : 'Group Voice Call';
-    const isInCall = ctx.groupCallService?.getState() !== 'idle' && ctx.groupCallService?.getState() !== 'ended';
-    const isThisRoom = ctx.groupCallService?.getRoom()?.roomId === data.roomId;
+  const renderCallRoomActivity = (activity: CallRoomActivity) => {
+    const { roomId, kind, callType, creatorUsername, joinUsername, leaveUsername } = activity;
+    const isEnded = kind === 'ended';
+    const isActive = kind === 'started' || kind === 'joined';
+
+    let label = '';
+    if (kind === 'started') label = `${creatorUsername || 'Someone'} started a group ${callType} call`;
+    else if (kind === 'joined') label = `${joinUsername || 'Someone'} joined the group call`;
+    else if (kind === 'left') label = `${leaveUsername || 'Someone'} left the group call`;
+    else label = 'Group call ended';
+
     return (
-      <div className="gcall-join-now-msg">
-        <span className="gcall-join-now-icon">{icon}</span>
-        <div className="gcall-join-now-text">
-          <strong>{label} — ongoing</strong>
-          Started by {data.hostUsername}. Click to join.
-        </div>
-        <button
-          className="gcall-join-now-btn"
-          disabled={isInCall && !isThisRoom}
-          onClick={() => {
-            if (!ctx.groupCallService || !session) return;
-            ctx.groupCallService.joinByRoomId(data.roomId, data.callType, session.id, data.hostUsername);
-          }}
-        >
-          {isThisRoom ? 'In Call' : 'Join Now'}
-        </button>
+      <div className={`msg-call-card${isEnded ? ' msg-call-card-ended' : ''}`}>
+        <div className="msg-call-icon">{callType === 'video' ? '🎥' : '📞'}</div>
+        <div className="msg-call-title">{label}</div>
+        {isActive && (
+          <div className="msg-call-sub">Group call is ongoing. Anyone can join.</div>
+        )}
+        {isActive && (
+          <button
+            className="btn-primary msg-call-join-btn"
+            onClick={() => {
+              const gcService = (window as any).__groupCallService;
+              if (!gcService) return;
+              if (gcService.getState() !== 'idle') {
+                alert('You are already in a call.');
+                return;
+              }
+              gcService.joinRoom(
+                roomId,
+                callType,
+                activity.sessionId ?? session?.id ?? null,
+                creatorUsername || 'Group Call'
+              );
+            }}
+          >
+            Join Now
+          </button>
+        )}
       </div>
     );
   };
 
-  const startRecording = async () => {    try {
+  const startRecording = async () => {
+    try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const mimeType = MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : 'audio/ogg';
       const recorder = new MediaRecorder(stream, { mimeType });
@@ -437,22 +464,28 @@ export default function MessagesPage({ ctx }: Props) {
             <div className="msg-header-title">Session Chat</div>
             <div className="msg-header-sub">{session ? `Session ${session.code} · ${messages.length} messages` : 'No active session'}</div>
           </div>
-          {session && ctx.callService && (
+          {session && (ctx.callService || ctx.groupCallService) && (
             <div className="msg-header-actions">
               <button
                 className="msg-call-btn"
-                title="Voice call"
+                title="Audio call"
                 onClick={() => {
-                  const peers = ((window as any)._sessionDevices as { id: string; username: string; online?: boolean }[] | undefined)
-                    ?.filter(d => d.id !== deviceId);
-                  if (!peers || peers.length === 0) return;
-                  if (peers.length === 1) {
+                  const peers = (window as any)._sessionDevices as { id: string; username: string; online?: boolean }[] | undefined;
+                  const others = peers?.filter(d => d.id !== deviceId) ?? [];
+                  if (others.length === 0) return;
+                  if (others.length === 1) {
                     // 1-to-1
-                    ctx.callService!.startCall(peers[0].username, peers[0].id, false);
+                    ctx.callService?.startCall(others[0].username || others[0].id, others[0].id, false);
                   } else {
-                    // group call — invite everyone in session
-                    const invitees = peers.map(d => ({ username: d.username, deviceId: d.id }));
-                    ctx.groupCallService?.startGroupCall(invitees, 'audio', session.id);
+                    // Group call
+                    const gcService = (window as any).__groupCallService;
+                    if (gcService && gcService.getState() === 'idle') {
+                      gcService.startGroupCall(
+                        others.map((d: any) => ({ deviceId: d.id, username: d.username || d.id })),
+                        'audio',
+                        session.id
+                      );
+                    }
                   }
                 }}
               >📞</button>
@@ -460,16 +493,22 @@ export default function MessagesPage({ ctx }: Props) {
                 className="msg-call-btn"
                 title="Video call"
                 onClick={() => {
-                  const peers = ((window as any)._sessionDevices as { id: string; username: string; online?: boolean }[] | undefined)
-                    ?.filter(d => d.id !== deviceId);
-                  if (!peers || peers.length === 0) return;
-                  if (peers.length === 1) {
+                  const peers = (window as any)._sessionDevices as { id: string; username: string; online?: boolean }[] | undefined;
+                  const others = peers?.filter(d => d.id !== deviceId) ?? [];
+                  if (others.length === 0) return;
+                  if (others.length === 1) {
                     // 1-to-1
-                    ctx.callService!.startCall(peers[0].username, peers[0].id, true);
+                    ctx.callService?.startCall(others[0].username || others[0].id, others[0].id, true);
                   } else {
-                    // group call — invite everyone in session
-                    const invitees = peers.map(d => ({ username: d.username, deviceId: d.id }));
-                    ctx.groupCallService?.startGroupCall(invitees, 'video', session.id);
+                    // Group call
+                    const gcService = (window as any).__groupCallService;
+                    if (gcService && gcService.getState() === 'idle') {
+                      gcService.startGroupCall(
+                        others.map((d: any) => ({ deviceId: d.id, username: d.username || d.id })),
+                        'video',
+                        session.id
+                      );
+                    }
                   }
                 }}
               >🎥</button>
@@ -484,31 +523,6 @@ export default function MessagesPage({ ctx }: Props) {
           {messages.map(m => {
             const own = m.sourceDevice === deviceId;
             const repliedMsg = m.replyTo ? messages.find(r => r.messageId === m.replyTo) : null;
-
-            // System messages: GROUP_CALL_START renders as a full-width call card, not a bubble
-            if (m.text?.startsWith('[[GROUP_CALL_START]]')) {
-              try {
-                const data = JSON.parse(m.text.replace('[[GROUP_CALL_START]]', ''));
-                return (
-                  <div key={m.messageId} className="msg-row msg-row-system">
-                    {renderGroupCallStart(data)}
-                  </div>
-                );
-              } catch { /* fall through to normal render */ }
-            }
-
-            // CALL_ACTIVITY also renders as a system card
-            if (m.text?.startsWith('[[CALL_ACTIVITY]]')) {
-              try {
-                const data = JSON.parse(m.text.replace('[[CALL_ACTIVITY]]', '')) as CallActivity;
-                return (
-                  <div key={m.messageId} className="msg-row msg-row-system">
-                    {renderCallActivity(data)}
-                  </div>
-                );
-              } catch { /* fall through to normal render */ }
-            }
-
             return (
               <div key={m.messageId} className={`msg-row${own ? ' own' : ''}`} onContextMenu={e => handleContextMenu(e, m)}>
                 {!own && <div className="msg-avatar">{(m.username || '?')[0].toUpperCase()}</div>}

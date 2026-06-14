@@ -84,10 +84,6 @@ class WebSocketManager(private val mainActivity: MainActivity) {
     private val _callEvents = MutableSharedFlow<CallEvent>(extraBufferCapacity = 32)
     val callEvents: SharedFlow<CallEvent> = _callEvents
 
-    // Group call room signaling events
-    private val _groupCallEvents = MutableSharedFlow<GroupCallEvent>(extraBufferCapacity = 64)
-    val groupCallEvents: SharedFlow<GroupCallEvent> = _groupCallEvents
-
     // Emits info about devices that connect to the current session
     private val _deviceConnected = MutableStateFlow<DeviceInfo?>(null)
     val deviceConnected: StateFlow<DeviceInfo?> = _deviceConnected
@@ -793,7 +789,7 @@ class WebSocketManager(private val mainActivity: MainActivity) {
                     val rawText = chat.optString("text", "")
                     val text = if (fileName != null && rawText == "📎 $fileName") "" else rawText
 
-                    if (text.startsWith("[[CALL_ACTIVITY]]")) {
+                    if (text.startsWith("[[CALL_ACTIVITY]]") || text.startsWith("[[CALL_ROOM_ACTIVITY]]")) {
                         _chatEvents.tryEmit(
                             ChatEvent.Message(
                                 messageId = messageId,
@@ -1633,75 +1629,90 @@ class WebSocketManager(private val mainActivity: MainActivity) {
                         candidate = payload.optJSONObject("data")?.toString() ?: ""
                     ))
                 }
-                // ── Group call room signaling ─────────────────────────────────
-                "group_call_invite" -> {
+
+                // ── Group call room signaling ──────────────────────────────────
+                "call_room_invite" -> {
                     val payload = json.optJSONObject("payload") ?: return
-                    val roomId       = payload.optString("roomId", "")
-                    val callType     = payload.optString("callType", "audio")
-                    val sessionId    = payload.optString("sessionId", "")
-                    val hostUsername = payload.optString("hostUsername", "Unknown")
-                    Log.d("FlowLink", "📞 Group ${callType} call invite from $hostUsername, room=$roomId")
-                    _groupCallEvents.tryEmit(GroupCallEvent.Invite(roomId, callType, sessionId, hostUsername))
-                    mainActivity.notificationService.showNotification(
-                        "📞 Group ${if (callType == "video") "Video" else "Voice"} Call",
-                        "$hostUsername started a group call"
-                    )
+                    _callEvents.tryEmit(CallEvent.RoomInvite(
+                        roomId       = payload.optString("roomId", ""),
+                        callType     = payload.optString("callType", "audio"),
+                        fromUsername = payload.optString("fromUsername", "Unknown"),
+                        fromDevice   = payload.optString("fromDevice", ""),
+                        sessionId    = payload.optString("sessionId", "")
+                    ))
                 }
-                "group_call_room_state" -> {
+                "call_room_created" -> {
                     val payload = json.optJSONObject("payload") ?: return
-                    val roomId = payload.optString("roomId", "")
-                    _groupCallEvents.tryEmit(GroupCallEvent.RoomState(roomId, payload.toString()))
+                    _callEvents.tryEmit(CallEvent.RoomCreated(
+                        roomId   = payload.optString("roomId", ""),
+                        callType = payload.optString("callType", "audio")
+                    ))
                 }
-                "group_call_peer_joined" -> {
+                "call_room_joined" -> {
                     val payload = json.optJSONObject("payload") ?: return
-                    _groupCallEvents.tryEmit(GroupCallEvent.PeerJoined(
+                    val peers = mutableListOf<RoomPeer>()
+                    val arr = payload.optJSONArray("participants")
+                    if (arr != null) {
+                        for (i in 0 until arr.length()) {
+                            val p = arr.optJSONObject(i) ?: continue
+                            peers.add(RoomPeer(p.optString("deviceId", ""), p.optString("username", "")))
+                        }
+                    }
+                    _callEvents.tryEmit(CallEvent.RoomJoined(
+                        roomId       = payload.optString("roomId", ""),
+                        callType     = payload.optString("callType", "audio"),
+                        participants = peers,
+                        sessionId    = payload.optString("sessionId", "")
+                    ))
+                }
+                "call_room_peer_joined" -> {
+                    val payload = json.optJSONObject("payload") ?: return
+                    _callEvents.tryEmit(CallEvent.RoomPeerJoined(
+                        roomId       = payload.optString("roomId", ""),
+                        peerId       = payload.optString("peerId", ""),
+                        peerUsername = payload.optString("peerUsername", "")
+                    ))
+                }
+                "call_room_peer_left" -> {
+                    val payload = json.optJSONObject("payload") ?: return
+                    _callEvents.tryEmit(CallEvent.RoomPeerLeft(
+                        roomId       = payload.optString("roomId", ""),
+                        peerId       = payload.optString("peerId", ""),
+                        peerUsername = payload.optString("peerUsername", "")
+                    ))
+                }
+                "call_room_offer" -> {
+                    val payload = json.optJSONObject("payload") ?: return
+                    _callEvents.tryEmit(CallEvent.RoomOffer(
+                        roomId      = payload.optString("roomId", ""),
+                        fromPeerId  = payload.optString("fromPeerId", ""),
+                        peerUsername= payload.optString("peerUsername", ""),
+                        sdp         = payload.optJSONObject("data")?.toString() ?: ""
+                    ))
+                }
+                "call_room_answer" -> {
+                    val payload = json.optJSONObject("payload") ?: return
+                    _callEvents.tryEmit(CallEvent.RoomAnswer(
+                        roomId     = payload.optString("roomId", ""),
+                        fromPeerId = payload.optString("fromPeerId", ""),
+                        sdp        = payload.optJSONObject("data")?.toString() ?: ""
+                    ))
+                }
+                "call_room_ice" -> {
+                    val payload = json.optJSONObject("payload") ?: return
+                    _callEvents.tryEmit(CallEvent.RoomIce(
+                        roomId     = payload.optString("roomId", ""),
+                        fromPeerId = payload.optString("fromPeerId", ""),
+                        candidate  = payload.optJSONObject("data")?.toString() ?: ""
+                    ))
+                }
+                "call_room_error" -> {
+                    val payload = json.optJSONObject("payload") ?: return
+                    _callEvents.tryEmit(CallEvent.RoomError(
                         roomId = payload.optString("roomId", ""),
-                        deviceId = payload.optString("deviceId", ""),
-                        username = payload.optString("username", "")
+                        reason = payload.optString("reason", "unknown")
                     ))
                 }
-                "group_call_peer_left" -> {
-                    val payload = json.optJSONObject("payload") ?: return
-                    _groupCallEvents.tryEmit(GroupCallEvent.PeerLeft(
-                        roomId = payload.optString("roomId", ""),
-                        deviceId = payload.optString("deviceId", "")
-                    ))
-                }
-                "group_call_offer" -> {
-                    val payload = json.optJSONObject("payload") ?: return
-                    _groupCallEvents.tryEmit(GroupCallEvent.Offer(
-                        roomId = payload.optString("roomId", ""),
-                        fromDeviceId = payload.optString("fromDeviceId", ""),
-                        sdp = payload.optJSONObject("data")?.toString() ?: ""
-                    ))
-                }
-                "group_call_answer" -> {
-                    val payload = json.optJSONObject("payload") ?: return
-                    _groupCallEvents.tryEmit(GroupCallEvent.Answer(
-                        roomId = payload.optString("roomId", ""),
-                        fromDeviceId = payload.optString("fromDeviceId", ""),
-                        sdp = payload.optJSONObject("data")?.toString() ?: ""
-                    ))
-                }
-                "group_call_ice" -> {
-                    val payload = json.optJSONObject("payload") ?: return
-                    _groupCallEvents.tryEmit(GroupCallEvent.IceCandidate(
-                        roomId = payload.optString("roomId", ""),
-                        fromDeviceId = payload.optString("fromDeviceId", ""),
-                        candidate = payload.optJSONObject("data")?.toString() ?: ""
-                    ))
-                }
-                "group_call_error" -> {
-                    val payload = json.optJSONObject("payload")
-                    val reason = payload?.optString("reason", "unknown") ?: "unknown"
-                    Log.w("FlowLink", "Group call error: $reason")
-                    _groupCallEvents.tryEmit(GroupCallEvent.Error(
-                        roomId = payload?.optString("roomId", "") ?: "",
-                        reason = reason
-                    ))
-                }
-            }
-        } catch (e: Exception) {
             Log.e("FlowLink", "Error handling message", e)
         }
     }
@@ -1818,19 +1829,29 @@ class WebSocketManager(private val mainActivity: MainActivity) {
         data class Offer(val callId: String, val fromDevice: String, val sdp: String) : CallEvent()
         data class Answer(val callId: String, val fromDevice: String, val sdp: String) : CallEvent()
         data class IceCandidate(val callId: String, val fromDevice: String, val candidate: String) : CallEvent()
+
+        // ── Group call room events ─────────────────────────────────────────
+        /** Received when another device creates a room and invites us */
+        data class RoomInvite(val roomId: String, val callType: String, val fromUsername: String, val fromDevice: String, val sessionId: String) : CallEvent()
+        /** Room created confirmation (for initiator) */
+        data class RoomCreated(val roomId: String, val callType: String) : CallEvent()
+        /** We joined — server returns existing participants */
+        data class RoomJoined(val roomId: String, val callType: String, val participants: List<RoomPeer>, val sessionId: String) : CallEvent()
+        /** A new peer joined the room (we are already in it) */
+        data class RoomPeerJoined(val roomId: String, val peerId: String, val peerUsername: String) : CallEvent()
+        /** A peer left the room */
+        data class RoomPeerLeft(val roomId: String, val peerId: String, val peerUsername: String) : CallEvent()
+        /** WebRTC offer from a room peer */
+        data class RoomOffer(val roomId: String, val fromPeerId: String, val peerUsername: String, val sdp: String) : CallEvent()
+        /** WebRTC answer from a room peer */
+        data class RoomAnswer(val roomId: String, val fromPeerId: String, val sdp: String) : CallEvent()
+        /** ICE candidate from a room peer */
+        data class RoomIce(val roomId: String, val fromPeerId: String, val candidate: String) : CallEvent()
+        /** Room not found / error */
+        data class RoomError(val roomId: String, val reason: String) : CallEvent()
     }
 
-    // ── Group call room signaling events ───────────────────────────────────
-    sealed class GroupCallEvent {
-        data class Invite(val roomId: String, val callType: String, val sessionId: String, val hostUsername: String) : GroupCallEvent()
-        data class RoomState(val roomId: String, val payloadJson: String) : GroupCallEvent()
-        data class PeerJoined(val roomId: String, val deviceId: String, val username: String) : GroupCallEvent()
-        data class PeerLeft(val roomId: String, val deviceId: String) : GroupCallEvent()
-        data class Offer(val roomId: String, val fromDeviceId: String, val sdp: String) : GroupCallEvent()
-        data class Answer(val roomId: String, val fromDeviceId: String, val sdp: String) : GroupCallEvent()
-        data class IceCandidate(val roomId: String, val fromDeviceId: String, val candidate: String) : GroupCallEvent()
-        data class Error(val roomId: String, val reason: String) : GroupCallEvent()
-    }
+    data class RoomPeer(val deviceId: String, val username: String)
 
     /** Send a call signaling message to a target device */
     fun sendCallSignal(type: String, callId: String, toDevice: String, extraPayload: JSONObject = JSONObject()) {
@@ -1848,24 +1869,20 @@ class WebSocketManager(private val mainActivity: MainActivity) {
         }.toString())
     }
 
-    /**
-     * Send a group call room signaling message.
-     * Used for group_call_join, group_call_leave, group_call_reject,
-     * group_call_offer, group_call_answer, group_call_ice.
-     */
-    fun sendGroupCallSignal(type: String, roomId: String, extraPayload: JSONObject = JSONObject()) {
-        val payload = JSONObject().apply {
-            put("roomId", roomId)
-            put("username", sessionManager.getUsername())
-            extraPayload.keys().forEach { key -> put(key, extraPayload[key]) }
-        }
+    /** Send a group call room message */
+    fun sendRoomSignal(type: String, extraPayload: JSONObject = JSONObject()) {
         sendMessage(JSONObject().apply {
             put("type", type)
             put("deviceId", sessionManager.getDeviceId())
-            put("payload", payload)
+            put("payload", extraPayload.apply {
+                put("fromUsername", sessionManager.getUsername())
+            })
             put("timestamp", System.currentTimeMillis())
         }.toString())
     }
+
+    /** Expose deviceId for consumers (delegates to SessionManager) */
+    fun getDeviceId(): String = sessionManager.getDeviceId()
 
     private fun parseGroupInfo(json: JSONObject): GroupInfo {
         val ids = mutableListOf<String>()

@@ -23,7 +23,7 @@ import CallModal from './components/CallModal';
 import GroupCallModal from './components/GroupCallModal';
 import CallsPage from './pages/CallsPage';
 import { CallService, CallState, CallInfo } from './services/CallService';
-import { GroupCallService, GroupCallState, GroupCallRoom } from './services/GroupCallService';
+import { GroupCallService, GroupCallState, GroupCallInfo, GroupCallParticipant } from './services/GroupCallService';
 import './App.css';
 
 export interface AppContext {
@@ -134,13 +134,18 @@ function Shell() {
 
   // ── Group call state ─────────────────────────────────────────────────────
   const [groupCallState, setGroupCallState] = useState<GroupCallState>('idle');
-  const [groupCallRoom, setGroupCallRoom] = useState<GroupCallRoom | null>(null);
+  const [groupCallInfo, setGroupCallInfo] = useState<GroupCallInfo | null>(null);
+  const [groupCallParticipants, setGroupCallParticipants] = useState<GroupCallParticipant[]>([]);
   const groupCallServiceRef = useRef<GroupCallService | null>(null);
   if (!groupCallServiceRef.current) {
     groupCallServiceRef.current = new GroupCallService(
-      '', // deviceId not available yet – updated below
+      '', // updated below
       '',
-      (state, room) => { setGroupCallState(state); setGroupCallRoom(room); }
+      (state, info, parts) => {
+        setGroupCallState(state);
+        setGroupCallInfo(info);
+        setGroupCallParticipants(parts);
+      }
     );
   }
 
@@ -166,8 +171,11 @@ function Shell() {
       }
       // Give GroupCallService the live websocket and identity
       if (groupCallServiceRef.current) {
-        groupCallServiceRef.current.updateIdentity(deviceId, username || '');
+        (groupCallServiceRef.current as any).deviceId = deviceId;
+        (groupCallServiceRef.current as any).username = username || '';
         groupCallServiceRef.current.setWebSocket(ws);
+        // Expose globally for chat Join Now button
+        (window as any).__groupCallService = groupCallServiceRef.current;
       }
     };
     ws.onmessage = (e) => handleWebSocketMessage(JSON.parse(e.data));
@@ -271,11 +279,10 @@ function Shell() {
       case 'chat_typing':
         window.dispatchEvent(new CustomEvent('chatMessage', { detail: { message } }));
         if (message.type === 'chat_message') {
-          setChatUnread(p => p + 1);
           const chatText = message.payload?.chat?.text || '';
-          if (chatText.startsWith('[[CALL_ACTIVITY]]')) {
-            // call activity messages are displayed in chat, but don't duplicate into storage as plain text only
-          }
+          const isCallActivity = chatText.startsWith('[[CALL_ACTIVITY]]') || chatText.startsWith('[[CALL_ROOM_ACTIVITY]]');
+          // Only increment unread badge for real chat messages, not call activity cards
+          if (!isCallActivity) setChatUnread(p => p + 1);
           // Buffer message in sessionStorage so MessagesPage gets it even if not mounted
           try {
             const chat = message.payload?.chat;
@@ -528,15 +535,17 @@ function Shell() {
           callServiceRef.current.handleMessage(message);
         }
         break;
-      // ── Group call signaling ─────────────────────────────────────────────
-      case 'group_call_invite':
-      case 'group_call_room_state':
-      case 'group_call_peer_joined':
-      case 'group_call_peer_left':
-      case 'group_call_offer':
-      case 'group_call_answer':
-      case 'group_call_ice':
-      case 'group_call_error':
+
+      // ── Group call room signaling ────────────────────────────────────────
+      case 'call_room_invite':
+      case 'call_room_created':
+      case 'call_room_joined':
+      case 'call_room_peer_joined':
+      case 'call_room_peer_left':
+      case 'call_room_error':
+      case 'call_room_offer':
+      case 'call_room_answer':
+      case 'call_room_ice':
         if (groupCallServiceRef.current) {
           groupCallServiceRef.current.handleMessage(message);
         }
@@ -816,12 +825,14 @@ function Shell() {
         />
       )}
 
-      {/* Group call overlay */}
-      {groupCallServiceRef.current && (
+      {/* Group call room overlay */}
+      {groupCallServiceRef.current && groupCallState !== 'idle' && (
         <GroupCallModal
           groupCallService={groupCallServiceRef.current}
           state={groupCallState}
-          room={groupCallRoom}
+          roomInfo={groupCallInfo}
+          participants={groupCallParticipants}
+          localUsername={username || ''}
         />
       )}
     </div>

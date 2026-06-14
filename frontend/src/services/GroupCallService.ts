@@ -1,40 +1,43 @@
 /**
- * GroupCallService — Room-based group audio/video calling
+ * GroupCallService — Room-based multi-participant WebRTC call management
  *
- * Architecture: Full mesh WebRTC.
- * Every participant creates a direct peer connection to every other participant.
+ * Architecture (full-mesh):
+ *   - One RTCPeerConnection per remote participant
+ *   - The caller creates the room and sends invites to all participants
+ *   - Each invited participant receives call_room_invite → shows ringing UI
+ *   - Accepting → send call_room_join → server returns list of existing peers
+ *   - New joiner initiates offers to every existing peer (they are the "caller" side)
+ *   - When a peer joins later, existing participants are notified via call_room_peer_joined
+ *     and the new joiner initiates offers to them too
  *
- * Call Room lifecycle:
- *   creator:  group_call_create  → receives room_state
- *   invitees: receive group_call_invite  → accept → group_call_join → negotiate with each existing peer
- *   late join: group_call_join (via "Join Now") → same negotiation path
- *
- * Per-pair signaling flow (caller side = the peer who already is in the room):
- *   existing peer sends call_offer → new joiner receives → sends call_answer → ICE exchange
+ * Participant state per peer:
+ *   peerId, peerUsername, pc (RTCPeerConnection), remoteStream, localStream ref
  */
 
-export type GroupCallState = 'idle' | 'ringing_in' | 'joining' | 'active' | 'ended';
-
 export interface GroupCallParticipant {
-  deviceId: string;
-  username: string;
+  peerId: string;
+  peerUsername: string;
   stream: MediaStream | null;
-  muted: boolean;
-  cameraOff: boolean;
-  isSelf: boolean;
 }
 
-export interface GroupCallRoom {
+export type GroupCallState =
+  | 'idle'
+  | 'ringing_in'   // received invite, not yet accepted
+  | 'ringing_out'  // sent invites, waiting for first join
+  | 'active'       // in the call room
+  | 'ended';
+
+export interface GroupCallInfo {
   roomId: string;
   callType: 'audio' | 'video';
-  hostUsername: string;
-  sessionId: string;
-  participants: GroupCallParticipant[];
+  initiatorUsername: string;
+  sessionId: string | null;
 }
 
-export type GroupCallEventHandler = (
+export type GroupCallStateHandler = (
   state: GroupCallState,
-  room: GroupCallRoom | null
+  info: GroupCallInfo | null,
+  participants: GroupCallParticipant[]
 ) => void;
 
 const ICE_SERVERS: RTCIceServer[] = [
@@ -47,213 +50,172 @@ const ICE_SERVERS: RTCIceServer[] = [
   },
 ];
 
-interface PeerEntry {
+interface PeerState {
+  peerId: string;
+  peerUsername: string;
   pc: RTCPeerConnection;
   remoteStream: MediaStream;
-  makingOffer: boolean;
-  ignoreOffer: boolean;
-  remoteDescSet: boolean;
   pendingCandidates: RTCIceCandidateInit[];
+  remoteDescSet: boolean;
 }
 
 export class GroupCallService {
   private ws: WebSocket | null = null;
   private deviceId: string;
   private username: string;
-
   private state: GroupCallState = 'idle';
-  private room: GroupCallRoom | null = null;
+  private currentRoom: GroupCallInfo | null = null;
+  private onStateChange: GroupCallStateHandler;
+
   private localStream: MediaStream | null = null;
+  private peers = new Map<string, PeerState>(); // keyed by peerId
 
-  // deviceId -> PeerEntry
-  private peers = new Map<string, PeerEntry>();
-
-  private onStateChange: GroupCallEventHandler;
-  private onParticipantsChange: ((participants: GroupCallParticipant[]) => void) | null = null;
-
-  // Pending invite info (for when user accepts)
-  private pendingInvite: { roomId: string; sessionId: string; hostUsername: string; callType: 'audio' | 'video' } | null = null;
-
-  constructor(deviceId: string, username: string, onStateChange: GroupCallEventHandler) {
+  constructor(
+    deviceId: string,
+    username: string,
+    onStateChange: GroupCallStateHandler
+  ) {
     this.deviceId = deviceId;
     this.username = username;
     this.onStateChange = onStateChange;
   }
 
   setWebSocket(ws: WebSocket) { this.ws = ws; }
-  setOnParticipantsChange(cb: (p: GroupCallParticipant[]) => void) { this.onParticipantsChange = cb; }
   getState() { return this.state; }
-  getRoom() { return this.room; }
+  getCurrentRoom() { return this.currentRoom; }
   getLocalStream() { return this.localStream; }
-
-  /** Update deviceId / username after initial construction (set before WS connects) */
-  updateIdentity(deviceId: string, username: string) {
-    this.deviceId = deviceId;
-    this.username = username;
+  getParticipants(): GroupCallParticipant[] {
+    return Array.from(this.peers.values()).map(p => ({
+      peerId: p.peerId,
+      peerUsername: p.peerUsername,
+      stream: p.remoteStream.getTracks().length > 0 ? p.remoteStream : null,
+    }));
   }
 
   // ── Public API ─────────────────────────────────────────────────────────
 
   /**
-   * Host starts a new group call and invites a list of targets.
+   * Start a group call: create a room and invite participants.
    */
   async startGroupCall(
-    invitees: { username: string; deviceId: string }[],
+    invitees: { deviceId: string; username: string }[],
     callType: 'audio' | 'video',
-    sessionId: string
+    sessionId: string | null
   ): Promise<void> {
     if (this.state !== 'idle') throw new Error('Already in a call');
 
-    const roomId = `gcall_${Date.now()}_${Math.random().toString(36).slice(2)}`;
-    this.room = {
+    const roomId = `room_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+    this.currentRoom = {
       roomId,
       callType,
-      hostUsername: this.username,
+      initiatorUsername: this.username,
       sessionId,
-      participants: [
-        { deviceId: this.deviceId, username: this.username, stream: null, muted: false, cameraOff: false, isSelf: true },
-      ],
     };
-    this.setState('joining');
+    this.setState('ringing_out');
 
     // Acquire local media
     try {
       this.localStream = await this.getUserMedia(callType === 'video');
-      this.updateSelfStream(this.localStream);
     } catch (err) {
       console.error('[GroupCallService] getUserMedia failed:', err);
-      this.cleanup();
+      this.cleanup('media_error');
       return;
     }
 
-    // Create room on server
     this.send({
-      type: 'group_call_create',
+      type: 'call_room_create',
       payload: {
         roomId,
         callType,
+        invitees,
         sessionId,
-        invitees: invitees.map(i => ({ username: i.username, deviceId: i.deviceId })),
-        hostUsername: this.username,
+        fromUsername: this.username,
       },
     });
-
-    this.setState('active');
-    // Post a "Join Now" chat message for this session
-    this.sendJoinNowChatMessage(roomId, callType, sessionId);
   }
 
   /**
-   * Accept an incoming group call invitation.
+   * Accept an incoming group call invite.
    */
   async acceptGroupCall(): Promise<void> {
-    if (!this.pendingInvite || this.state !== 'ringing_in') return;
-    const { roomId, sessionId, callType } = this.pendingInvite;
+    if (!this.currentRoom || this.state !== 'ringing_in') return;
 
-    this.setState('joining');
+    this.setState('active');
 
     try {
-      this.localStream = await this.getUserMedia(callType === 'video');
-      this.updateSelfStream(this.localStream);
+      this.localStream = await this.getUserMedia(this.currentRoom.callType === 'video');
     } catch (err) {
       console.error('[GroupCallService] getUserMedia failed:', err);
-      this.cleanup();
+      this.cleanup('media_error');
       return;
     }
 
-    // Tell server we're joining the room
     this.send({
-      type: 'group_call_join',
-      payload: { roomId, sessionId, username: this.username },
+      type: 'call_room_join',
+      payload: {
+        roomId: this.currentRoom.roomId,
+        fromUsername: this.username,
+      },
     });
-    // State will flip to 'active' when we receive the room_state back
   }
 
   /**
-   * Reject an incoming group call invitation.
+   * Join an ongoing call from a chat "Join Now" button.
+   */
+  async joinRoom(roomId: string, callType: 'audio' | 'video', sessionId: string | null, initiatorUsername: string): Promise<void> {
+    if (this.state !== 'idle') return;
+
+    this.currentRoom = { roomId, callType, initiatorUsername, sessionId };
+    this.setState('active');
+
+    try {
+      this.localStream = await this.getUserMedia(callType === 'video');
+    } catch (err) {
+      console.error('[GroupCallService] getUserMedia failed:', err);
+      this.cleanup('media_error');
+      return;
+    }
+
+    this.send({
+      type: 'call_room_join',
+      payload: { roomId, fromUsername: this.username },
+    });
+  }
+
+  /**
+   * Reject an incoming invite without affecting others in the room.
    */
   rejectGroupCall(): void {
-    if (!this.pendingInvite) return;
-    const { roomId, sessionId } = this.pendingInvite;
-    this.send({
-      type: 'group_call_reject',
-      payload: { roomId, sessionId, username: this.username },
-    });
-    this.pendingInvite = null;
-    this.cleanup();
+    if (this.state !== 'ringing_in') return;
+    // Simply do nothing — the room continues without us.
+    // Optionally send a call_reject signal back to the initiator only for UX.
+    this.cleanup('rejected');
   }
 
   /**
-   * Join an ongoing call via "Join Now" link in chat.
-   */
-  async joinByRoomId(roomId: string, callType: 'audio' | 'video', sessionId: string, hostUsername: string): Promise<void> {
-    if (this.state !== 'idle') return; // already in a call
-    this.pendingInvite = { roomId, sessionId, hostUsername, callType };
-    this.room = {
-      roomId,
-      callType,
-      hostUsername,
-      sessionId,
-      participants: [
-        { deviceId: this.deviceId, username: this.username, stream: null, muted: false, cameraOff: false, isSelf: true },
-      ],
-    };
-    this.setState('ringing_in'); // show UI so user taps Accept
-    // Auto-accept since they explicitly clicked "Join Now"
-    await this.acceptGroupCall();
-  }
-
-  /**
-   * Leave the group call.
+   * Leave the call room. Others remain connected.
    */
   leaveCall(): void {
-    if (!this.room) return;
+    if (!this.currentRoom) return;
     this.send({
-      type: 'group_call_leave',
-      payload: { roomId: this.room.roomId, sessionId: this.room.sessionId },
+      type: 'call_room_leave',
+      payload: { roomId: this.currentRoom.roomId, fromUsername: this.username },
     });
-    this.cleanup();
+    this.cleanup('left');
   }
 
   toggleMute(): boolean {
     const audio = this.localStream?.getAudioTracks()[0];
     if (!audio) return false;
     audio.enabled = !audio.enabled;
-    const muted = !audio.enabled;
-    this.updateSelfMeta({ muted });
-    return muted;
+    return !audio.enabled; // returns true if NOW muted
   }
 
   toggleCamera(): boolean {
     const video = this.localStream?.getVideoTracks()[0];
     if (!video) return false;
     video.enabled = !video.enabled;
-    const cameraOff = !video.enabled;
-    this.updateSelfMeta({ cameraOff });
-    return cameraOff;
-  }
-
-  async switchCamera(): Promise<void> {
-    if (!this.localStream || this.room?.callType !== 'video') return;
-    const videoTrack = this.localStream.getVideoTracks()[0];
-    if (!videoTrack) return;
-    const settings = videoTrack.getSettings();
-    const nextFacing = (settings.facingMode ?? 'user') === 'user' ? 'environment' : 'user';
-    try {
-      const newStream = await navigator.mediaDevices.getUserMedia({
-        audio: false,
-        video: { facingMode: { exact: nextFacing } },
-      });
-      const newVideoTrack = newStream.getVideoTracks()[0];
-      for (const entry of this.peers.values()) {
-        const sender = entry.pc.getSenders().find(s => s.track?.kind === 'video');
-        if (sender) await sender.replaceTrack(newVideoTrack);
-      }
-      videoTrack.stop();
-      this.localStream.removeTrack(videoTrack);
-      this.localStream.addTrack(newVideoTrack);
-      this.updateSelfStream(this.localStream);
-    } catch { /* facingMode exact not supported */ }
+    return !video.enabled;
   }
 
   // ── Incoming message handler ──────────────────────────────────────────
@@ -262,232 +224,201 @@ export class GroupCallService {
     const { type, payload } = message;
 
     switch (type) {
-      case 'group_call_invite':
-        await this.onGroupCallInvite(payload);
+
+      // ── Received invite from another device ────────────────────────────
+      case 'call_room_invite': {
+        if (this.state !== 'idle') {
+          // Already in a call — silently ignore (room stays open)
+          return;
+        }
+        this.currentRoom = {
+          roomId: payload.roomId,
+          callType: payload.callType,
+          initiatorUsername: payload.fromUsername || 'Unknown',
+          sessionId: payload.sessionId ?? null,
+        };
+        this.setState('ringing_in');
         break;
+      }
 
-      case 'group_call_room_state':
-        await this.onRoomState(payload);
+      // ── Creator confirmed room created ─────────────────────────────────
+      case 'call_room_created': {
+        if (this.state === 'ringing_out') {
+          this.setState('active');
+        }
         break;
+      }
 
-      case 'group_call_peer_joined':
-        await this.onPeerJoined(payload);
+      // ── We just joined, server sends existing participant list ──────────
+      case 'call_room_joined': {
+        const existingPeers: { deviceId: string; username: string }[] = payload.participants || [];
+        // Initiate offer to every existing participant
+        for (const peer of existingPeers) {
+          await this.initiatePeerConnection(peer.deviceId, peer.username);
+        }
+        this.notifyStateChange();
         break;
+      }
 
-      case 'group_call_peer_left':
-        this.onPeerLeft(payload);
+      // ── A new peer joined the room (server notifies existing members) ──
+      case 'call_room_peer_joined': {
+        const { peerId, peerUsername } = payload;
+        if (peerId === this.deviceId) break;
+        if (!this.peers.has(peerId) && this.state === 'active') {
+          // We're an existing participant — the new joiner will send us an offer.
+          // Pre-create the peer state so we're ready to receive it.
+          this.getOrCreatePeer(peerId, peerUsername);
+          this.notifyStateChange();
+        }
         break;
+      }
 
-      case 'group_call_offer':
-        await this.onRemoteOffer(payload);
+      // ── A peer left ────────────────────────────────────────────────────
+      case 'call_room_peer_left': {
+        const { peerId } = payload;
+        this.removePeer(peerId);
+        this.notifyStateChange();
         break;
+      }
 
-      case 'group_call_answer':
-        await this.onRemoteAnswer(payload);
+      // ── Room not found (expired or never existed) ──────────────────────
+      case 'call_room_error': {
+        if (payload.reason === 'room_not_found') {
+          this.cleanup('room_not_found');
+        }
         break;
+      }
 
-      case 'group_call_ice':
-        await this.onRemoteIce(payload);
+      // ── WebRTC signaling between peers ─────────────────────────────────
+      case 'call_room_offer': {
+        const { fromPeerId, toPeerId, data, peerUsername } = payload;
+        if (toPeerId !== this.deviceId) break;
+        let peerState = this.peers.get(fromPeerId);
+        if (!peerState) {
+          peerState = this.getOrCreatePeer(fromPeerId, peerUsername || fromPeerId);
+        }
+        await this.handleRemoteOffer(peerState, data);
+        this.notifyStateChange();
         break;
-    }
-  }
+      }
 
-  // ── Signaling handlers ────────────────────────────────────────────────
+      case 'call_room_answer': {
+        const { fromPeerId, toPeerId, data } = payload;
+        if (toPeerId !== this.deviceId) break;
+        const peerState = this.peers.get(fromPeerId);
+        if (!peerState) break;
+        if (peerState.pc.signalingState === 'have-local-offer') {
+          await peerState.pc.setRemoteDescription(data);
+          peerState.remoteDescSet = true;
+          this.drainCandidates(peerState);
+        }
+        break;
+      }
 
-  private async onGroupCallInvite(payload: any): Promise<void> {
-    if (this.state !== 'idle') {
-      // Already in a call — auto-reject
-      this.send({
-        type: 'group_call_reject',
-        payload: { roomId: payload.roomId, sessionId: payload.sessionId, username: this.username, reason: 'busy' },
-      });
-      return;
-    }
-    this.pendingInvite = {
-      roomId: payload.roomId,
-      sessionId: payload.sessionId,
-      hostUsername: payload.hostUsername,
-      callType: payload.callType,
-    };
-    this.room = {
-      roomId: payload.roomId,
-      callType: payload.callType,
-      hostUsername: payload.hostUsername,
-      sessionId: payload.sessionId,
-      participants: [
-        { deviceId: this.deviceId, username: this.username, stream: null, muted: false, cameraOff: false, isSelf: true },
-      ],
-    };
-    this.setState('ringing_in');
-  }
-
-  /**
-   * Server sends full room state after we join.
-   * existingPeers: list of { deviceId, username } already in the room.
-   * As the new joiner, we wait for each existing peer to send us an offer.
-   */
-  private async onRoomState(payload: any): Promise<void> {
-    const { roomId, callType, hostUsername, sessionId, participants } = payload;
-    if (this.room && this.room.roomId !== roomId) return;
-
-    if (!this.room) {
-      this.room = { roomId, callType, hostUsername, sessionId, participants: [] };
-    }
-
-    // Ensure self is in participants list
-    const selfEntry: GroupCallParticipant = {
-      deviceId: this.deviceId,
-      username: this.username,
-      stream: this.localStream,
-      muted: false,
-      cameraOff: false,
-      isSelf: true,
-    };
-    const others: GroupCallParticipant[] = (participants as any[])
-      .filter(p => p.deviceId !== this.deviceId)
-      .map(p => ({
-        deviceId: p.deviceId,
-        username: p.username,
-        stream: null,
-        muted: false,
-        cameraOff: false,
-        isSelf: false,
-      }));
-
-    this.room.participants = [selfEntry, ...others];
-    this.setState('active');
-    this.notifyParticipants();
-
-    // Each existing peer (already in room) will send us an offer.
-    // We just ensure a PeerEntry exists so we're ready to handle it.
-    for (const p of others) {
-      if (!this.peers.has(p.deviceId)) {
-        this.getOrCreatePeer(p.deviceId);
+      case 'call_room_ice': {
+        const { fromPeerId, toPeerId, data } = payload;
+        if (toPeerId !== this.deviceId) break;
+        const peerState = this.peers.get(fromPeerId);
+        if (!peerState) break;
+        if (peerState.remoteDescSet) {
+          try { await peerState.pc.addIceCandidate(data); } catch { /* ignore */ }
+        } else {
+          peerState.pendingCandidates.push(data);
+        }
+        break;
       }
     }
   }
 
+  // ── WebRTC helpers ────────────────────────────────────────────────────
+
   /**
-   * Another peer has joined the room while we're already in it.
-   * As the "older" peer, we initiate the offer toward the new joiner.
+   * Initiate a peer connection TO an existing participant.
+   * The joining peer is always the "caller" (creates offer).
    */
-  private async onPeerJoined(payload: any): Promise<void> {
-    const { deviceId, username } = payload;
-    if (deviceId === this.deviceId || !this.room) return;
+  private async initiatePeerConnection(peerId: string, peerUsername: string): Promise<void> {
+    if (!this.localStream || !this.currentRoom) return;
+    if (this.peers.has(peerId)) return; // already connected
 
-    // Add to participant list if not already there
-    if (!this.room.participants.find(p => p.deviceId === deviceId)) {
-      this.room.participants.push({ deviceId, username, stream: null, muted: false, cameraOff: false, isSelf: false });
-      this.notifyParticipants();
-    }
+    const peerState = this.getOrCreatePeer(peerId, peerUsername);
+    const pc = peerState.pc;
 
-    // Create peer and send offer
-    const entry = this.getOrCreatePeer(deviceId);
-    await this.sendOffer(deviceId, entry);
+    // Add our local tracks to the connection
+    this.localStream.getTracks().forEach(track => {
+      if (track.kind === 'video' && this.currentRoom?.callType !== 'video') return;
+      pc.addTrack(track, this.localStream!);
+    });
+
+    const offer = await pc.createOffer();
+    await pc.setLocalDescription(offer);
+
+    this.send({
+      type: 'call_room_offer',
+      payload: {
+        roomId: this.currentRoom.roomId,
+        toPeerId: peerId,
+        fromPeerId: this.deviceId,
+        peerUsername: this.username,
+        data: offer,
+      },
+    });
   }
 
-  private onPeerLeft(payload: any): void {
-    const { deviceId } = payload;
-    if (!this.room) return;
-    this.room.participants = this.room.participants.filter(p => p.deviceId !== deviceId);
-    this.notifyParticipants();
-    const entry = this.peers.get(deviceId);
-    if (entry) {
-      entry.pc.close();
-      this.peers.delete(deviceId);
-    }
-    // If everyone left, end the call
-    const others = this.room.participants.filter(p => !p.isSelf);
-    if (others.length === 0) {
-      console.log('[GroupCallService] All peers left, ending call');
-      this.cleanup();
-    }
-  }
+  /**
+   * Handle incoming offer from a peer that joined after us.
+   */
+  private async handleRemoteOffer(peerState: PeerState, offerDesc: RTCSessionDescriptionInit): Promise<void> {
+    if (!this.localStream || !this.currentRoom) return;
+    const pc = peerState.pc;
 
-  private async onRemoteOffer(payload: any): Promise<void> {
-    const { fromDeviceId, data: offerDesc } = payload;
-    if (!this.room || !this.localStream) return;
+    await pc.setRemoteDescription(offerDesc);
+    peerState.remoteDescSet = true;
+    this.drainCandidates(peerState);
 
-    const entry = this.getOrCreatePeer(fromDeviceId);
+    // Add our local tracks AFTER setRemoteDescription
+    this.localStream.getTracks().forEach(track => {
+      if (track.kind === 'video' && this.currentRoom?.callType !== 'video') return;
+      const alreadyAdded = pc.getSenders().some(s => s.track?.id === track.id);
+      if (!alreadyAdded) pc.addTrack(track, this.localStream!);
+    });
 
-    // Perfect negotiation: polite peer check
-    const offerCollision = entry.makingOffer || entry.pc.signalingState !== 'stable';
-    // We use deviceId lexicographic order for polite/impolite
-    const isPolite = this.deviceId < fromDeviceId;
-    entry.ignoreOffer = !isPolite && offerCollision;
-    if (entry.ignoreOffer) {
-      console.warn('[GroupCallService] Ignoring colliding offer from', fromDeviceId);
-      return;
-    }
-
-    await entry.pc.setRemoteDescription(new RTCSessionDescription(offerDesc));
-    entry.remoteDescSet = true;
-    this.drainCandidates(fromDeviceId, entry);
-
-    // Add local tracks after setRemoteDescription (callee pattern)
-    this.addTracksToPC(entry.pc, this.localStream, this.room.callType === 'video');
-
-    // Force sendrecv
-    entry.pc.getTransceivers().forEach(tr => {
+    // Force sendrecv on all transceivers
+    pc.getTransceivers().forEach(tr => {
       if (tr.direction === 'recvonly' || tr.direction === 'inactive') {
         tr.direction = 'sendrecv';
       }
     });
 
-    const answer = await entry.pc.createAnswer();
-    await entry.pc.setLocalDescription(answer);
+    const answer = await pc.createAnswer();
+    await pc.setLocalDescription(answer);
 
     this.send({
-      type: 'group_call_answer',
+      type: 'call_room_answer',
       payload: {
-        roomId: this.room.roomId,
-        toDeviceId: fromDeviceId,
+        roomId: this.currentRoom!.roomId,
+        toPeerId: peerState.peerId,
+        fromPeerId: this.deviceId,
         data: answer,
       },
     });
   }
 
-  private async onRemoteAnswer(payload: any): Promise<void> {
-    const { fromDeviceId, data: answerDesc } = payload;
-    const entry = this.peers.get(fromDeviceId);
-    if (!entry) return;
-
-    if (entry.pc.signalingState === 'have-local-offer') {
-      await entry.pc.setRemoteDescription(new RTCSessionDescription(answerDesc));
-      entry.remoteDescSet = true;
-      this.drainCandidates(fromDeviceId, entry);
-    }
-  }
-
-  private async onRemoteIce(payload: any): Promise<void> {
-    const { fromDeviceId, data: candidate } = payload;
-    if (!candidate) return;
-    const entry = this.peers.get(fromDeviceId);
-    if (!entry) return;
-
-    if (entry.remoteDescSet) {
-      try { await entry.pc.addIceCandidate(candidate); } catch { /* ignore */ }
-    } else {
-      entry.pendingCandidates.push(candidate);
-    }
-  }
-
-  // ── Peer connection helpers ───────────────────────────────────────────
-
-  private getOrCreatePeer(remoteDeviceId: string): PeerEntry {
-    if (this.peers.has(remoteDeviceId)) return this.peers.get(remoteDeviceId)!;
+  private getOrCreatePeer(peerId: string, peerUsername: string): PeerState {
+    const existing = this.peers.get(peerId);
+    if (existing) return existing;
 
     const remoteStream = new MediaStream();
     const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
 
-    const entry: PeerEntry = {
+    const peerState: PeerState = {
+      peerId,
+      peerUsername,
       pc,
       remoteStream,
-      makingOffer: false,
-      ignoreOffer: false,
-      remoteDescSet: false,
       pendingCandidates: [],
+      remoteDescSet: false,
     };
+    this.peers.set(peerId, peerState);
 
     pc.ontrack = (e) => {
       const track = e.track;
@@ -495,26 +426,22 @@ export class GroupCallService {
         remoteStream.addTrack(track);
       }
       e.streams[0]?.getTracks().forEach(t => {
-        if (!remoteStream.getTracks().find(x => x.id === t.id)) remoteStream.addTrack(t);
-      });
-
-      // Update participant stream
-      if (this.room) {
-        const participant = this.room.participants.find(p => p.deviceId === remoteDeviceId);
-        if (participant) {
-          participant.stream = remoteStream;
-          this.notifyParticipants();
+        if (!remoteStream.getTracks().find(x => x.id === t.id)) {
+          remoteStream.addTrack(t);
         }
-      }
+      });
+      console.log(`[GroupCallService] ontrack from ${peerUsername}: ${track.kind}`);
+      this.notifyStateChange();
     };
 
     pc.onicecandidate = (e) => {
-      if (e.candidate && this.room) {
+      if (e.candidate && this.currentRoom) {
         this.send({
-          type: 'group_call_ice',
+          type: 'call_room_ice',
           payload: {
-            roomId: this.room.roomId,
-            toDeviceId: remoteDeviceId,
+            roomId: this.currentRoom.roomId,
+            toPeerId: peerId,
+            fromPeerId: this.deviceId,
             data: e.candidate.toJSON(),
           },
         });
@@ -522,98 +449,77 @@ export class GroupCallService {
     };
 
     pc.onconnectionstatechange = () => {
-      console.log(`[GroupCallService] peer ${remoteDeviceId} connection state: ${pc.connectionState}`);
+      console.log(`[GroupCallService] peer ${peerUsername} connection: ${pc.connectionState}`);
       if (pc.connectionState === 'failed') {
-        // Try ICE restart
-        this.restartIce(remoteDeviceId, entry);
+        this.removePeer(peerId);
+        this.notifyStateChange();
       }
     };
 
     pc.onnegotiationneeded = async () => {
+      // Only re-negotiate if we already set a local description (i.e., we're the offerer)
+      if (pc.signalingState !== 'stable') return;
       try {
-        entry.makingOffer = true;
-        await entry.pc.setLocalDescription();
-        this.send({
-          type: 'group_call_offer',
-          payload: {
-            roomId: this.room?.roomId,
-            toDeviceId: remoteDeviceId,
-            data: entry.pc.localDescription,
-          },
-        });
-      } catch (err) {
-        console.error('[GroupCallService] onnegotiationneeded error:', err);
-      } finally {
-        entry.makingOffer = false;
-      }
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+        if (this.currentRoom) {
+          this.send({
+            type: 'call_room_offer',
+            payload: {
+              roomId: this.currentRoom.roomId,
+              toPeerId: peerId,
+              fromPeerId: this.deviceId,
+              peerUsername: this.username,
+              data: offer,
+            },
+          });
+        }
+      } catch { /* ignore */ }
     };
 
-    this.peers.set(remoteDeviceId, entry);
-    return entry;
+    return peerState;
   }
 
-  private async sendOffer(remoteDeviceId: string, entry: PeerEntry): Promise<void> {
-    if (!this.room || !this.localStream) return;
-    try {
-      entry.makingOffer = true;
-
-      // Add tracks before offer (caller pattern)
-      this.addTracksToPC(entry.pc, this.localStream, this.room.callType === 'video');
-
-      const offer = await entry.pc.createOffer();
-      await entry.pc.setLocalDescription(offer);
-
-      this.send({
-        type: 'group_call_offer',
-        payload: {
-          roomId: this.room.roomId,
-          toDeviceId: remoteDeviceId,
-          data: entry.pc.localDescription,
-        },
-      });
-    } catch (err) {
-      console.error('[GroupCallService] sendOffer error:', err);
-    } finally {
-      entry.makingOffer = false;
-    }
+  private removePeer(peerId: string) {
+    const peerState = this.peers.get(peerId);
+    if (!peerState) return;
+    peerState.pc.close();
+    this.peers.delete(peerId);
   }
 
-  private async restartIce(remoteDeviceId: string, entry: PeerEntry): Promise<void> {
-    if (!this.room) return;
-    try {
-      entry.makingOffer = true;
-      const offer = await entry.pc.createOffer({ iceRestart: true });
-      await entry.pc.setLocalDescription(offer);
-      this.send({
-        type: 'group_call_offer',
-        payload: { roomId: this.room.roomId, toDeviceId: remoteDeviceId, data: entry.pc.localDescription },
-      });
-    } catch { /* ignore */ } finally {
-      entry.makingOffer = false;
-    }
-  }
-
-  private addTracksToPC(pc: RTCPeerConnection, stream: MediaStream, isVideo: boolean): void {
-    stream.getTracks().forEach(track => {
-      if (track.kind === 'video' && !isVideo) return;
-      const alreadyAdded = pc.getSenders().some(s => s.track?.id === track.id);
-      if (!alreadyAdded) pc.addTrack(track, stream);
+  private drainCandidates(peerState: PeerState) {
+    const queued = peerState.pendingCandidates.splice(0);
+    queued.forEach(c => {
+      try { peerState.pc.addIceCandidate(c); } catch { /* ignore */ }
     });
   }
 
-  private drainCandidates(_remoteDeviceId: string, entry: PeerEntry): void {
-    const queued = entry.pendingCandidates.splice(0);
-    queued.forEach(c => { try { entry.pc.addIceCandidate(c); } catch { /* ignore */ } });
+  // ── Internal state helpers ────────────────────────────────────────────
+
+  private setState(state: GroupCallState) {
+    this.state = state;
+    this.notifyStateChange();
   }
 
-  // ── Utilities ─────────────────────────────────────────────────────────
+  private notifyStateChange() {
+    this.onStateChange(this.state, this.currentRoom, this.getParticipants());
+  }
+
+  private send(msg: object) {
+    const ws = this.ws || (window as any).appWebSocket;
+    if (ws?.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ ...msg, deviceId: this.deviceId, timestamp: Date.now() }));
+    }
+  }
 
   private async getUserMedia(video: boolean): Promise<MediaStream> {
     let stream: MediaStream;
     try {
       stream = await navigator.mediaDevices.getUserMedia({
         audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
-        video: video ? { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user' } : false,
+        video: video
+          ? { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user' }
+          : false,
       });
     } catch {
       stream = await navigator.mediaDevices.getUserMedia({ audio: true, video });
@@ -622,71 +528,23 @@ export class GroupCallService {
     return stream;
   }
 
-  private send(msg: object): void {
-    const ws = this.ws || (window as any).appWebSocket;
-    if (ws?.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({ ...msg, deviceId: this.deviceId, timestamp: Date.now() }));
+  private cleanup(reason?: string) {
+    // Close all peer connections
+    for (const [, peerState] of this.peers) {
+      try { peerState.pc.close(); } catch { /* ignore */ }
     }
-  }
-
-  private sendJoinNowChatMessage(roomId: string, callType: 'audio' | 'video', sessionId: string): void {
-    const ws = this.ws || (window as any).appWebSocket;
-    if (!ws || ws.readyState !== WebSocket.OPEN) return;
-    const icon = callType === 'video' ? '🎥' : '📞';
-    const label = callType === 'video' ? 'video' : 'voice';
-    ws.send(JSON.stringify({
-      type: 'chat_message',
-      sessionId,
-      deviceId: this.deviceId,
-      payload: {
-        chat: {
-          messageId: `gcall-start-${roomId}`,
-          text: `[[GROUP_CALL_START]]${JSON.stringify({ roomId, callType, hostUsername: this.username })}`,
-          username: this.username,
-          sentAt: Date.now(),
-          format: 'plain',
-        },
-      },
-      timestamp: Date.now(),
-    }));
-    console.log(`[GroupCallService] ${icon} Group ${label} call started — Join Now message sent`);
-  }
-
-  private setState(state: GroupCallState): void {
-    this.state = state;
-    this.onStateChange(state, this.room);
-  }
-
-  private updateSelfStream(stream: MediaStream): void {
-    if (this.room) {
-      const self = this.room.participants.find(p => p.isSelf);
-      if (self) { self.stream = stream; this.notifyParticipants(); }
-    }
-  }
-
-  private updateSelfMeta(meta: Partial<GroupCallParticipant>): void {
-    if (this.room) {
-      const self = this.room.participants.find(p => p.isSelf);
-      if (self) { Object.assign(self, meta); this.notifyParticipants(); }
-    }
-  }
-
-  private notifyParticipants(): void {
-    if (this.onParticipantsChange && this.room) {
-      this.onParticipantsChange([...this.room.participants]);
-    }
-    // Also re-trigger onStateChange so React re-renders
-    this.onStateChange(this.state, this.room ? { ...this.room } : null);
-  }
-
-  cleanup(): void {
-    this.localStream?.getTracks().forEach(t => t.stop());
-    this.peers.forEach(entry => entry.pc.close());
     this.peers.clear();
+
+    // Stop local media
+    this.localStream?.getTracks().forEach(t => t.stop());
     this.localStream = null;
-    this.room = null;
-    this.pendingInvite = null;
+
+    this.currentRoom = null;
     this.setState('ended');
-    setTimeout(() => { if (this.state === 'ended') this.setState('idle'); }, 1500);
+    const delay = reason === 'rejected' ? 1000 : 1500;
+    setTimeout(() => {
+      if (this.state === 'ended') this.setState('idle');
+    }, delay);
+    console.log('[GroupCallService] cleanup. reason:', reason);
   }
 }

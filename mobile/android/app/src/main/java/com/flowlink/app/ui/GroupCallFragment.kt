@@ -1,0 +1,672 @@
+package com.flowlink.app.ui
+
+import android.media.AudioManager
+import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
+import android.util.Log
+import android.view.LayoutInflater
+import android.view.View
+import android.view.ViewGroup
+import android.widget.*
+import androidx.fragment.app.Fragment
+import androidx.lifecycle.lifecycleScope
+import com.flowlink.app.MainActivity
+import com.flowlink.app.R
+import com.flowlink.app.service.WebSocketManager
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import org.json.JSONObject
+import org.webrtc.*
+
+/**
+ * GroupCallFragment — Room-based multi-participant call UI.
+ *
+ * Uses a full-mesh WebRTC topology: one RTCPeerConnection per remote participant.
+ *
+ * Key design rules:
+ * - One user's rejection/leave NEVER tears down the room.
+ * - Late joiners: send call_room_join to get the current participant list,
+ *   then initiate offers to every peer in that list.
+ * - New peer joined: server notifies everyone; new joiner sends offers to us.
+ * - WebRTC tracks follow the callee pattern: setRemoteDescription THEN addTrack.
+ */
+class GroupCallFragment : Fragment() {
+
+    companion object {
+        private const val TAG = "GroupCallFragment"
+
+        const val ARG_ROOM_ID   = "roomId"
+        const val ARG_IS_VIDEO  = "isVideo"
+        const val ARG_DIRECTION = "direction"
+        const val ARG_INITIATOR = "initiator"
+
+        fun newIncomingRoom(roomId: String, fromUsername: String, isVideo: Boolean) =
+            GroupCallFragment().apply {
+                arguments = Bundle().apply {
+                    putString(ARG_ROOM_ID,   roomId)
+                    putBoolean(ARG_IS_VIDEO, isVideo)
+                    putString(ARG_DIRECTION, "inbound")
+                    putString(ARG_INITIATOR, fromUsername)
+                }
+            }
+
+        fun newOutgoingRoom(roomId: String, isVideo: Boolean, initiatorUsername: String) =
+            GroupCallFragment().apply {
+                arguments = Bundle().apply {
+                    putString(ARG_ROOM_ID,   roomId)
+                    putBoolean(ARG_IS_VIDEO, isVideo)
+                    putString(ARG_DIRECTION, "outbound")
+                    putString(ARG_INITIATOR, initiatorUsername)
+                }
+            }
+    }
+
+    // ── Activity / manager refs ───────────────────────────────────────────
+    private lateinit var mainActivity: MainActivity
+    private lateinit var wsManager: WebSocketManager
+
+    // ── Args ─────────────────────────────────────────────────────────────
+    private var roomId    = ""
+    private var isVideo   = false
+    private var direction = "inbound"
+    private var initiator = ""
+
+    // ── State ─────────────────────────────────────────────────────────────
+    private val mainHandler = Handler(Looper.getMainLooper())
+    private var activeRingtone: android.media.Ringtone? = null
+    private var durationSec = 0
+    private var isActive = false
+
+    // ── Views ─────────────────────────────────────────────────────────────
+    private var tvStatus       : TextView?    = null
+    private var tvParticipants : TextView?    = null
+    private var btnAccept      : ImageButton? = null
+    private var btnEnd         : ImageButton? = null
+    private var btnMute        : ImageButton? = null
+    private var btnSpeaker     : ImageButton? = null
+    private var btnCameraOff   : ImageButton? = null
+    private var videoGrid      : LinearLayout? = null
+
+    // ── WebRTC shared resources ───────────────────────────────────────────
+    private var factory          : PeerConnectionFactory? = null
+    private var eglBase          : EglBase?               = null
+    private var localAudioSource : AudioSource?           = null
+    private var localAudioTrack  : AudioTrack?            = null
+    private var localVideoSource : VideoSource?           = null
+    private var localVideoTrack  : VideoTrack?            = null
+    private var videoCapturer    : CameraVideoCapturer?   = null
+
+    // ── Per-peer state ────────────────────────────────────────────────────
+    private data class PeerConn(
+        val pc: PeerConnection,
+        val videoView: SurfaceViewRenderer?,
+        var remoteDescSet: Boolean = false,
+        val pendingCandidates: MutableList<JSONObject> = mutableListOf()
+    )
+    private val peers = mutableMapOf<String, PeerConn>()
+
+    // ── Duration ticker ───────────────────────────────────────────────────
+    private val durationTick = object : Runnable {
+        override fun run() {
+            if (isActive && isAdded) {
+                durationSec++
+                tvStatus?.text = fmt(durationSec)
+                mainHandler.postDelayed(this, 1000)
+            }
+        }
+    }
+
+    // ── Lifecycle ─────────────────────────────────────────────────────────
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        mainActivity = activity as MainActivity
+        wsManager    = mainActivity.webSocketManager
+        roomId    = arguments?.getString(ARG_ROOM_ID,   "") ?: ""
+        isVideo   = arguments?.getBoolean(ARG_IS_VIDEO, false) ?: false
+        direction = arguments?.getString(ARG_DIRECTION, "inbound") ?: "inbound"
+        initiator = arguments?.getString(ARG_INITIATOR, "Group Call") ?: "Group Call"
+    }
+
+    override fun onCreateView(inf: LayoutInflater, c: ViewGroup?, s: Bundle?): View? =
+        inf.inflate(R.layout.fragment_group_call, c, false)
+
+    override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
+        super.onViewCreated(view, savedInstanceState)
+
+        tvStatus       = view.findViewById(R.id.gcf_status)
+        tvParticipants = view.findViewById(R.id.gcf_participants)
+        btnAccept      = view.findViewById(R.id.gcf_btn_accept)
+        btnEnd         = view.findViewById(R.id.gcf_btn_end)
+        btnMute        = view.findViewById(R.id.gcf_btn_mute)
+        btnSpeaker     = view.findViewById(R.id.gcf_btn_speaker)
+        btnCameraOff   = view.findViewById(R.id.gcf_btn_camera)
+        videoGrid      = view.findViewById(R.id.gcf_video_grid)
+
+        view.findViewById<TextView>(R.id.gcf_title)?.text =
+            "${if (isVideo) "Video" else "Audio"} Group Call"
+
+        btnAccept?.setOnClickListener    { acceptGroupCall() }
+        btnEnd?.setOnClickListener       { leaveGroupCall() }
+        btnMute?.setOnClickListener      { toggleMute() }
+        btnSpeaker?.setOnClickListener   { toggleSpeaker() }
+        btnCameraOff?.setOnClickListener { toggleCamera() }
+
+        lifecycleScope.launch { wsManager.callEvents.collect { handleCallEvent(it) } }
+
+        when (direction) {
+            "inbound" -> {
+                tvStatus?.text = "Incoming ${if (isVideo) "video" else "audio"} group call from $initiator"
+                btnAccept?.visibility = View.VISIBLE
+                btnMute?.visibility   = View.GONE
+                startRingtone()
+            }
+            "outbound" -> {
+                tvStatus?.text = "Calling…"
+                btnAccept?.visibility = View.GONE
+                activity?.volumeControlStream = AudioManager.STREAM_VOICE_CALL
+                lifecycleScope.launch { initWebRTC() }
+            }
+        }
+    }
+
+    override fun onDestroyView() {
+        super.onDestroyView()
+        stopRingtone()
+        mainHandler.removeCallbacks(durationTick)
+    }
+
+    // ── Ringtone ──────────────────────────────────────────────────────────
+
+    private fun startRingtone() {
+        stopRingtone()
+        activeRingtone = SettingsFragment.playRingtone(requireContext())
+    }
+
+    private fun stopRingtone() {
+        activeRingtone?.stop()
+        activeRingtone = null
+    }
+
+    // ── Call controls ─────────────────────────────────────────────────────
+
+    private fun acceptGroupCall() {
+        if (!isAdded) return
+        stopRingtone()
+        mainActivity.notificationService.dismissIncomingCall()
+        tvStatus?.text = "Connecting…"
+        btnAccept?.visibility = View.GONE
+        activity?.volumeControlStream = AudioManager.STREAM_VOICE_CALL
+        lifecycleScope.launch {
+            initWebRTC()
+            wsManager.sendRoomSignal("call_room_join", JSONObject().apply { put("roomId", roomId) })
+        }
+    }
+
+    private fun leaveGroupCall() {
+        wsManager.sendRoomSignal("call_room_leave", JSONObject().apply { put("roomId", roomId) })
+        cleanupAll()
+        try { parentFragmentManager.popBackStack() } catch (e: Exception) {
+            Log.e(TAG, "popBackStack: ${e.message}")
+        }
+    }
+
+    private fun toggleMute() {
+        localAudioTrack?.let {
+            it.setEnabled(!it.enabled())
+            btnMute?.alpha = if (it.enabled()) 1.0f else 0.4f
+        }
+    }
+
+    private fun toggleSpeaker() {
+        val am = requireContext().getSystemService(android.content.Context.AUDIO_SERVICE) as AudioManager
+        am.isSpeakerphoneOn = !am.isSpeakerphoneOn
+        btnSpeaker?.alpha = if (am.isSpeakerphoneOn) 1.0f else 0.4f
+    }
+
+    private fun toggleCamera() {
+        localVideoTrack?.let {
+            it.setEnabled(!it.enabled())
+            btnCameraOff?.alpha = if (it.enabled()) 1.0f else 0.4f
+        }
+    }
+
+    // ── Signaling event handler ───────────────────────────────────────────
+
+    private fun handleCallEvent(event: WebSocketManager.CallEvent) {
+        if (!isAdded) return
+        mainHandler.post {
+            if (!isAdded) return@post
+            when (event) {
+                is WebSocketManager.CallEvent.RoomCreated -> {
+                    if (event.roomId != roomId) return@post
+                    tvStatus?.text = "Waiting for others to join…"
+                    activateActiveState()
+                }
+                is WebSocketManager.CallEvent.RoomJoined -> {
+                    if (event.roomId != roomId) return@post
+                    tvStatus?.text = "Connected"
+                    activateActiveState()
+                    updateParticipantCount(event.participants.size)
+                    lifecycleScope.launch {
+                        for (peer in event.participants) {
+                            if (peer.deviceId.isNotBlank()) {
+                                initiateOfferToPeer(peer.deviceId, peer.username)
+                            }
+                        }
+                    }
+                }
+                is WebSocketManager.CallEvent.RoomPeerJoined -> {
+                    if (event.roomId != roomId) return@post
+                    // Pre-create slot so we're ready to receive the offer
+                    getOrCreatePeerConn(event.peerId, event.peerUsername)
+                    updateParticipantCount(peers.size)
+                }
+                is WebSocketManager.CallEvent.RoomPeerLeft -> {
+                    if (event.roomId != roomId) return@post
+                    removePeer(event.peerId)
+                    updateParticipantCount(peers.size)
+                }
+                is WebSocketManager.CallEvent.RoomOffer -> {
+                    if (event.roomId != roomId) return@post
+                    lifecycleScope.launch {
+                        handleRemoteOffer(event.fromPeerId, event.peerUsername, event.sdp)
+                    }
+                }
+                is WebSocketManager.CallEvent.RoomAnswer -> {
+                    if (event.roomId != roomId) return@post
+                    handleRemoteAnswer(event.fromPeerId, event.sdp)
+                }
+                is WebSocketManager.CallEvent.RoomIce -> {
+                    if (event.roomId != roomId) return@post
+                    handleRemoteIce(event.fromPeerId, event.candidate)
+                }
+                is WebSocketManager.CallEvent.RoomError -> {
+                    if (event.roomId != roomId) return@post
+                    tvStatus?.text = "Room not found or expired"
+                    mainHandler.postDelayed({
+                        if (isAdded) try { parentFragmentManager.popBackStack() } catch (_: Exception) {}
+                    }, 1500)
+                }
+                else -> {}
+            }
+        }
+    }
+
+    private fun activateActiveState() {
+        if (isActive) return
+        isActive = true
+        btnMute?.visibility    = View.VISIBLE
+        btnSpeaker?.visibility = View.VISIBLE
+        if (isVideo) btnCameraOff?.visibility = View.VISIBLE
+        mainHandler.post(durationTick)
+    }
+
+    // ── WebRTC init ───────────────────────────────────────────────────────
+
+    private suspend fun initWebRTC() = withContext(Dispatchers.IO) {
+        if (factory != null) return@withContext   // already initialized
+        val ctx = requireContext().applicationContext
+
+        withContext(Dispatchers.Main) {
+            val am = ctx.getSystemService(android.content.Context.AUDIO_SERVICE) as AudioManager
+            am.mode = AudioManager.MODE_IN_COMMUNICATION
+            am.isSpeakerphoneOn = false
+        }
+
+        eglBase = EglBase.create()
+        PeerConnectionFactory.initialize(
+            PeerConnectionFactory.InitializationOptions.builder(ctx).createInitializationOptions()
+        )
+        factory = PeerConnectionFactory.builder()
+            .setVideoEncoderFactory(DefaultVideoEncoderFactory(eglBase!!.eglBaseContext, true, true))
+            .setVideoDecoderFactory(DefaultVideoDecoderFactory(eglBase!!.eglBaseContext))
+            .createPeerConnectionFactory()
+
+        val audioConstraints = MediaConstraints().apply {
+            mandatory.add(MediaConstraints.KeyValuePair("googEchoCancellation", "true"))
+            mandatory.add(MediaConstraints.KeyValuePair("googNoiseSuppression", "true"))
+            mandatory.add(MediaConstraints.KeyValuePair("googAutoGainControl", "true"))
+        }
+        localAudioSource = factory!!.createAudioSource(audioConstraints)
+        localAudioTrack  = factory!!.createAudioTrack("gcAudio0", localAudioSource).also {
+            it.setEnabled(true)
+        }
+
+        if (isVideo) {
+            val enumerator = Camera2Enumerator(ctx)
+            val frontCam = enumerator.deviceNames.firstOrNull { enumerator.isFrontFacing(it) }
+                ?: enumerator.deviceNames.firstOrNull()
+            if (frontCam != null) {
+                videoCapturer    = enumerator.createCapturer(frontCam, null)
+                localVideoSource = factory!!.createVideoSource(false)
+                val surfaceHelper = SurfaceTextureHelper.create("GCCapture", eglBase!!.eglBaseContext)
+                videoCapturer!!.initialize(surfaceHelper, ctx, localVideoSource!!.capturerObserver)
+                videoCapturer!!.startCapture(640, 480, 24)
+                localVideoTrack = factory!!.createVideoTrack("gcVideo0", localVideoSource)
+            }
+        }
+    }
+
+    // ── Peer connection management ────────────────────────────────────────
+
+    /**
+     * Initiate an offer to an existing participant.
+     * We are the "caller" side: add tracks BEFORE createOffer.
+     */
+    private suspend fun initiateOfferToPeer(peerId: String, peerUsername: String) =
+        withContext(Dispatchers.Main) {
+            val conn = getOrCreatePeerConn(peerId, peerUsername)
+            val pc   = conn.pc
+
+            addLocalTracksToPc(pc)
+
+            val constraints = MediaConstraints().apply {
+                mandatory.add(MediaConstraints.KeyValuePair("OfferToReceiveAudio", "true"))
+                mandatory.add(MediaConstraints.KeyValuePair("OfferToReceiveVideo", isVideo.toString()))
+            }
+            pc.createOffer(object : SdpObserver {
+                override fun onCreateSuccess(sdp: SessionDescription) {
+                    pc.setLocalDescription(simpleSdpObserver {
+                        wsManager.sendRoomSignal("call_room_offer", JSONObject().apply {
+                            put("roomId",      roomId)
+                            put("toPeerId",    peerId)
+                            put("fromPeerId",  wsManager.getDeviceId())
+                            put("peerUsername", mainActivity.sessionManager.getUsername())
+                            put("data", JSONObject().apply {
+                                put("type", sdp.type.canonicalForm())
+                                put("sdp",  sdp.description)
+                            })
+                        })
+                    }, sdp)
+                }
+                override fun onCreateFailure(e: String?) { Log.e(TAG, "createOffer failed: $e") }
+                override fun onSetSuccess() {}
+                override fun onSetFailure(p0: String?) {}
+            }, constraints)
+        }
+
+    /**
+     * Handle an incoming offer from a peer that joined after us.
+     * We are the "callee" side: setRemoteDescription FIRST, then addTrack.
+     */
+    private suspend fun handleRemoteOffer(
+        fromPeerId: String, peerUsername: String, sdpJson: String
+    ) = withContext(Dispatchers.Main) {
+        val conn = getOrCreatePeerConn(fromPeerId, peerUsername)
+        val pc   = conn.pc
+        try {
+            val obj = JSONObject(sdpJson)
+            val sdp = SessionDescription(
+                SessionDescription.Type.fromCanonicalForm(obj.optString("type", "offer")),
+                obj.optString("sdp", "")
+            )
+            pc.setRemoteDescription(simpleSdpObserver {
+                conn.remoteDescSet = true
+                drainCandidates(conn)
+
+                // Add local tracks AFTER setRemoteDescription (callee pattern)
+                addLocalTracksToPc(pc)
+
+                // Force all transceivers to sendrecv
+                pc.transceivers.forEach { tr ->
+                    if (tr.direction == RtpTransceiver.RtpTransceiverDirection.RECV_ONLY ||
+                        tr.direction == RtpTransceiver.RtpTransceiverDirection.INACTIVE) {
+                        tr.direction = RtpTransceiver.RtpTransceiverDirection.SEND_RECV
+                    }
+                }
+
+                pc.createAnswer(object : SdpObserver {
+                    override fun onCreateSuccess(answerSdp: SessionDescription) {
+                        pc.setLocalDescription(simpleSdpObserver {
+                            wsManager.sendRoomSignal("call_room_answer", JSONObject().apply {
+                                put("roomId",     roomId)
+                                put("toPeerId",   fromPeerId)
+                                put("fromPeerId", wsManager.getDeviceId())
+                                put("data", JSONObject().apply {
+                                    put("type", answerSdp.type.canonicalForm())
+                                    put("sdp",  answerSdp.description)
+                                })
+                            })
+                        }, answerSdp)
+                    }
+                    override fun onCreateFailure(e: String?) { Log.e(TAG, "createAnswer failed: $e") }
+                    override fun onSetSuccess() {}
+                    override fun onSetFailure(p0: String?) {}
+                }, MediaConstraints())
+            }, sdp)
+        } catch (e: Exception) {
+            Log.e(TAG, "handleRemoteOffer: ${e.message}")
+        }
+    }
+
+    private fun handleRemoteAnswer(fromPeerId: String, sdpJson: String) {
+        val conn = peers[fromPeerId] ?: return
+        try {
+            val obj = JSONObject(sdpJson)
+            val sdp = SessionDescription(
+                SessionDescription.Type.fromCanonicalForm(obj.optString("type", "answer")),
+                obj.optString("sdp", "")
+            )
+            conn.pc.setRemoteDescription(simpleSdpObserver {
+                conn.remoteDescSet = true
+                drainCandidates(conn)
+            }, sdp)
+        } catch (e: Exception) {
+            Log.e(TAG, "handleRemoteAnswer: ${e.message}")
+        }
+    }
+
+    private fun handleRemoteIce(fromPeerId: String, candidateJson: String) {
+        val conn = peers[fromPeerId] ?: return
+        try {
+            val c = JSONObject(candidateJson)
+            val candidate = IceCandidate(
+                c.optString("sdpMid", ""),
+                c.optInt("sdpMLineIndex", 0),
+                c.optString("candidate", "")
+            )
+            if (conn.remoteDescSet) {
+                conn.pc.addIceCandidate(candidate)
+            } else {
+                conn.pendingCandidates.add(c)
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "handleRemoteIce: ${e.message}")
+        }
+    }
+
+    private fun drainCandidates(conn: PeerConn) {
+        val queued = conn.pendingCandidates.toList()
+        conn.pendingCandidates.clear()
+        queued.forEach { c ->
+            try {
+                conn.pc.addIceCandidate(IceCandidate(
+                    c.optString("sdpMid", ""),
+                    c.optInt("sdpMLineIndex", 0),
+                    c.optString("candidate", "")
+                ))
+            } catch (_: Exception) {}
+        }
+    }
+
+    /**
+     * Add our local audio (and optionally video) tracks to a PeerConnection.
+     * Guards against double-adding the same track.
+     */
+    private fun addLocalTracksToPc(pc: PeerConnection) {
+        val existingIds = pc.senders.mapNotNull { it.track()?.id() }.toSet()
+        localAudioTrack?.let {
+            if (it.id() !in existingIds) pc.addTrack(it)
+        }
+        if (isVideo) {
+            localVideoTrack?.let {
+                if (it.id() !in existingIds) pc.addTrack(it)
+            }
+        }
+    }
+
+    private fun getOrCreatePeerConn(peerId: String, peerUsername: String): PeerConn {
+        peers[peerId]?.let { return it }
+
+        val iceServers = listOf(
+            PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer(),
+            PeerConnection.IceServer.builder("stun:stun1.l.google.com:19302").createIceServer(),
+            PeerConnection.IceServer.builder("turn:openrelay.metered.ca:80")
+                .setUsername("openrelayproject").setPassword("openrelayproject").createIceServer()
+        )
+        val rtcConfig = PeerConnection.RTCConfiguration(iceServers).apply {
+            sdpSemantics             = PeerConnection.SdpSemantics.UNIFIED_PLAN
+            iceTransportsType        = PeerConnection.IceTransportsType.ALL
+            bundlePolicy             = PeerConnection.BundlePolicy.MAXBUNDLE
+            rtcpMuxPolicy            = PeerConnection.RtcpMuxPolicy.REQUIRE
+            continualGatheringPolicy = PeerConnection.ContinualGatheringPolicy.GATHER_CONTINUALLY
+        }
+
+        // Create a per-peer video view for video calls
+        var videoView: SurfaceViewRenderer? = null
+        if (isVideo && eglBase != null) {
+            videoView = SurfaceViewRenderer(requireContext()).apply {
+                init(eglBase!!.eglBaseContext, null)
+                setEnableHardwareScaler(true)
+            }
+            val vv = videoView
+            mainHandler.post {
+                val params = LinearLayout.LayoutParams(0, 280).apply {
+                    weight = 1f; setMargins(4, 4, 4, 4)
+                }
+                videoGrid?.addView(vv, params)
+                // Peer label overlay
+                val tv = android.widget.TextView(requireContext()).apply {
+                    text = peerUsername
+                    setTextColor(android.graphics.Color.WHITE)
+                    textSize = 11f
+                    setPadding(8, 4, 8, 4)
+                    setBackgroundColor(android.graphics.Color.parseColor("#88000000"))
+                }
+                videoGrid?.addView(tv)
+            }
+        }
+
+        val pc = factory!!.createPeerConnection(rtcConfig, object : PeerConnection.Observer {
+            override fun onIceCandidate(candidate: IceCandidate) {
+                wsManager.sendRoomSignal("call_room_ice", JSONObject().apply {
+                    put("roomId",    roomId)
+                    put("toPeerId",  peerId)
+                    put("fromPeerId", wsManager.getDeviceId())
+                    put("data", JSONObject().apply {
+                        put("sdpMid",         candidate.sdpMid)
+                        put("sdpMLineIndex",   candidate.sdpMLineIndex)
+                        put("candidate",       candidate.sdp)
+                    })
+                })
+            }
+            override fun onTrack(transceiver: RtpTransceiver) {
+                val track = transceiver.receiver.track() ?: return
+                if (track is VideoTrack) {
+                    mainHandler.post {
+                        videoView?.let { track.addSink(it) }
+                    }
+                }
+            }
+            override fun onConnectionChange(newState: PeerConnection.PeerConnectionState?) {
+                Log.d(TAG, "Peer $peerUsername connection: $newState")
+                if (newState == PeerConnection.PeerConnectionState.FAILED) {
+                    mainHandler.post { removePeer(peerId) }
+                }
+            }
+            // Required overrides — all no-op
+            override fun onSignalingChange(p0: PeerConnection.SignalingState?) {}
+            override fun onIceConnectionChange(p0: PeerConnection.IceConnectionState?) {}
+            override fun onIceConnectionReceivingChange(p0: Boolean) {}
+            override fun onIceGatheringChange(p0: PeerConnection.IceGatheringState?) {}
+            override fun onIceCandidatesRemoved(p0: Array<out IceCandidate>?) {}
+            override fun onAddStream(p0: MediaStream?) {}
+            override fun onRemoveStream(p0: MediaStream?) {}
+            override fun onDataChannel(p0: DataChannel?) {}
+            override fun onRenegotiationNeeded() {}
+            override fun onAddTrack(p0: RtpReceiver?, p1: Array<out MediaStream>?) {}
+        })
+
+        if (pc == null) {
+            Log.e(TAG, "createPeerConnection returned null for $peerId")
+            // Callers check null safely via the map; skip adding
+            val dummy = PeerConn(
+                pc = object : PeerConnection(null) { override fun dispose() {} },
+                videoView = videoView
+            )
+            peers[peerId] = dummy
+            return dummy
+        }
+
+        val conn = PeerConn(pc = pc, videoView = videoView)
+        peers[peerId] = conn
+        return conn
+    }
+
+    private fun removePeer(peerId: String) {
+        val conn = peers.remove(peerId) ?: return
+        try {
+            // Remove video sink before releasing the view
+            conn.videoView?.let { view ->
+                conn.pc.receivers
+                    .mapNotNull { it.track() as? VideoTrack }
+                    .forEach { it.removeSink(view) }
+            }
+            mainHandler.post { videoGrid?.removeView(conn.videoView) }
+            conn.videoView?.release()
+            conn.pc.close()
+        } catch (_: Exception) {}
+    }
+
+    // ── Cleanup ───────────────────────────────────────────────────────────
+
+    private fun cleanupAll() {
+        stopRingtone()
+        mainHandler.removeCallbacks(durationTick)
+        isActive = false
+        for ((_, conn) in peers) {
+            try {
+                conn.videoView?.release()
+                conn.pc.close()
+            } catch (_: Exception) {}
+        }
+        peers.clear()
+        try { videoCapturer?.stopCapture() } catch (_: Exception) {}
+        try { videoCapturer?.dispose() } catch (_: Exception) {}
+        localVideoTrack?.dispose()
+        localAudioTrack?.dispose()
+        localVideoSource?.dispose()
+        localAudioSource?.dispose()
+        factory?.dispose()
+        eglBase?.release()
+        factory          = null
+        eglBase          = null
+        localAudioSource = null
+        localAudioTrack  = null
+        localVideoSource = null
+        localVideoTrack  = null
+        videoCapturer    = null
+    }
+
+    // ── UI helpers ────────────────────────────────────────────────────────
+
+    private fun updateParticipantCount(remoteCount: Int) {
+        val total = remoteCount + 1
+        tvParticipants?.text = "$total participant${if (total != 1) "s" else ""}"
+    }
+
+    private fun fmt(secs: Int) =
+        "%02d:%02d".format(secs / 60, secs % 60)
+
+    // ── SdpObserver helper ────────────────────────────────────────────────
+
+    private fun simpleSdpObserver(onSuccess: () -> Unit) = object : SdpObserver {
+        override fun onCreateSuccess(p0: SessionDescription?) {}
+        override fun onSetSuccess()                           { onSuccess() }
+        override fun onCreateFailure(p0: String?)             {}
+        override fun onSetFailure(p0: String?)                { Log.e(TAG, "SDP setFailure: $p0") }
+    }
+}

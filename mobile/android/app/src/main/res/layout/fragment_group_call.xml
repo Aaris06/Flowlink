@@ -1,0 +1,127 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="#EE0F0C29">
+
+    <!-- Header: title, participant count, status -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="20dp"
+        android:background="#CC1A1A2E">
+
+        <TextView
+            android:id="@+id/gcf_title"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Group Call"
+            android:textSize="20sp"
+            android:textStyle="bold"
+            android:textColor="#E2E8F0"
+            android:gravity="center"/>
+
+        <TextView
+            android:id="@+id/gcf_participants"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text=""
+            android:textSize="13sp"
+            android:textColor="#94A3B8"
+            android:gravity="center"
+            android:layout_marginTop="4dp"/>
+
+        <TextView
+            android:id="@+id/gcf_status"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Connecting…"
+            android:textSize="15sp"
+            android:textColor="#A78BFA"
+            android:gravity="center"
+            android:layout_marginTop="8dp"/>
+    </LinearLayout>
+
+    <!--
+        Video grid: participant video tiles are added here dynamically.
+        For audio-only calls this area shows participant avatars (added in code).
+        Weight=1 so it fills remaining space between header and controls.
+    -->
+    <LinearLayout
+        android:id="@+id/gcf_video_grid"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:orientation="horizontal"
+        android:flexWrap="wrap"
+        android:padding="4dp"
+        android:background="#1A0D0D1A"/>
+
+    <!-- Controls row -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center"
+        android:padding="20dp"
+        android:background="#CC1A1A2E">
+
+        <!-- Accept (visible when ringing_in) -->
+        <ImageButton
+            android:id="@+id/gcf_btn_accept"
+            android:layout_width="68dp"
+            android:layout_height="68dp"
+            android:layout_marginHorizontal="10dp"
+            android:background="@drawable/call_btn_bg_green"
+            android:src="@android:drawable/ic_menu_call"
+            android:contentDescription="Accept call"
+            android:visibility="gone"/>
+
+        <!-- Mute -->
+        <ImageButton
+            android:id="@+id/gcf_btn_mute"
+            android:layout_width="56dp"
+            android:layout_height="56dp"
+            android:layout_marginHorizontal="8dp"
+            android:background="@drawable/call_btn_bg_neutral"
+            android:src="@drawable/ic_mic"
+            android:contentDescription="Toggle mute"
+            android:visibility="gone"/>
+
+        <!-- Speaker -->
+        <ImageButton
+            android:id="@+id/gcf_btn_speaker"
+            android:layout_width="56dp"
+            android:layout_height="56dp"
+            android:layout_marginHorizontal="8dp"
+            android:background="@drawable/call_btn_bg_neutral"
+            android:src="@android:drawable/ic_lock_silent_mode"
+            android:contentDescription="Toggle speaker"
+            android:visibility="gone"/>
+
+        <!-- Camera toggle -->
+        <ImageButton
+            android:id="@+id/gcf_btn_camera"
+            android:layout_width="56dp"
+            android:layout_height="56dp"
+            android:layout_marginHorizontal="8dp"
+            android:background="@drawable/call_btn_bg_neutral"
+            android:src="@android:drawable/ic_menu_camera"
+            android:contentDescription="Toggle camera"
+            android:visibility="gone"/>
+
+        <!-- Leave / end -->
+        <ImageButton
+            android:id="@+id/gcf_btn_end"
+            android:layout_width="68dp"
+            android:layout_height="68dp"
+            android:layout_marginHorizontal="10dp"
+            android:background="@drawable/call_btn_bg_red"
+            android:src="@android:drawable/ic_menu_close_clear_cancel"
+            android:contentDescription="Leave call"/>
+
+    </LinearLayout>
+
+</LinearLayout>

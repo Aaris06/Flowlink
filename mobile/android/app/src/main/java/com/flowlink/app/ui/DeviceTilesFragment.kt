@@ -278,7 +278,7 @@ class DeviceTilesFragment : Fragment() {
                 mainActivity.webSocketManager.chatEvents.collect { event ->
                     when (event) {
                         is WebSocketManager.ChatEvent.Message -> {
-                            if (event.text.startsWith("[[CALL_ACTIVITY]]")) {
+                            if (event.text.startsWith("[[CALL_ACTIVITY]]") || event.text.startsWith("[[CALL_ROOM_ACTIVITY]]")) {
                                 chatMessages.add(
                                     ChatMessage(
                                         messageId = event.messageId,
