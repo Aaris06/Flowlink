@@ -789,8 +789,10 @@ class GroupCallFragment : Fragment() {
     private fun rebuildVideoGrid() {
         val grid = videoGrid ?: return
 
-        // Collect ALL FrameLayout tiles — they may be direct children (first build)
-        // or nested inside horizontal row LinearLayouts (subsequent rebuilds)
+        // Step 1: Collect ALL FrameLayout tiles from the current grid hierarchy.
+        // Tiles may be:
+        //   - Direct children of grid (first call, before any rebuild)
+        //   - Inside horizontal LinearLayout rows (after first rebuild)
         val tiles = mutableListOf<android.widget.FrameLayout>()
         for (i in 0 until grid.childCount) {
             val child = grid.getChildAt(i)
@@ -804,25 +806,36 @@ class GroupCallFragment : Fragment() {
                 }
             }
         }
+
+        // Step 2: Detach every tile from its current parent BEFORE clearing the grid.
+        // This is CRITICAL: grid.removeAllViews() removes the row LinearLayouts but
+        // leaves the tiles as children of those (now-detached) rows. Calling addView()
+        // on a tile that still has a parent throws IllegalStateException.
+        tiles.forEach { tile ->
+            (tile.parent as? android.view.ViewGroup)?.removeView(tile)
+        }
+
+        // Step 3: Clear the grid (now safe — tiles are already detached)
         grid.removeAllViews()
+
         val n = tiles.size
         if (n == 0) return
 
-        // Determine grid dimensions
+        // Step 4: Determine layout dimensions
         val (cols, rows) = when {
             n == 1 -> 1 to 1
-            n == 2 -> 1 to 2   // portrait: stack vertically
-            n == 3 -> 2 to 2   // top row spans full width, bottom row has 2
+            n == 2 -> 1 to 2   // portrait: 2 rows
+            n == 3 -> 2 to 2   // top row 1 tile (full-width), bottom row 2
             n == 4 -> 2 to 2
             n <= 6 -> 3 to 2
             else   -> 3 to 3
         }
 
+        // Step 5: Rebuild rows and add tiles
         var idx = 0
         for (row in 0 until rows) {
             if (idx >= n) break
             val remaining = n - idx
-            // For 3-tile layout: first row is 1 full-width tile
             val colsThisRow = if (n == 3 && row == 0) 1 else minOf(cols, remaining)
 
             val rowLayout = android.widget.LinearLayout(requireContext()).apply {
@@ -834,6 +847,7 @@ class GroupCallFragment : Fragment() {
             for (col in 0 until colsThisRow) {
                 if (idx >= n) break
                 val tile = tiles[idx++]
+                // Tile is already detached from any parent — safe to add
                 tile.layoutParams = android.widget.LinearLayout.LayoutParams(0,
                     android.widget.LinearLayout.LayoutParams.MATCH_PARENT
                 ).apply { weight = 1f; setMargins(2, 2, 2, 2) }
