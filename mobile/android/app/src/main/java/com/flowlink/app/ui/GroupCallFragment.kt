@@ -42,6 +42,9 @@ class GroupCallFragment : Fragment() {
         const val ARG_DIRECTION = "direction"
         const val ARG_INITIATOR = "initiator"
 
+        /** Guards against calling PeerConnectionFactory.initialize() more than once per process */
+        @Volatile private var pcfInitialized = false
+
         fun newIncomingRoom(roomId: String, fromUsername: String, isVideo: Boolean) =
             GroupCallFragment().apply {
                 arguments = Bundle().apply {
@@ -292,8 +295,12 @@ class GroupCallFragment : Fragment() {
                 }
                 is WebSocketManager.CallEvent.RoomPeerJoined -> {
                     if (event.roomId != roomId) return@post
-                    // Pre-create slot so we're ready to receive the offer
-                    getOrCreatePeerConn(event.peerId, event.peerUsername)
+                    // Only pre-create the slot if WebRTC is already initialized
+                    // (factory != null). If not, the offer will arrive after
+                    // initWebRTC completes and getOrCreatePeerConn will be called then.
+                    if (factory != null) {
+                        getOrCreatePeerConn(event.peerId, event.peerUsername)
+                    }
                     updateParticipantCount(peers.size)
                 }
                 is WebSocketManager.CallEvent.RoomPeerLeft -> {
@@ -349,9 +356,12 @@ class GroupCallFragment : Fragment() {
         }
 
         eglBase = EglBase.create()
-        PeerConnectionFactory.initialize(
-            PeerConnectionFactory.InitializationOptions.builder(ctx).createInitializationOptions()
-        )
+        if (!pcfInitialized) {
+            PeerConnectionFactory.initialize(
+                PeerConnectionFactory.InitializationOptions.builder(ctx).createInitializationOptions()
+            )
+            pcfInitialized = true
+        }
         factory = PeerConnectionFactory.builder()
             .setVideoEncoderFactory(DefaultVideoEncoderFactory(eglBase!!.eglBaseContext, true, true))
             .setVideoDecoderFactory(DefaultVideoDecoderFactory(eglBase!!.eglBaseContext))
@@ -553,6 +563,18 @@ class GroupCallFragment : Fragment() {
     private fun getOrCreatePeerConn(peerId: String, peerUsername: String): PeerConn {
         peers[peerId]?.let { return it }
 
+        // factory must be initialized before reaching here
+        val f = factory ?: run {
+            Log.e(TAG, "getOrCreatePeerConn: factory not ready yet for $peerId")
+            // Create a stub so callers don't crash; will be replaced when initWebRTC completes
+            val stub = PeerConn(
+                pc = object : PeerConnection(null) { override fun dispose() {} },
+                videoView = null
+            )
+            peers[peerId] = stub
+            return stub
+        }
+
         val iceServers = listOf(
             PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer(),
             PeerConnection.IceServer.builder("stun:stun1.l.google.com:19302").createIceServer(),
@@ -567,76 +589,57 @@ class GroupCallFragment : Fragment() {
             continualGatheringPolicy = PeerConnection.ContinualGatheringPolicy.GATHER_CONTINUALLY
         }
 
-        // Create a per-peer video view for video calls
+        // Create the SurfaceViewRenderer synchronously on the current (main) thread.
+        // Do NOT defer this to mainHandler.post — by the time onTrack fires, the view
+        // must already be fully initialized so we can addSink() without crashing.
         var videoView: SurfaceViewRenderer? = null
-        if (isVideo && eglBase != null) {
-            videoView = SurfaceViewRenderer(requireContext()).apply {
-                init(eglBase!!.eglBaseContext, null)
-                setEnableHardwareScaler(true)
-            }
-            val vv = videoView
-            val username = peerUsername
-            mainHandler.post {
-                // Wrap in a FrameLayout so the label can overlay the video
-                val tileFrame = android.widget.FrameLayout(requireContext()).apply {
-                    setBackgroundColor(android.graphics.Color.parseColor("#1A1A2E"))
+        if (isVideo) {
+            val egl = eglBase
+            if (egl != null) {
+                try {
+                    videoView = SurfaceViewRenderer(requireContext()).apply {
+                        init(egl.eglBaseContext, null)
+                        setEnableHardwareScaler(true)
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "SurfaceViewRenderer init failed for $peerId: ${e.message}")
+                    videoView = null
                 }
-                // Video fills the tile
-                val videoParams = android.widget.FrameLayout.LayoutParams(
-                    android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
-                    android.widget.FrameLayout.LayoutParams.MATCH_PARENT
-                )
-                tileFrame.addView(vv, videoParams)
-                // Label at bottom
-                val label = android.widget.TextView(requireContext()).apply {
-                    text = username
-                    setTextColor(android.graphics.Color.WHITE)
-                    textSize = 11f
-                    setPadding(8, 4, 8, 6)
-                    setBackgroundColor(android.graphics.Color.parseColor("#AA000000"))
-                    gravity = android.view.Gravity.CENTER_HORIZONTAL
-                }
-                val labelParams = android.widget.FrameLayout.LayoutParams(
-                    android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
-                    android.widget.FrameLayout.LayoutParams.WRAP_CONTENT,
-                    android.view.Gravity.BOTTOM
-                )
-                tileFrame.addView(label, labelParams)
-
-                // Add tile to the grid; rebuildVideoGrid will lay it out properly
-                videoGrid?.addView(tileFrame)
-                rebuildVideoGrid()
             }
         }
 
-        val pc = factory!!.createPeerConnection(rtcConfig, object : PeerConnection.Observer {
+        // Capture for use in lambdas
+        val capturedVideoView = videoView
+        val capturedUsername  = peerUsername
+
+        // Create the PeerConnection
+        val pc = f.createPeerConnection(rtcConfig, object : PeerConnection.Observer {
             override fun onIceCandidate(candidate: IceCandidate) {
                 wsManager.sendRoomSignal("call_room_ice", JSONObject().apply {
-                    put("roomId",    roomId)
-                    put("toPeerId",  peerId)
+                    put("roomId",     roomId)
+                    put("toPeerId",   peerId)
                     put("fromPeerId", wsManager.getDeviceId())
                     put("data", JSONObject().apply {
-                        put("sdpMid",         candidate.sdpMid)
-                        put("sdpMLineIndex",   candidate.sdpMLineIndex)
-                        put("candidate",       candidate.sdp)
+                        put("sdpMid",        candidate.sdpMid)
+                        put("sdpMLineIndex", candidate.sdpMLineIndex)
+                        put("candidate",     candidate.sdp)
                     })
                 })
             }
             override fun onTrack(transceiver: RtpTransceiver) {
                 val track = transceiver.receiver.track() ?: return
-                if (track is VideoTrack) {
+                if (track is VideoTrack && capturedVideoView != null) {
                     mainHandler.post {
-                        videoView?.let { track.addSink(it) }
+                        track.addSink(capturedVideoView)
                     }
                 }
             }
             override fun onConnectionChange(newState: PeerConnection.PeerConnectionState?) {
-                Log.d(TAG, "Peer $peerUsername connection: $newState")
+                Log.d(TAG, "Peer $capturedUsername connection: $newState")
                 if (newState == PeerConnection.PeerConnectionState.FAILED) {
                     mainHandler.post { removePeer(peerId) }
                 }
             }
-            // Required overrides — all no-op
             override fun onSignalingChange(p0: PeerConnection.SignalingState?) {}
             override fun onIceConnectionChange(p0: PeerConnection.IceConnectionState?) {}
             override fun onIceConnectionReceivingChange(p0: Boolean) {}
@@ -651,17 +654,45 @@ class GroupCallFragment : Fragment() {
 
         if (pc == null) {
             Log.e(TAG, "createPeerConnection returned null for $peerId")
-            // Callers check null safely via the map; skip adding
+            capturedVideoView?.release()
             val dummy = PeerConn(
                 pc = object : PeerConnection(null) { override fun dispose() {} },
-                videoView = videoView
+                videoView = null
             )
             peers[peerId] = dummy
             return dummy
         }
 
-        val conn = PeerConn(pc = pc, videoView = videoView)
+        val conn = PeerConn(pc = pc, videoView = capturedVideoView)
         peers[peerId] = conn
+
+        // Add the tile to the grid UI — deferred to main thread is fine here
+        // because by the time onTrack fires the view is already init()'d above
+        if (capturedVideoView != null) {
+            val tileFrame = android.widget.FrameLayout(requireContext()).apply {
+                setBackgroundColor(android.graphics.Color.parseColor("#1A1A2E"))
+            }
+            tileFrame.addView(capturedVideoView, android.widget.FrameLayout.LayoutParams(
+                android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
+                android.widget.FrameLayout.LayoutParams.MATCH_PARENT
+            ))
+            val label = android.widget.TextView(requireContext()).apply {
+                text = capturedUsername
+                setTextColor(android.graphics.Color.WHITE)
+                textSize = 11f
+                setPadding(8, 4, 8, 6)
+                setBackgroundColor(android.graphics.Color.parseColor("#AA000000"))
+                gravity = android.view.Gravity.CENTER_HORIZONTAL
+            }
+            tileFrame.addView(label, android.widget.FrameLayout.LayoutParams(
+                android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
+                android.widget.FrameLayout.LayoutParams.WRAP_CONTENT,
+                android.view.Gravity.BOTTOM
+            ))
+            videoGrid?.addView(tileFrame)
+            rebuildVideoGrid()
+        }
+
         return conn
     }
 

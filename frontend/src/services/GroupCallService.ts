@@ -307,10 +307,17 @@ export class GroupCallService {
         if (toPeerId !== this.deviceId) break;
         const peerState = this.peers.get(fromPeerId);
         if (!peerState) break;
+        // Only apply if we're expecting an answer (have-local-offer state)
         if (peerState.pc.signalingState === 'have-local-offer') {
-          await peerState.pc.setRemoteDescription(data);
-          peerState.remoteDescSet = true;
-          this.drainCandidates(peerState);
+          try {
+            await peerState.pc.setRemoteDescription(data);
+            peerState.remoteDescSet = true;
+            this.drainCandidates(peerState);
+          } catch (err) {
+            console.error(`[GroupCallService] setRemoteDescription answer failed for ${fromPeerId}:`, err);
+          }
+        } else {
+          console.warn(`[GroupCallService] answer ignored for ${fromPeerId}: signalingState=${peerState.pc.signalingState}`);
         }
         break;
       }
@@ -343,64 +350,99 @@ export class GroupCallService {
     const peerState = this.getOrCreatePeer(peerId, peerUsername);
     const pc = peerState.pc;
 
-    // Add our local tracks to the connection
-    this.localStream.getTracks().forEach(track => {
-      if (track.kind === 'video' && this.currentRoom?.callType !== 'video') return;
-      pc.addTrack(track, this.localStream!);
-    });
-
-    const offer = await pc.createOffer();
-    await pc.setLocalDescription(offer);
-
-    this.send({
-      type: 'call_room_offer',
-      payload: {
-        roomId: this.currentRoom.roomId,
-        toPeerId: peerId,
-        fromPeerId: this.deviceId,
-        peerUsername: this.username,
-        data: offer,
-      },
-    });
-  }
-
-  /**
-   * Handle incoming offer from a peer that joined after us.
-   */
-  private async handleRemoteOffer(peerState: PeerState, offerDesc: RTCSessionDescriptionInit): Promise<void> {
-    if (!this.localStream || !this.currentRoom) return;
-    const pc = peerState.pc;
-
-    await pc.setRemoteDescription(offerDesc);
-    peerState.remoteDescSet = true;
-    this.drainCandidates(peerState);
-
-    // Add our local tracks AFTER setRemoteDescription
+    // Add our local tracks BEFORE createOffer (caller pattern)
     this.localStream.getTracks().forEach(track => {
       if (track.kind === 'video' && this.currentRoom?.callType !== 'video') return;
       const alreadyAdded = pc.getSenders().some(s => s.track?.id === track.id);
       if (!alreadyAdded) pc.addTrack(track, this.localStream!);
     });
 
-    // Force sendrecv on all transceivers
-    pc.getTransceivers().forEach(tr => {
-      if (tr.direction === 'recvonly' || tr.direction === 'inactive') {
-        tr.direction = 'sendrecv';
+    // Guard: only create offer when signalingState allows it
+    if (pc.signalingState !== 'stable') {
+      console.warn(`[GroupCallService] initiatePeerConnection: skipped for ${peerId}, state=${pc.signalingState}`);
+      return;
+    }
+
+    try {
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+
+      this.send({
+        type: 'call_room_offer',
+        payload: {
+          roomId: this.currentRoom.roomId,
+          toPeerId: peerId,
+          fromPeerId: this.deviceId,
+          peerUsername: this.username,
+          data: offer,
+        },
+      });
+    } catch (err) {
+      console.error(`[GroupCallService] initiatePeerConnection offer failed for ${peerId}:`, err);
+      this.removePeer(peerId);
+    }
+  }
+
+  /**
+   * Handle incoming offer from a peer that joined after us.
+   * Callee pattern: setRemoteDescription FIRST, then addTrack, then createAnswer.
+   */
+  private async handleRemoteOffer(peerState: PeerState, offerDesc: RTCSessionDescriptionInit): Promise<void> {
+    if (!this.localStream || !this.currentRoom) return;
+    const pc = peerState.pc;
+
+    // Glare: if we already sent an offer and receive one back, we need to rollback.
+    // Use the "perfect negotiation" pattern: polite peer always rolls back.
+    // For simplicity we determine politeness by deviceId comparison — lower ID = polite.
+    const isPolite = this.deviceId < peerState.peerId;
+    const offerCollision = (pc.signalingState === 'have-local-offer');
+
+    if (offerCollision && !isPolite) {
+      // Impolite side: ignore the incoming offer during glare
+      console.warn(`[GroupCallService] glare: ignoring offer from ${peerState.peerId} (impolite side)`);
+      return;
+    }
+
+    try {
+      if (offerCollision && isPolite) {
+        // Polite side: rollback our local offer and accept theirs
+        await pc.setLocalDescription({ type: 'rollback' });
+        peerState.remoteDescSet = false;
       }
-    });
 
-    const answer = await pc.createAnswer();
-    await pc.setLocalDescription(answer);
+      await pc.setRemoteDescription(offerDesc);
+      peerState.remoteDescSet = true;
+      this.drainCandidates(peerState);
 
-    this.send({
-      type: 'call_room_answer',
-      payload: {
-        roomId: this.currentRoom!.roomId,
-        toPeerId: peerState.peerId,
-        fromPeerId: this.deviceId,
-        data: answer,
-      },
-    });
+      // Add our local tracks AFTER setRemoteDescription (callee pattern)
+      this.localStream.getTracks().forEach(track => {
+        if (track.kind === 'video' && this.currentRoom?.callType !== 'video') return;
+        const alreadyAdded = pc.getSenders().some(s => s.track?.id === track.id);
+        if (!alreadyAdded) pc.addTrack(track, this.localStream!);
+      });
+
+      // Force sendrecv on all transceivers
+      pc.getTransceivers().forEach(tr => {
+        if (tr.direction === 'recvonly' || tr.direction === 'inactive') {
+          tr.direction = 'sendrecv';
+        }
+      });
+
+      const answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
+
+      this.send({
+        type: 'call_room_answer',
+        payload: {
+          roomId: this.currentRoom!.roomId,
+          toPeerId: peerState.peerId,
+          fromPeerId: this.deviceId,
+          data: answer,
+        },
+      });
+    } catch (err) {
+      console.error(`[GroupCallService] handleRemoteOffer failed for ${peerState.peerId}:`, err);
+    }
   }
 
   private getOrCreatePeer(peerId: string, peerUsername: string): PeerState {
@@ -456,26 +498,11 @@ export class GroupCallService {
       }
     };
 
-    pc.onnegotiationneeded = async () => {
-      // Only re-negotiate if we already set a local description (i.e., we're the offerer)
-      if (pc.signalingState !== 'stable') return;
-      try {
-        const offer = await pc.createOffer();
-        await pc.setLocalDescription(offer);
-        if (this.currentRoom) {
-          this.send({
-            type: 'call_room_offer',
-            payload: {
-              roomId: this.currentRoom.roomId,
-              toPeerId: peerId,
-              fromPeerId: this.deviceId,
-              peerUsername: this.username,
-              data: offer,
-            },
-          });
-        }
-      } catch { /* ignore */ }
-    };
+    // Do NOT use onnegotiationneeded — we manage the offer/answer flow
+    // explicitly in initiatePeerConnection and handleRemoteOffer.
+    // Letting onnegotiationneeded fire causes duplicate offers when addTrack()
+    // is called, which puts the PC into an invalid signaling state.
+    pc.onnegotiationneeded = null;
 
     return peerState;
   }
