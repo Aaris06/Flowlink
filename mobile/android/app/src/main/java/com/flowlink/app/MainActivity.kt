@@ -1647,8 +1647,9 @@ class MainActivity : AppCompatActivity(), UsernameDialogFragment.UsernameDialogL
                 fromUsername = fromUsername,
                 isVideo = callType == "video"
             )
+            showCallFragmentContainer()
             supportFragmentManager.beginTransaction()
-                .replace(R.id.fragment_container, fragment, "group_call")
+                .replace(R.id.call_fragment_container, fragment, "group_call")
                 .addToBackStack("group_call")
                 .commitAllowingStateLoss()
 
@@ -1662,6 +1663,18 @@ class MainActivity : AppCompatActivity(), UsernameDialogFragment.UsernameDialogL
                 )
             }
         }
+    }
+
+    /** Make the call overlay container visible (called before adding a group call fragment). */
+    fun showCallFragmentContainer() {
+        binding.root.findViewById<android.widget.FrameLayout>(R.id.call_fragment_container)
+            ?.visibility = android.view.View.VISIBLE
+    }
+
+    /** Hide the call overlay container (called when call ends / fragment is removed). */
+    fun hideCallFragmentContainer() {
+        binding.root.findViewById<android.widget.FrameLayout>(R.id.call_fragment_container)
+            ?.visibility = android.view.View.INVISIBLE
     }
 
     // ── Floating call bubble ───────────────────────────────────────────────
@@ -1815,18 +1828,22 @@ class MainActivity : AppCompatActivity(), UsernameDialogFragment.UsernameDialogL
         }
     }
 
-    // ── Floating GROUP call bubble ─────────────────────────────────────────
+    // ── Floating GROUP call bubble (WindowManager — floats above all fragments) ──
 
     private var groupCallBubbleView: android.view.View? = null
     private var groupCallOnLeave: (() -> Unit)? = null
+    /** SurfaceViewRenderers in the bubble that need releasing on hide */
+    private val groupCallBubbleSvrs = mutableListOf<org.webrtc.SurfaceViewRenderer>()
+    /** VideoTracks whose sinks were added to the bubble — must be removed on hide */
+    private val groupCallBubbleTracks = mutableListOf<Pair<org.webrtc.VideoTrack, org.webrtc.SurfaceViewRenderer>>()
 
     /**
-     * Attach the floating minimised group-call bubble to the window decor.
-     * Audio keeps playing because GroupCallFragment stays alive in the back stack;
-     * this bubble is purely a visual indicator with a leave button.
+     * Show the floating group-call bubble via WindowManager.
+     * This makes the bubble persist above ALL fragment transactions so the user
+     * can freely navigate while the call is minimized.
      *
-     * @param usernames  Ordered list of remote participant display names (for avatars).
-     * @param onLeave    Called when the user taps the leave (✕) button.
+     * For video calls: embeds up to 2 SurfaceViewRenderer tiles showing remote streams.
+     * For audio calls: shows up to 3 overlapping avatar letter circles.
      */
     @android.annotation.SuppressLint("ClickableViewAccessibility")
     fun showGroupCallBubble(
@@ -1835,101 +1852,148 @@ class MainActivity : AppCompatActivity(), UsernameDialogFragment.UsernameDialogL
         initiator:   String,
         durationSec: Int,
         usernames:   List<String>,
+        videoTracks: List<org.webrtc.VideoTrack> = emptyList(),
+        eglBase:     org.webrtc.EglBase?          = null,
         onLeave:     () -> Unit
     ) {
         hideGroupCallBubble()          // remove stale bubble first
         groupCallOnLeave = onLeave
 
-        val decor  = window.decorView as? android.widget.FrameLayout ?: return
-        val bubble = layoutInflater.inflate(R.layout.overlay_group_call_minimized, decor, false)
+        val bubble = layoutInflater.inflate(R.layout.overlay_group_call_minimized, null, false)
 
-        // ── Avatar strip ──────────────────────────────────────────────────
-        val av1      = bubble.findViewById<android.widget.TextView>(R.id.gcm_avatar_1)
-        val av2      = bubble.findViewById<android.widget.TextView>(R.id.gcm_avatar_2)
-        val av3      = bubble.findViewById<android.widget.TextView>(R.id.gcm_avatar_3)
-        val avOver   = bubble.findViewById<android.widget.TextView>(R.id.gcm_avatar_overflow)
-        val infoTv   = bubble.findViewById<android.widget.TextView>(R.id.gcm_bubble_info)
-        val timerTv  = bubble.findViewById<android.widget.TextView>(R.id.gcm_bubble_timer)
-        val endBtn   = bubble.findViewById<android.view.View>(R.id.gcm_bubble_btn_end)
-        val strip    = bubble.findViewById<android.widget.FrameLayout>(R.id.gcm_avatar_strip)
+        val mediaStrip  = bubble.findViewById<android.widget.FrameLayout>(R.id.gcm_media_strip)
+        val av1         = bubble.findViewById<android.widget.TextView>(R.id.gcm_avatar_1)
+        val av2         = bubble.findViewById<android.widget.TextView>(R.id.gcm_avatar_2)
+        val av3         = bubble.findViewById<android.widget.TextView>(R.id.gcm_avatar_3)
+        val overBadge   = bubble.findViewById<android.widget.TextView>(R.id.gcm_overflow_badge)
+        val infoTv      = bubble.findViewById<android.widget.TextView>(R.id.gcm_bubble_info)
+        val timerTv     = bubble.findViewById<android.widget.TextView>(R.id.gcm_bubble_timer)
+        val endBtn      = bubble.findViewById<android.view.View>(R.id.gcm_bubble_btn_end)
 
-        // Populate avatars
         val displayNames = if (usernames.isEmpty()) listOf(initiator) else usernames
         fun firstLetter(s: String) = s.firstOrNull()?.uppercaseChar()?.toString() ?: "?"
+        val dpToPx: (Float) -> Int = { dp -> (dp * resources.displayMetrics.density + 0.5f).toInt() }
 
-        when {
-            displayNames.size >= 1 -> {
-                av1.text       = firstLetter(displayNames[0])
-                av1.visibility = android.view.View.VISIBLE
+        val MAX_VIDEO_TILES = 2
+
+        if (isVideo && eglBase != null && videoTracks.isNotEmpty()) {
+            // ── Video mode: SurfaceViewRenderer tiles ─────────────────────
+            val visibleTracks = videoTracks.take(MAX_VIDEO_TILES)
+            val tileW = dpToPx(48f)
+            val tileH = dpToPx(52f)
+            val overlap = dpToPx(24f)
+
+            visibleTracks.forEachIndexed { idx, track ->
+                try {
+                    val svr = org.webrtc.SurfaceViewRenderer(this).apply {
+                        init(eglBase.eglBaseContext, null)
+                        setEnableHardwareScaler(true)
+                    }
+                    val lp = android.widget.FrameLayout.LayoutParams(tileW, tileH).apply {
+                        gravity = android.view.Gravity.CENTER_VERTICAL or android.view.Gravity.START
+                        marginStart = idx * overlap
+                    }
+                    svr.layoutParams = lp
+                    // Rounded corners via outline
+                    svr.outlineProvider = android.view.ViewOutlineProvider.BACKGROUND
+                    svr.clipToOutline   = true
+                    svr.background      = resources.getDrawable(R.drawable.call_pip_bg, theme)
+                    svr.elevation       = (MAX_VIDEO_TILES - idx).toFloat() * 2f
+                    mediaStrip.addView(svr)
+
+                    track.addSink(svr)
+                    groupCallBubbleSvrs.add(svr)
+                    groupCallBubbleTracks.add(Pair(track, svr))
+                } catch (e: Exception) {
+                    android.util.Log.e("FlowLink", "bubble SVR init failed: ${e.message}")
+                }
+            }
+            // Overflow badge for remaining peers
+            val overflow = videoTracks.size - MAX_VIDEO_TILES
+            if (overflow > 0) {
+                overBadge.text       = "+$overflow"
+                overBadge.visibility = android.view.View.VISIBLE
+            }
+        } else {
+            // ── Audio mode (or no video tracks yet): avatar circles ────────
+            val avatarViews = listOf(av1, av2, av3)
+            displayNames.take(3).forEachIndexed { idx, name ->
+                avatarViews[idx].text       = firstLetter(name)
+                avatarViews[idx].visibility = android.view.View.VISIBLE
+            }
+            val overflow = displayNames.size - 3
+            if (overflow > 0) {
+                overBadge.text       = "+$overflow"
+                overBadge.visibility = android.view.View.VISIBLE
             }
         }
-        when {
-            displayNames.size >= 2 -> {
-                av2.text       = firstLetter(displayNames[1])
-                av2.visibility = android.view.View.VISIBLE
-            }
-        }
-        when {
-            displayNames.size >= 3 -> {
-                av3.text       = firstLetter(displayNames[2])
-                av3.visibility = android.view.View.VISIBLE
-            }
-        }
-        if (displayNames.size > 3) {
-            avOver.text       = "+${displayNames.size - 3}"
-            avOver.visibility = android.view.View.VISIBLE
-        }
 
-        // Adjust strip width based on how many avatars are visible
-        val visibleCount = minOf(displayNames.size, 4)  // 3 avatars + overflow
-        val dpToPx: (Int) -> Int = { dp -> (dp * resources.displayMetrics.density).toInt() }
-        val stripWidth = when (visibleCount) {
-            1 -> dpToPx(36)
-            2 -> dpToPx(56)
-            3 -> dpToPx(76)
-            else -> dpToPx(96)
-        }
-        strip.layoutParams = (strip.layoutParams as android.widget.LinearLayout.LayoutParams).also {
-            it.width = stripWidth
-        }
-
-        // Participant count info
+        // Info
         val total = displayNames.size + 1
         infoTv.text  = "$total in call"
         timerTv.text = if (durationSec > 0)
             "%02d:%02d".format(durationSec / 60, durationSec % 60)
         else "Active"
 
-        // ── Buttons ───────────────────────────────────────────────────────
+        // Buttons
         endBtn.setOnClickListener {
             groupCallOnLeave?.invoke()
             hideGroupCallBubble()
         }
-
         bubble.setOnClickListener { restoreGroupCallFromBubble() }
 
-        // ── Drag ──────────────────────────────────────────────────────────
+        // Drag — works with WindowManager by updating LayoutParams
+        val wm = getSystemService(android.content.Context.WINDOW_SERVICE) as android.view.WindowManager
+        val wmParams = android.view.WindowManager.LayoutParams(
+            android.view.WindowManager.LayoutParams.WRAP_CONTENT,
+            android.view.WindowManager.LayoutParams.WRAP_CONTENT,
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O)
+                android.view.WindowManager.LayoutParams.TYPE_APPLICATION
+            else
+                @Suppress("DEPRECATION") android.view.WindowManager.LayoutParams.TYPE_PHONE,
+            android.view.WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
+            android.graphics.PixelFormat.TRANSLUCENT
+        ).apply {
+            gravity = android.view.Gravity.TOP or android.view.Gravity.START
+            x = 24
+            y = (resources.displayMetrics.heightPixels - dpToPx(180f)).coerceAtLeast(80)
+        }
+
         var startRawX = 0f; var startRawY = 0f
-        var origX = 0f;     var origY = 0f
+        var origX = 0;      var origY = 0
         var isDragging = false
-        bubble.setOnTouchListener { v, event ->
+
+        bubble.setOnTouchListener { _, event ->
             when (event.action) {
                 android.view.MotionEvent.ACTION_DOWN -> {
                     startRawX = event.rawX; startRawY = event.rawY
-                    origX = v.x; origY = v.y; isDragging = false; false
+                    origX = wmParams.x; origY = wmParams.y
+                    isDragging = false; false
                 }
                 android.view.MotionEvent.ACTION_MOVE -> {
                     val dx = event.rawX - startRawX
                     val dy = event.rawY - startRawY
-                    if (!isDragging && (kotlin.math.abs(dx) > 8 || kotlin.math.abs(dy) > 8)) isDragging = true
-                    if (isDragging) { v.x = origX + dx; v.y = origY + dy; true } else false
+                    if (!isDragging && (kotlin.math.abs(dx) > 8 || kotlin.math.abs(dy) > 8))
+                        isDragging = true
+                    if (isDragging) {
+                        wmParams.x = (origX + dx).toInt()
+                        wmParams.y = (origY + dy).toInt()
+                        runCatching { wm.updateViewLayout(bubble, wmParams) }
+                        true
+                    } else false
                 }
                 android.view.MotionEvent.ACTION_UP -> {
                     if (!isDragging) {
-                        val parentW = decor.width
-                        val midX    = parentW / 2f
-                        v.animate().x(if (v.x + v.width / 2f < midX) 16f else parentW - v.width - 16f)
-                            .setDuration(200).start()
+                        // Snap to nearest edge
+                        val screenW = resources.displayMetrics.widthPixels
+                        val targetX = if (wmParams.x + bubble.width / 2 < screenW / 2) 16
+                                      else screenW - bubble.width - 16
+                        bubble.animate().translationX((targetX - wmParams.x).toFloat())
+                            .setDuration(200).withEndAction {
+                                wmParams.x = targetX
+                                bubble.translationX = 0f
+                                runCatching { wm.updateViewLayout(bubble, wmParams) }
+                            }.start()
                     }
                     false
                 }
@@ -1937,31 +2001,41 @@ class MainActivity : AppCompatActivity(), UsernameDialogFragment.UsernameDialogL
             }
         }
 
-        // ── Layout & position ─────────────────────────────────────────────
-        val params = android.widget.FrameLayout.LayoutParams(
-            android.widget.FrameLayout.LayoutParams.WRAP_CONTENT,
-            android.widget.FrameLayout.LayoutParams.WRAP_CONTENT)
-        decor.addView(bubble, params)
-
-        bubble.post {
-            bubble.x = 24f
-            bubble.y = (decor.height - bubble.height - 180).toFloat().coerceAtLeast(80f)
-            bubble.scaleX = 0f; bubble.scaleY = 0f; bubble.alpha = 0f
-            bubble.animate().scaleX(1f).scaleY(1f).alpha(1f).setDuration(280)
-                .setInterpolator(android.view.animation.OvershootInterpolator(1.4f)).start()
+        // Add to WindowManager
+        try {
+            wm.addView(bubble, wmParams)
+        } catch (e: Exception) {
+            android.util.Log.e("FlowLink", "showGroupCallBubble addView: ${e.message}")
+            return
         }
+
+        // Pop-in animation
+        bubble.scaleX = 0f; bubble.scaleY = 0f; bubble.alpha = 0f
+        bubble.animate().scaleX(1f).scaleY(1f).alpha(1f).setDuration(280)
+            .setInterpolator(android.view.animation.OvershootInterpolator(1.4f)).start()
 
         groupCallBubbleView = bubble
     }
 
-    /** Remove the group call bubble from the decor. */
+    /** Remove the group call bubble from the WindowManager, releasing video sinks. */
     fun hideGroupCallBubble() {
         val bubble = groupCallBubbleView ?: return
         groupCallBubbleView = null
-        groupCallOnLeave = null
-        val decor = window.decorView as? android.widget.FrameLayout
-        bubble.animate().scaleX(0f).scaleY(0f).alpha(0f).setDuration(200)
-            .withEndAction { decor?.removeView(bubble) }.start()
+        groupCallOnLeave    = null
+
+        // Release video sinks before removing view
+        groupCallBubbleTracks.forEach { (track, svr) ->
+            runCatching { track.removeSink(svr) }
+        }
+        groupCallBubbleTracks.clear()
+        groupCallBubbleSvrs.forEach { svr ->
+            runCatching { svr.release() }
+        }
+        groupCallBubbleSvrs.clear()
+
+        val wm = getSystemService(android.content.Context.WINDOW_SERVICE) as android.view.WindowManager
+        bubble.animate().scaleX(0f).scaleY(0f).alpha(0f).setDuration(180)
+            .withEndAction { runCatching { wm.removeView(bubble) } }.start()
     }
 
     /** Update the timer on the group call bubble while minimised. */
@@ -1971,18 +2045,20 @@ class MainActivity : AppCompatActivity(), UsernameDialogFragment.UsernameDialogL
             ?.text = "%02d:%02d".format(durationSec / 60, durationSec % 60)
     }
 
-    /** Re-add GroupCallFragment on top of whatever is currently shown. */
+    /** Re-show the hidden GroupCallFragment and dismiss the bubble. */
     private fun restoreGroupCallFromBubble() {
         hideGroupCallBubble()
         runOnUiThread {
             try {
-                val fm = supportFragmentManager
+                val fm       = supportFragmentManager
                 val existing = fm.findFragmentByTag("group_call")
-                if (existing != null && existing.isAdded) {
-                    // Fragment is hidden — show it again
+                if (existing != null && existing.isAdded && existing.isHidden) {
+                    showCallFragmentContainer()
                     fm.beginTransaction()
                         .show(existing)
                         .commitAllowingStateLoss()
+                } else if (existing != null && existing.isAdded && !existing.isHidden) {
+                    showCallFragmentContainer()
                 } else {
                     android.widget.Toast.makeText(this, "Call ended", android.widget.Toast.LENGTH_SHORT).show()
                 }

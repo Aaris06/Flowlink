@@ -189,8 +189,9 @@ class ChatFragment : Fragment() {
                     roomId = roomId, isVideo = false,
                     initiatorUsername = sessionManager?.getUsername() ?: "You"
                 )
+                (requireActivity() as? com.flowlink.app.MainActivity)?.showCallFragmentContainer()
                 requireActivity().supportFragmentManager.beginTransaction()
-                    .replace(com.flowlink.app.R.id.fragment_container, fragment, "group_call")
+                    .replace(com.flowlink.app.R.id.call_fragment_container, fragment, "group_call")
                     .addToBackStack("group_call")
                     .commitAllowingStateLoss()
                 Toast.makeText(requireContext(), "Starting group audio call with ${devices.size} devices", Toast.LENGTH_SHORT).show()
@@ -228,8 +229,9 @@ class ChatFragment : Fragment() {
                     roomId = roomId, isVideo = true,
                     initiatorUsername = sessionManager?.getUsername() ?: "You"
                 )
+                (requireActivity() as? com.flowlink.app.MainActivity)?.showCallFragmentContainer()
                 requireActivity().supportFragmentManager.beginTransaction()
-                    .replace(com.flowlink.app.R.id.fragment_container, fragment, "group_call")
+                    .replace(com.flowlink.app.R.id.call_fragment_container, fragment, "group_call")
                     .addToBackStack("group_call")
                     .commitAllowingStateLoss()
                 Toast.makeText(requireContext(), "Starting group video call with ${devices.size} devices", Toast.LENGTH_SHORT).show()

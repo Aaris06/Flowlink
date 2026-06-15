@@ -16,6 +16,26 @@
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent" />
 
+    <!--
+      Dedicated full-screen container for call fragments (1-on-1 and group).
+      Lives above fragment_container so calls overlay normal app content.
+      When the call is minimized the fragment is hidden but kept alive here —
+      completely independent of the bottom-nav fragment_container, so
+      navigation works normally while a call is minimised.
+      Default INVISIBLE (not GONE — GONE would remove it from layout) so it
+      doesn't intercept touch events when no call is in progress.
+    -->
+    <FrameLayout
+        android:id="@+id/call_fragment_container"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:elevation="8dp"
+        android:visibility="invisible"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent" />
+
     <com.google.android.material.bottomnavigation.BottomNavigationView
         android:id="@+id/bottom_nav"
         android:layout_width="match_parent"
@@ -42,4 +62,3 @@
         app:layout_constraintEnd_toEndOf="parent" />
 
 </androidx.constraintlayout.widget.ConstraintLayout>
-

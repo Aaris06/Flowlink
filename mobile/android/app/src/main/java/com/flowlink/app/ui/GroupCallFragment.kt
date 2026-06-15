@@ -118,6 +118,8 @@ class GroupCallFragment : Fragment() {
     private data class PeerConn(
         val pc: PeerConnection,
         val videoView: SurfaceViewRenderer?,
+        val peerUsername: String = "",
+        var remoteVideoTrack: VideoTrack? = null,
         var remoteDescSet: Boolean = false,
         val pendingCandidates: MutableList<JSONObject> = mutableListOf()
     )
@@ -212,8 +214,20 @@ class GroupCallFragment : Fragment() {
         super.onDestroyView()
         stopRingtone()
         mainHandler.removeCallbacks(durationTick)
-        // Clean up bubble if it's still showing (e.g. back button pressed while minimized)
+        // Bubble is on WindowManager — only hide it if call is ending (not when restoring)
+        // isActive=false means call has ended or was never active; hide the bubble.
+        // If the call is still active (minimized), the bubble should stay up.
+        if (!isActive) {
+            mainActivity.hideGroupCallBubble()
+        }
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        // Fragment is being destroyed entirely (back press while minimized, or call ended).
+        // Always hide the bubble and clean up WebRTC.
         mainActivity.hideGroupCallBubble()
+        cleanupAll()
     }
 
     override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
@@ -253,23 +267,31 @@ class GroupCallFragment : Fragment() {
         mainActivity.hideGroupCallBubble()
         wsManager.sendRoomSignal("call_room_leave", JSONObject().apply { put("roomId", roomId) })
         cleanupAll()
+        mainActivity.hideCallFragmentContainer()
         try { parentFragmentManager.popBackStack() } catch (e: Exception) {
-            Log.e(TAG, "popBackStack: ${e.message}")
+            Log.e(TAG, "leaveGroupCall popBackStack: ${e.message}")
         }
     }
 
-    /** Minimize: hide fragment (keeps WebRTC/audio alive), show floating bubble. */
+    /** Minimize: hide fragment (WebRTC stays alive), show WindowManager floating bubble. */
     private fun minimizeGroupCall() {
-        val usernameList = collectPeerUsernames()
+        val peerList    = peers.values.toList()
+        val usernames   = peerList.map { it.peerUsername }
+        val videoTracks = if (isVideo) peerList.mapNotNull { it.remoteVideoTrack } else emptyList()
+        val egl         = eglBase
+
         mainActivity.showGroupCallBubble(
             roomId      = roomId,
             isVideo     = isVideo,
             initiator   = initiator,
             durationSec = durationSec,
-            usernames   = usernameList,
+            usernames   = usernames,
+            videoTracks = videoTracks,
+            eglBase     = egl,
             onLeave     = { leaveGroupCall() }
         )
-        // HIDE (not pop) — fragment stays alive so audio and WebRTC connections continue
+        // Hide both the fragment AND the container so no touches are blocked
+        mainActivity.hideCallFragmentContainer()
         try {
             parentFragmentManager.beginTransaction()
                 .hide(this)
@@ -277,38 +299,6 @@ class GroupCallFragment : Fragment() {
         } catch (e: Exception) {
             Log.e(TAG, "hide on minimize: ${e.message}")
         }
-    }
-
-    /**
-     * Walk the videoGrid to collect the username label from each tile.
-     * The tile FrameLayout always has a TextView as its last child (the name label).
-     */
-    private fun collectPeerUsernames(): List<String> {
-        val grid = videoGrid ?: return emptyList()
-        val names = mutableListOf<String>()
-        for (i in 0 until grid.childCount) {
-            val child = grid.getChildAt(i)
-            // tiles may be direct FrameLayouts or inside horizontal LinearLayout rows
-            when (child) {
-                is android.widget.FrameLayout -> extractLabelFromTile(child)?.let { names.add(it) }
-                is android.widget.LinearLayout -> {
-                    for (j in 0 until child.childCount) {
-                        val tile = child.getChildAt(j)
-                        if (tile is android.widget.FrameLayout)
-                            extractLabelFromTile(tile)?.let { names.add(it) }
-                    }
-                }
-            }
-        }
-        return names
-    }
-
-    private fun extractLabelFromTile(tile: android.widget.FrameLayout): String? {
-        for (k in 0 until tile.childCount) {
-            val v = tile.getChildAt(k)
-            if (v is android.widget.TextView) return v.text?.toString()?.takeIf { it.isNotBlank() }
-        }
-        return null
     }
 
     private fun toggleMute() {
@@ -692,9 +682,15 @@ class GroupCallFragment : Fragment() {
             }
             override fun onTrack(transceiver: RtpTransceiver) {
                 val track = transceiver.receiver.track() ?: return
-                if (track is VideoTrack && capturedVideoView != null) {
+                if (track is VideoTrack) {
                     mainHandler.post {
-                        track.addSink(capturedVideoView)
+                        // Save remote video track reference for bubble preview
+                        peers[peerId]?.let { conn ->
+                            peers[peerId] = conn.copy(remoteVideoTrack = track)
+                        }
+                        if (capturedVideoView != null) {
+                            track.addSink(capturedVideoView)
+                        }
                     }
                 }
             }
@@ -727,7 +723,7 @@ class GroupCallFragment : Fragment() {
             return dummy
         }
 
-        val conn = PeerConn(pc = pc, videoView = capturedVideoView)
+        val conn = PeerConn(pc = pc, videoView = capturedVideoView, peerUsername = capturedUsername)
         peers[peerId] = conn
 
         // Add the tile to the grid UI — deferred to main thread is fine here
