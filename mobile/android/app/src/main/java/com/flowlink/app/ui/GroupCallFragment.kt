@@ -101,6 +101,7 @@ class GroupCallFragment : Fragment() {
     private var btnMute        : ImageButton?          = null
     private var btnSpeaker     : ImageButton?          = null
     private var btnCameraOff   : ImageButton?          = null
+    private var btnMinimize    : ImageButton?          = null
     private var videoGrid      : LinearLayout?         = null
     private var localPip       : SurfaceViewRenderer? = null  // local camera PiP overlay
 
@@ -128,6 +129,8 @@ class GroupCallFragment : Fragment() {
             if (isActive && isAdded) {
                 durationSec++
                 tvStatus?.text = fmt(durationSec)
+                // Also update the bubble timer if we are currently minimized
+                mainActivity.updateGroupCallBubbleTimer(durationSec)
                 mainHandler.postDelayed(this, 1000)
             }
         }
@@ -158,6 +161,7 @@ class GroupCallFragment : Fragment() {
         btnMute        = view.findViewById(R.id.gcf_btn_mute)
         btnSpeaker     = view.findViewById(R.id.gcf_btn_speaker)
         btnCameraOff   = view.findViewById(R.id.gcf_btn_camera)
+        btnMinimize    = view.findViewById(R.id.gcf_btn_minimize)
         videoGrid      = view.findViewById(R.id.gcf_video_grid)
         localPip       = view.findViewById(R.id.gcf_local_pip)
 
@@ -169,6 +173,7 @@ class GroupCallFragment : Fragment() {
         btnMute?.setOnClickListener      { toggleMute() }
         btnSpeaker?.setOnClickListener   { toggleSpeaker() }
         btnCameraOff?.setOnClickListener { toggleCamera() }
+        btnMinimize?.setOnClickListener  { minimizeGroupCall() }
 
         lifecycleScope.launch { wsManager.callEvents.collect { handleCallEvent(it) } }
 
@@ -182,6 +187,7 @@ class GroupCallFragment : Fragment() {
             "outbound" -> {
                 tvStatus?.text = "Calling…"
                 btnAccept?.visibility = View.GONE
+                btnMinimize?.visibility = View.VISIBLE
                 activity?.volumeControlStream = AudioManager.STREAM_VOICE_CALL
                 lifecycleScope.launch { initWebRTC() }
             }
@@ -189,6 +195,7 @@ class GroupCallFragment : Fragment() {
                 // Late join from chat "Join Now" button — skip ringing, auto-join
                 tvStatus?.text = "Joining…"
                 btnAccept?.visibility = View.GONE
+                btnMinimize?.visibility = View.VISIBLE
                 activity?.volumeControlStream = AudioManager.STREAM_VOICE_CALL
                 lifecycleScope.launch {
                     initWebRTC()
@@ -205,6 +212,8 @@ class GroupCallFragment : Fragment() {
         super.onDestroyView()
         stopRingtone()
         mainHandler.removeCallbacks(durationTick)
+        // Clean up bubble if it's still showing (e.g. back button pressed while minimized)
+        mainActivity.hideGroupCallBubble()
     }
 
     override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
@@ -241,11 +250,65 @@ class GroupCallFragment : Fragment() {
     }
 
     private fun leaveGroupCall() {
+        mainActivity.hideGroupCallBubble()
         wsManager.sendRoomSignal("call_room_leave", JSONObject().apply { put("roomId", roomId) })
         cleanupAll()
         try { parentFragmentManager.popBackStack() } catch (e: Exception) {
             Log.e(TAG, "popBackStack: ${e.message}")
         }
+    }
+
+    /** Minimize: hide fragment (keeps WebRTC/audio alive), show floating bubble. */
+    private fun minimizeGroupCall() {
+        val usernameList = collectPeerUsernames()
+        mainActivity.showGroupCallBubble(
+            roomId      = roomId,
+            isVideo     = isVideo,
+            initiator   = initiator,
+            durationSec = durationSec,
+            usernames   = usernameList,
+            onLeave     = { leaveGroupCall() }
+        )
+        // HIDE (not pop) — fragment stays alive so audio and WebRTC connections continue
+        try {
+            parentFragmentManager.beginTransaction()
+                .hide(this)
+                .commitAllowingStateLoss()
+        } catch (e: Exception) {
+            Log.e(TAG, "hide on minimize: ${e.message}")
+        }
+    }
+
+    /**
+     * Walk the videoGrid to collect the username label from each tile.
+     * The tile FrameLayout always has a TextView as its last child (the name label).
+     */
+    private fun collectPeerUsernames(): List<String> {
+        val grid = videoGrid ?: return emptyList()
+        val names = mutableListOf<String>()
+        for (i in 0 until grid.childCount) {
+            val child = grid.getChildAt(i)
+            // tiles may be direct FrameLayouts or inside horizontal LinearLayout rows
+            when (child) {
+                is android.widget.FrameLayout -> extractLabelFromTile(child)?.let { names.add(it) }
+                is android.widget.LinearLayout -> {
+                    for (j in 0 until child.childCount) {
+                        val tile = child.getChildAt(j)
+                        if (tile is android.widget.FrameLayout)
+                            extractLabelFromTile(tile)?.let { names.add(it) }
+                    }
+                }
+            }
+        }
+        return names
+    }
+
+    private fun extractLabelFromTile(tile: android.widget.FrameLayout): String? {
+        for (k in 0 until tile.childCount) {
+            val v = tile.getChildAt(k)
+            if (v is android.widget.TextView) return v.text?.toString()?.takeIf { it.isNotBlank() }
+        }
+        return null
     }
 
     private fun toggleMute() {
@@ -340,6 +403,7 @@ class GroupCallFragment : Fragment() {
         btnMute?.visibility    = View.VISIBLE
         btnSpeaker?.visibility = View.VISIBLE
         if (isVideo) btnCameraOff?.visibility = View.VISIBLE
+        btnMinimize?.visibility = View.VISIBLE
         mainHandler.post(durationTick)
     }
 

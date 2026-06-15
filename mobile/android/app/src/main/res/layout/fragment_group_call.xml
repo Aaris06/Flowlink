@@ -10,43 +10,62 @@
         android:layout_height="match_parent"
         android:orientation="vertical">
 
-        <!-- Header: title, participant count, status -->
+        <!-- Header: title, participant count, status, minimize button -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:orientation="vertical"
-            android:padding="16dp"
+            android:orientation="horizontal"
+            android:padding="12dp"
+            android:gravity="center_vertical"
             android:background="#CC1A1A2E">
 
-            <TextView
-                android:id="@+id/gcf_title"
-                android:layout_width="match_parent"
+            <!-- Title + status column (takes remaining width) -->
+            <LinearLayout
+                android:layout_width="0dp"
                 android:layout_height="wrap_content"
-                android:text="Group Call"
-                android:textSize="18sp"
-                android:textStyle="bold"
-                android:textColor="#E2E8F0"
-                android:gravity="center"/>
+                android:layout_weight="1"
+                android:orientation="vertical">
 
-            <TextView
-                android:id="@+id/gcf_participants"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text=""
-                android:textSize="12sp"
-                android:textColor="#94A3B8"
-                android:gravity="center"
-                android:layout_marginTop="2dp"/>
+                <TextView
+                    android:id="@+id/gcf_title"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Group Call"
+                    android:textSize="16sp"
+                    android:textStyle="bold"
+                    android:textColor="#E2E8F0"/>
 
-            <TextView
-                android:id="@+id/gcf_status"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="Connecting…"
-                android:textSize="13sp"
-                android:textColor="#A78BFA"
-                android:gravity="center"
-                android:layout_marginTop="4dp"/>
+                <TextView
+                    android:id="@+id/gcf_participants"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text=""
+                    android:textSize="11sp"
+                    android:textColor="#94A3B8"
+                    android:layout_marginTop="2dp"/>
+
+                <TextView
+                    android:id="@+id/gcf_status"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Connecting…"
+                    android:textSize="12sp"
+                    android:textColor="#A78BFA"
+                    android:layout_marginTop="2dp"/>
+            </LinearLayout>
+
+            <!-- Minimize button -->
+            <ImageButton
+                android:id="@+id/gcf_btn_minimize"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:background="@drawable/call_btn_bg_neutral"
+                android:src="@android:drawable/arrow_down_float"
+                android:tint="#FFFFFF"
+                android:padding="8dp"
+                android:contentDescription="Minimize call"
+                android:visibility="gone"/>
+
         </LinearLayout>
 
         <!--

@@ -19,15 +19,16 @@ function attachStream(el: HTMLMediaElement | null, stream: MediaStream | null) {
   });
 }
 
-// ── Compute the best grid layout for N remote participants ─────────────────
+// ── How many tiles to show in the grid before showing "+N more" ────────────
+const MAX_VISIBLE_TILES = 4;
+
+// ── Compute the best grid layout for N visible tiles ──────────────────────
 function getGridClass(count: number): string {
   if (count <= 1) return 'gcm-grid-1';
   if (count === 2) return 'gcm-grid-2';
   if (count === 3) return 'gcm-grid-3';
   if (count === 4) return 'gcm-grid-4';
-  if (count <= 6) return 'gcm-grid-6';
-  if (count <= 9) return 'gcm-grid-9';
-  return 'gcm-grid-9'; // cap at 3×3
+  return 'gcm-grid-4'; // capped at 4 visible + overflow tile
 }
 
 export default function GroupCallModal({
@@ -41,6 +42,8 @@ export default function GroupCallModal({
   const [cameraOff, setCameraOff] = useState(false);
   const [duration, setDuration] = useState(0);
   const [minimized, setMinimized] = useState(false);
+  // When the overflow tile is clicked, expand to show all participants
+  const [showAllParticipants, setShowAllParticipants] = useState(false);
 
   // Local PiP video
   const localVideoRef = useRef<HTMLVideoElement | null>(null);
@@ -105,6 +108,7 @@ export default function GroupCallModal({
       duration={duration}
       state={state}
       fmt={fmt}
+      participants={participants}
       onRestore={() => setMinimized(false)}
       onLeave={() => groupCallService.leaveCall()}
     />
@@ -144,19 +148,53 @@ export default function GroupCallModal({
         {isVideo && state === 'active' && (
           <div className="gcm-video-area">
             {/* Remote participants grid */}
-            <div className={`gcm-grid ${getGridClass(Math.max(participants.length, 1))}`}>
-              {participants.length === 0 ? (
-                // No remote peers yet — show waiting placeholder
-                <div className="gcm-tile gcm-tile-waiting">
-                  <div className="gcm-tile-avatar">👥</div>
-                  <div className="gcm-tile-label">Waiting for others…</div>
+            {(() => {
+              const visibleParticipants = showAllParticipants
+                ? participants
+                : participants.slice(0, MAX_VISIBLE_TILES);
+              const overflowCount = participants.length - MAX_VISIBLE_TILES;
+              const showOverflow = !showAllParticipants && overflowCount > 0;
+              // Total tiles in grid: visible + possibly 1 overflow tile
+              const tileCount = visibleParticipants.length + (showOverflow ? 1 : 0);
+
+              return (
+                <div className={`gcm-grid ${getGridClass(Math.max(tileCount, 1))}`}>
+                  {participants.length === 0 ? (
+                    <div className="gcm-tile gcm-tile-waiting">
+                      <div className="gcm-tile-avatar">👥</div>
+                      <div className="gcm-tile-label">Waiting for others…</div>
+                    </div>
+                  ) : (
+                    <>
+                      {visibleParticipants.map(p => (
+                        <RemoteTile key={p.peerId} participant={p} />
+                      ))}
+                      {showOverflow && (
+                        <div
+                          className="gcm-tile gcm-tile-overflow"
+                          onClick={() => setShowAllParticipants(true)}
+                          title="Click to see all participants"
+                        >
+                          <div className="gcm-tile-overflow-label">
+                            +{overflowCount} more
+                          </div>
+                          <div className="gcm-tile-overflow-sub">Click to expand</div>
+                        </div>
+                      )}
+                      {showAllParticipants && overflowCount > 0 && (
+                        <div
+                          className="gcm-tile gcm-tile-collapse"
+                          onClick={() => setShowAllParticipants(false)}
+                          title="Click to collapse"
+                        >
+                          <div className="gcm-tile-overflow-label">Collapse</div>
+                        </div>
+                      )}
+                    </>
+                  )}
                 </div>
-              ) : (
-                participants.map(p => (
-                  <RemoteTile key={p.peerId} participant={p} />
-                ))
-              )}
-            </div>
+              );
+            })()}
 
             {/* Local video: small floating PiP in bottom-right */}
             <div className="gcm-pip">
@@ -309,27 +347,95 @@ interface MinimizedBubbleProps {
   roomInfo: GroupCallInfo;
   duration: number;
   state: GroupCallState;
+  participants: GroupCallParticipant[];
   fmt: (s: number) => string;
   onRestore: () => void;
   onLeave: () => void;
 }
 
-function MinimizedBubble({ roomInfo, duration, state, fmt, onRestore, onLeave }: MinimizedBubbleProps) {
+// Max video thumbnails shown in the minimized bubble
+const BUBBLE_MAX_VIDEOS = 4;
+
+function MinimizedBubble({ roomInfo, duration, state, participants, fmt, onRestore, onLeave }: MinimizedBubbleProps) {
+  const isVideo = roomInfo.callType === 'video';
+  const visibleParticipants = participants.slice(0, BUBBLE_MAX_VIDEOS);
+  const overflowCount = participants.length - BUBBLE_MAX_VIDEOS;
+
   return (
     <div className="gcm-bubble" onClick={onRestore} title="Click to restore call">
-      <div className="gcm-bubble-circle">
-        <div className="gcm-bubble-avatar">{roomInfo.initiatorUsername[0]?.toUpperCase()}</div>
+      {/* Always render audio players so audio never stops when minimized */}
+      {participants.map(p =>
+        p.stream ? <AudioPlayer key={p.peerId} stream={p.stream} /> : null
+      )}
+
+      <div className="gcm-bubble-content">
+        {/* Video thumbnails (video call only) */}
+        {isVideo && participants.length > 0 ? (
+          <div className="gcm-bubble-videos">
+            {visibleParticipants.map(p => (
+              <BubbleVideoThumb key={p.peerId} participant={p} />
+            ))}
+            {overflowCount > 0 && (
+              <div className="gcm-bubble-overflow">+{overflowCount}</div>
+            )}
+          </div>
+        ) : (
+          /* Audio-only or no participants yet: show single avatar */
+          <div className="gcm-bubble-avatar">{roomInfo.initiatorUsername[0]?.toUpperCase()}</div>
+        )}
+
+        {/* Info: name + timer */}
         <div className="gcm-bubble-info">
-          <span className="gcm-bubble-name">{roomInfo.initiatorUsername}</span>
+          <span className="gcm-bubble-name">
+            {participants.length > 0
+              ? `${participants.length + 1} in call`
+              : roomInfo.initiatorUsername}
+          </span>
           <span className="gcm-bubble-timer">{state === 'active' ? fmt(duration) : 'Calling…'}</span>
         </div>
       </div>
+
       <button
         className="gcm-bubble-end"
         onMouseDown={(e) => e.stopPropagation()}
         onClick={(e) => { e.stopPropagation(); onLeave(); }}
         title="Leave call"
       >✕</button>
+    </div>
+  );
+}
+
+// ── Single video thumbnail inside the minimized bubble ──────────────────────
+
+function BubbleVideoThumb({ participant }: { participant: GroupCallParticipant }) {
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+
+  useEffect(() => {
+    if (videoRef.current && participant.stream) {
+      attachStream(videoRef.current, participant.stream);
+    }
+  }, [participant.stream]);
+
+  const hasVideo = participant.stream && participant.stream.getVideoTracks().length > 0;
+
+  return (
+    <div className="gcm-bubble-thumb" title={participant.peerUsername}>
+      {hasVideo ? (
+        <video
+          ref={(el) => {
+            videoRef.current = el;
+            if (el && participant.stream) attachStream(el, participant.stream);
+          }}
+          className="gcm-bubble-thumb-video"
+          autoPlay
+          playsInline
+          muted
+        />
+      ) : (
+        <div className="gcm-bubble-thumb-avatar">
+          {(participant.peerUsername || '?')[0]?.toUpperCase()}
+        </div>
+      )}
     </div>
   );
 }
