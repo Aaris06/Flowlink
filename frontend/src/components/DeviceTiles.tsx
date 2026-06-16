@@ -1883,6 +1883,11 @@ export default function DeviceTiles({
             <span>🔑</span>
             <span>{session.code}</span>
           </div>
+          {session.code && (
+            <span className="dt-session-code-badge" title="Session code — share this to invite others">
+              {session.code}
+            </span>
+          )}
           <button className="btn-chat" style={{ background: 'rgba(108,99,255,0.15)', color: '#A78BFA', border: '1px solid rgba(108,99,255,0.3)' }} onClick={() => setShowInvitationPanel(true)}>
             + Invite
           </button>

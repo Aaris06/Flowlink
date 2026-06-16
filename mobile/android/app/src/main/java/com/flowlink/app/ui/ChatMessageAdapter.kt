@@ -250,9 +250,8 @@ class ChatMessageAdapter(
                 creatorUsername = creatorUser
             )
             try {
-                mainActivity.showCallFragmentContainer()
                 mainActivity.supportFragmentManager.beginTransaction()
-                    .replace(com.flowlink.app.R.id.call_fragment_container, fragment, "group_call")
+                    .replace(com.flowlink.app.R.id.fragment_container, fragment, "group_call")
                     .addToBackStack("group_call")
                     .commitAllowingStateLoss()
             } catch (e: Exception) {

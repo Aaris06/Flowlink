@@ -1,18 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  Minimized group-call bubble — attached to WindowManager so it floats
-  above ALL fragments and persists through any navigation.
-
-  For video calls: shows up to 2 SurfaceViewRenderer thumbnails (added
-  programmatically) + an optional "+N" badge.
-  For audio calls: shows up to 3 overlapping avatar letter circles.
-
-  Tap body → restore call.  Tap ✕ → leave call.
+  Minimized group-call bubble — floats over the app, draggable, tap to restore.
+  Shows up to 3 participant avatar circles + an optional "+N" overflow badge,
+  the participant count, and a timer on the right.
+  Audio keeps playing because GroupCallFragment stays alive in the back stack.
 -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/gcm_bubble_root"
     android:layout_width="wrap_content"
-    android:layout_height="64dp"
+    android:layout_height="56dp"
     android:minWidth="160dp"
     android:orientation="horizontal"
     android:gravity="center_vertical"
@@ -21,84 +17,92 @@
     android:paddingTop="6dp"
     android:paddingBottom="6dp"
     android:background="@drawable/call_pip_bg"
+    android:elevation="32dp"
     android:clickable="true"
     android:focusable="true">
 
     <!--
-      Media strip: either video thumbnails (video call) or avatar circles (audio).
-      SurfaceViewRenderer tiles are added/removed programmatically.
-      The FrameLayout is sized to fit up to 2 tiles (48dp each + 4dp gap = 100dp).
+      Avatar strip: up to 3 overlapping circles.
+      Each is a TextView with the first letter of the participant's username.
+      gcm_avatar_1 is always visible when ≥1 participant exists.
+      gcm_avatar_2 / gcm_avatar_3 are shown when there are 2+ / 3+ remote participants.
     -->
-    <FrameLayout
-        android:id="@+id/gcm_media_strip"
-        android:layout_width="100dp"
+    <!-- Live video preview for video calls (hidden for audio calls) -->
+    <org.webrtc.SurfaceViewRenderer
+        android:id="@+id/gcm_bubble_video"
+        android:layout_width="52dp"
         android:layout_height="52dp"
-        android:clipChildren="false">
+        android:layout_marginEnd="4dp"
+        android:background="@drawable/call_pip_bg"
+        android:visibility="gone" />
+    <FrameLayout
+        android:id="@+id/gcm_avatar_strip"
+        android:layout_width="wrap_content"
+        android:layout_height="40dp">
 
-        <!-- Avatar 1 — shown for audio calls or when video is unavailable -->
+        <!-- Avatar 1 (leftmost) -->
         <TextView
             android:id="@+id/gcm_avatar_1"
-            android:layout_width="44dp"
-            android:layout_height="44dp"
+            android:layout_width="36dp"
+            android:layout_height="36dp"
             android:layout_gravity="center_vertical|start"
             android:layout_marginStart="0dp"
             android:gravity="center"
             android:textColor="#FFFFFF"
-            android:textSize="16sp"
+            android:textSize="15sp"
             android:textStyle="bold"
             android:background="@drawable/call_avatar_bg"
             android:elevation="3dp"
-            android:visibility="gone"/>
+            android:visibility="visible"/>
 
-        <!-- Avatar 2 -->
+        <!-- Avatar 2 (shifted right, overlaps 1) -->
         <TextView
             android:id="@+id/gcm_avatar_2"
-            android:layout_width="44dp"
-            android:layout_height="44dp"
+            android:layout_width="36dp"
+            android:layout_height="36dp"
             android:layout_gravity="center_vertical|start"
-            android:layout_marginStart="24dp"
+            android:layout_marginStart="20dp"
             android:gravity="center"
             android:textColor="#FFFFFF"
-            android:textSize="16sp"
+            android:textSize="15sp"
             android:textStyle="bold"
             android:background="@drawable/call_avatar_bg"
             android:elevation="2dp"
             android:visibility="gone"/>
 
-        <!-- Avatar 3 -->
+        <!-- Avatar 3 (shifted further right) -->
         <TextView
             android:id="@+id/gcm_avatar_3"
-            android:layout_width="44dp"
-            android:layout_height="44dp"
+            android:layout_width="36dp"
+            android:layout_height="36dp"
             android:layout_gravity="center_vertical|start"
-            android:layout_marginStart="48dp"
+            android:layout_marginStart="40dp"
             android:gravity="center"
             android:textColor="#FFFFFF"
-            android:textSize="16sp"
+            android:textSize="15sp"
             android:textStyle="bold"
             android:background="@drawable/call_avatar_bg"
             android:elevation="1dp"
             android:visibility="gone"/>
 
-        <!--
-          "+N more" overflow badge — positioned over the right edge of the strip.
-          Shown when there are more remote participants than visible tiles.
-        -->
+        <!-- Overflow badge "+N" (when >3 participants) -->
         <TextView
-            android:id="@+id/gcm_overflow_badge"
-            android:layout_width="44dp"
-            android:layout_height="44dp"
-            android:layout_gravity="center_vertical|end"
+            android:id="@+id/gcm_avatar_overflow"
+            android:layout_width="36dp"
+            android:layout_height="36dp"
+            android:layout_gravity="center_vertical|start"
+            android:layout_marginStart="60dp"
             android:gravity="center"
             android:textColor="#FFFFFF"
             android:textSize="11sp"
             android:textStyle="bold"
             android:background="@drawable/call_btn_bg_neutral"
+            android:elevation="0dp"
             android:visibility="gone"/>
 
     </FrameLayout>
 
-    <!-- Info column: participant count + timer -->
+    <!-- Info: participant count + timer -->
     <LinearLayout
         android:layout_width="0dp"
         android:layout_height="wrap_content"
@@ -127,15 +131,16 @@
 
     </LinearLayout>
 
-    <!-- Leave call button -->
+    <!-- End / leave call button -->
     <FrameLayout
         android:id="@+id/gcm_bubble_btn_end"
         android:layout_width="32dp"
         android:layout_height="32dp"
-        android:layout_marginStart="8dp"
+        android:layout_marginStart="6dp"
         android:background="@drawable/call_btn_bg_red"
         android:clickable="true"
-        android:focusable="true">
+        android:focusable="true"
+        android:elevation="36dp">
 
         <TextView
             android:layout_width="match_parent"

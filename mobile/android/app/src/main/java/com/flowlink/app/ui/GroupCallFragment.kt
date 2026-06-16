@@ -13,6 +13,7 @@ import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
 import com.flowlink.app.MainActivity
 import com.flowlink.app.R
+import com.flowlink.app.service.GroupCallSession
 import com.flowlink.app.service.WebSocketManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -24,13 +25,9 @@ import org.webrtc.*
  * GroupCallFragment — Room-based multi-participant call UI.
  *
  * Uses a full-mesh WebRTC topology: one RTCPeerConnection per remote participant.
- *
- * Key design rules:
- * - One user's rejection/leave NEVER tears down the room.
- * - Late joiners: send call_room_join to get the current participant list,
- *   then initiate offers to every peer in that list.
- * - New peer joined: server notifies everyone; new joiner sends offers to us.
- * - WebRTC tracks follow the callee pattern: setRemoteDescription THEN addTrack.
+ * All WebRTC state lives in GroupCallSession so the fragment can be popped off
+ * the back stack (minimized) and re-created (restored) without tearing down
+ * peer connections or media tracks.
  */
 class GroupCallFragment : Fragment() {
 
@@ -41,6 +38,7 @@ class GroupCallFragment : Fragment() {
         const val ARG_IS_VIDEO  = "isVideo"
         const val ARG_DIRECTION = "direction"
         const val ARG_INITIATOR = "initiator"
+        const val ARG_RESTORE   = "restore"
 
         /** Guards against calling PeerConnectionFactory.initialize() more than once per process */
         @Volatile private var pcfInitialized = false
@@ -75,6 +73,10 @@ class GroupCallFragment : Fragment() {
                     putString(ARG_INITIATOR, creatorUsername)
                 }
             }
+
+        fun restore() = GroupCallFragment().apply {
+            arguments = Bundle().apply { putBoolean(ARG_RESTORE, true) }
+        }
     }
 
     // ── Activity / manager refs ───────────────────────────────────────────
@@ -86,12 +88,11 @@ class GroupCallFragment : Fragment() {
     private var isVideo   = false
     private var direction = "inbound"
     private var initiator = ""
+    private var isRestore = false
 
     // ── State ─────────────────────────────────────────────────────────────
     private val mainHandler = Handler(Looper.getMainLooper())
     private var activeRingtone: android.media.Ringtone? = null
-    private var durationSec = 0
-    private var isActive = false
 
     // ── Views ─────────────────────────────────────────────────────────────
     private var tvStatus       : TextView?             = null
@@ -105,34 +106,14 @@ class GroupCallFragment : Fragment() {
     private var videoGrid      : LinearLayout?         = null
     private var localPip       : SurfaceViewRenderer? = null  // local camera PiP overlay
 
-    // ── WebRTC shared resources ───────────────────────────────────────────
-    private var factory          : PeerConnectionFactory? = null
-    private var eglBase          : EglBase?               = null
-    private var localAudioSource : AudioSource?           = null
-    private var localAudioTrack  : AudioTrack?            = null
-    private var localVideoSource : VideoSource?           = null
-    private var localVideoTrack  : VideoTrack?            = null
-    private var videoCapturer    : CameraVideoCapturer?   = null
-
-    // ── Per-peer state ────────────────────────────────────────────────────
-    private data class PeerConn(
-        val pc: PeerConnection,
-        val videoView: SurfaceViewRenderer?,
-        val peerUsername: String = "",
-        var remoteVideoTrack: VideoTrack? = null,
-        var remoteDescSet: Boolean = false,
-        val pendingCandidates: MutableList<JSONObject> = mutableListOf()
-    )
-    private val peers = mutableMapOf<String, PeerConn>()
-
     // ── Duration ticker ───────────────────────────────────────────────────
     private val durationTick = object : Runnable {
         override fun run() {
-            if (isActive && isAdded) {
-                durationSec++
-                tvStatus?.text = fmt(durationSec)
+            if (GroupCallSession.isActive && isAdded) {
+                GroupCallSession.durationSec++
+                tvStatus?.text = fmt(GroupCallSession.durationSec)
                 // Also update the bubble timer if we are currently minimized
-                mainActivity.updateGroupCallBubbleTimer(durationSec)
+                mainActivity.updateGroupCallBubbleTimer(GroupCallSession.durationSec)
                 mainHandler.postDelayed(this, 1000)
             }
         }
@@ -144,10 +125,20 @@ class GroupCallFragment : Fragment() {
         super.onCreate(savedInstanceState)
         mainActivity = activity as MainActivity
         wsManager    = mainActivity.webSocketManager
-        roomId    = arguments?.getString(ARG_ROOM_ID,   "") ?: ""
-        isVideo   = arguments?.getBoolean(ARG_IS_VIDEO, false) ?: false
-        direction = arguments?.getString(ARG_DIRECTION, "inbound") ?: "inbound"
-        initiator = arguments?.getString(ARG_INITIATOR, "Group Call") ?: "Group Call"
+        isRestore = arguments?.getBoolean(ARG_RESTORE, false) ?: false
+        if (!isRestore) {
+            // populate from args as before
+            roomId    = arguments?.getString(ARG_ROOM_ID,   "") ?: ""
+            isVideo   = arguments?.getBoolean(ARG_IS_VIDEO, false) ?: false
+            direction = arguments?.getString(ARG_DIRECTION, "inbound") ?: "inbound"
+            initiator = arguments?.getString(ARG_INITIATOR, "Group Call") ?: "Group Call"
+        } else {
+            // Re-attach to existing GroupCallSession state
+            roomId    = GroupCallSession.roomId
+            isVideo   = GroupCallSession.isVideo
+            direction = GroupCallSession.direction
+            initiator = GroupCallSession.initiator
+        }
     }
 
     override fun onCreateView(inf: LayoutInflater, c: ViewGroup?, s: Bundle?): View? =
@@ -179,32 +170,59 @@ class GroupCallFragment : Fragment() {
 
         lifecycleScope.launch { wsManager.callEvents.collect { handleCallEvent(it) } }
 
-        when (direction) {
-            "inbound" -> {
-                tvStatus?.text = "Incoming ${if (isVideo) "video" else "audio"} group call from $initiator"
-                btnAccept?.visibility = View.VISIBLE
-                btnMute?.visibility   = View.GONE
-                startRingtone()
+        if (isRestore) {
+            // Re-attach local video to PiP
+            val pip = localPip
+            val egl = GroupCallSession.eglBase
+            if (pip != null && egl != null && GroupCallSession.localVideoTrack != null) {
+                runCatching {
+                    pip.init(egl.eglBaseContext, null)
+                    pip.setEnableHardwareScaler(true)
+                    pip.setMirror(true)
+                    GroupCallSession.localVideoTrack?.addSink(pip)
+                    pip.visibility = View.VISIBLE
+                }
             }
-            "outbound" -> {
-                tvStatus?.text = "Calling…"
-                btnAccept?.visibility = View.GONE
-                btnMinimize?.visibility = View.VISIBLE
-                activity?.volumeControlStream = AudioManager.STREAM_VOICE_CALL
-                lifecycleScope.launch { initWebRTC() }
+            // Re-attach remote video sinks + rebuild grid
+            for ((_, entry) in GroupCallSession.peers) {
+                if (entry.videoView != null) {
+                    videoGrid?.addView(createTileFrameForEntry(entry))
+                }
             }
-            "join_now" -> {
-                // Late join from chat "Join Now" button — skip ringing, auto-join
-                tvStatus?.text = "Joining…"
-                btnAccept?.visibility = View.GONE
-                btnMinimize?.visibility = View.VISIBLE
-                activity?.volumeControlStream = AudioManager.STREAM_VOICE_CALL
-                lifecycleScope.launch {
-                    initWebRTC()
-                    // Send join after WebRTC is ready and fragment is attached
-                    wsManager.sendRoomSignal("call_room_join", JSONObject().apply {
-                        put("roomId", roomId)
-                    })
+            rebuildVideoGrid()
+            updateParticipantCount(GroupCallSession.peers.size)
+            if (GroupCallSession.isActive) {
+                activateActiveState()
+                tvStatus?.text = fmt(GroupCallSession.durationSec)
+            }
+        } else {
+            when (direction) {
+                "inbound" -> {
+                    tvStatus?.text = "Incoming ${if (isVideo) "video" else "audio"} group call from $initiator"
+                    btnAccept?.visibility = View.VISIBLE
+                    btnMute?.visibility   = View.GONE
+                    startRingtone()
+                }
+                "outbound" -> {
+                    tvStatus?.text = "Calling…"
+                    btnAccept?.visibility = View.GONE
+                    btnMinimize?.visibility = View.VISIBLE
+                    activity?.volumeControlStream = AudioManager.STREAM_VOICE_CALL
+                    lifecycleScope.launch { initWebRTC() }
+                }
+                "join_now" -> {
+                    // Late join from chat "Join Now" button — skip ringing, auto-join
+                    tvStatus?.text = "Joining…"
+                    btnAccept?.visibility = View.GONE
+                    btnMinimize?.visibility = View.VISIBLE
+                    activity?.volumeControlStream = AudioManager.STREAM_VOICE_CALL
+                    lifecycleScope.launch {
+                        initWebRTC()
+                        // Send join after WebRTC is ready and fragment is attached
+                        wsManager.sendRoomSignal("call_room_join", JSONObject().apply {
+                            put("roomId", roomId)
+                        })
+                    }
                 }
             }
         }
@@ -214,20 +232,27 @@ class GroupCallFragment : Fragment() {
         super.onDestroyView()
         stopRingtone()
         mainHandler.removeCallbacks(durationTick)
-        // Bubble is on WindowManager — only hide it if call is ending (not when restoring)
-        // isActive=false means call has ended or was never active; hide the bubble.
-        // If the call is still active (minimized), the bubble should stay up.
-        if (!isActive) {
+        // Detach local PiP video sink (view is being destroyed but track lives on in GroupCallSession)
+        if (!GroupCallSession.isRunning) {
             mainActivity.hideGroupCallBubble()
+        } else {
+            // Fragment is minimized — detach PiP sink so it can be reattached on restore
+            runCatching {
+                localPip?.let { pip ->
+                    GroupCallSession.localVideoTrack?.removeSink(pip)
+                    pip.release()
+                }
+            }
+            // Detach remote video sinks — views will be re-attached on restore
+            for ((_, entry) in GroupCallSession.peers) {
+                runCatching {
+                    entry.videoView?.let { vv ->
+                        // Remove from grid without releasing — track stays alive
+                        (vv.parent as? android.view.ViewGroup)?.removeView(vv)
+                    }
+                }
+            }
         }
-    }
-
-    override fun onDestroy() {
-        super.onDestroy()
-        // Fragment is being destroyed entirely (back press while minimized, or call ended).
-        // Always hide the bubble and clean up WebRTC.
-        mainActivity.hideGroupCallBubble()
-        cleanupAll()
     }
 
     override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
@@ -265,44 +290,31 @@ class GroupCallFragment : Fragment() {
 
     private fun leaveGroupCall() {
         mainActivity.hideGroupCallBubble()
-        wsManager.sendRoomSignal("call_room_leave", JSONObject().apply { put("roomId", roomId) })
+        wsManager.sendRoomSignal("call_room_leave", JSONObject().apply { put("roomId", GroupCallSession.roomId) })
         cleanupAll()
-        mainActivity.hideCallFragmentContainer()
+        GroupCallSession.reset()
         try { parentFragmentManager.popBackStack() } catch (e: Exception) {
-            Log.e(TAG, "leaveGroupCall popBackStack: ${e.message}")
+            Log.e(TAG, "popBackStack: ${e.message}")
         }
     }
 
-    /** Minimize: hide fragment (WebRTC stays alive), show WindowManager floating bubble. */
+    /** Minimize: pop fragment off the back stack (so the app is navigable), show floating bubble. */
     private fun minimizeGroupCall() {
-        val peerList    = peers.values.toList()
-        val usernames   = peerList.map { it.peerUsername }
-        val videoTracks = if (isVideo) peerList.mapNotNull { it.remoteVideoTrack } else emptyList()
-        val egl         = eglBase
-
         mainActivity.showGroupCallBubble(
-            roomId      = roomId,
-            isVideo     = isVideo,
-            initiator   = initiator,
-            durationSec = durationSec,
-            usernames   = usernames,
-            videoTracks = videoTracks,
-            eglBase     = egl,
+            roomId      = GroupCallSession.roomId,
+            isVideo     = GroupCallSession.isVideo,
+            initiator   = GroupCallSession.initiator,
+            durationSec = GroupCallSession.durationSec,
+            usernames   = GroupCallSession.peerUsernames,
             onLeave     = { leaveGroupCall() }
         )
-        // Hide both the fragment AND the container so no touches are blocked
-        mainActivity.hideCallFragmentContainer()
-        try {
-            parentFragmentManager.beginTransaction()
-                .hide(this)
-                .commitAllowingStateLoss()
-        } catch (e: Exception) {
-            Log.e(TAG, "hide on minimize: ${e.message}")
+        try { parentFragmentManager.popBackStack() } catch (e: Exception) {
+            Log.e(TAG, "popBackStack on minimize: ${e.message}")
         }
     }
 
     private fun toggleMute() {
-        localAudioTrack?.let {
+        GroupCallSession.localAudioTrack?.let {
             it.setEnabled(!it.enabled())
             btnMute?.alpha = if (it.enabled()) 1.0f else 0.4f
         }
@@ -315,7 +327,7 @@ class GroupCallFragment : Fragment() {
     }
 
     private fun toggleCamera() {
-        localVideoTrack?.let {
+        GroupCallSession.localVideoTrack?.let {
             it.setEnabled(!it.enabled())
             btnCameraOff?.alpha = if (it.enabled()) 1.0f else 0.4f
         }
@@ -349,17 +361,15 @@ class GroupCallFragment : Fragment() {
                 is WebSocketManager.CallEvent.RoomPeerJoined -> {
                     if (event.roomId != roomId) return@post
                     // Only pre-create the slot if WebRTC is already initialized
-                    // (factory != null). If not, the offer will arrive after
-                    // initWebRTC completes and getOrCreatePeerConn will be called then.
-                    if (factory != null) {
-                        getOrCreatePeerConn(event.peerId, event.peerUsername)
+                    if (GroupCallSession.factory != null) {
+                        getOrCreatePeerEntry(event.peerId, event.peerUsername)
                     }
-                    updateParticipantCount(peers.size)
+                    updateParticipantCount(GroupCallSession.peers.size)
                 }
                 is WebSocketManager.CallEvent.RoomPeerLeft -> {
                     if (event.roomId != roomId) return@post
                     removePeer(event.peerId)
-                    updateParticipantCount(peers.size)
+                    updateParticipantCount(GroupCallSession.peers.size)
                 }
                 is WebSocketManager.CallEvent.RoomOffer -> {
                     if (event.roomId != roomId) return@post
@@ -388,8 +398,9 @@ class GroupCallFragment : Fragment() {
     }
 
     private fun activateActiveState() {
-        if (isActive) return
-        isActive = true
+        if (GroupCallSession.isActive) return
+        GroupCallSession.isActive = true
+        GroupCallSession.state = GroupCallSession.State.ACTIVE
         btnMute?.visibility    = View.VISIBLE
         btnSpeaker?.visibility = View.VISIBLE
         if (isVideo) btnCameraOff?.visibility = View.VISIBLE
@@ -400,7 +411,7 @@ class GroupCallFragment : Fragment() {
     // ── WebRTC init ───────────────────────────────────────────────────────
 
     private suspend fun initWebRTC() = withContext(Dispatchers.IO) {
-        if (factory != null) return@withContext   // already initialized
+        if (GroupCallSession.factory != null) return@withContext   // already initialized
         val ctx = requireContext().applicationContext
 
         withContext(Dispatchers.Main) {
@@ -409,16 +420,23 @@ class GroupCallFragment : Fragment() {
             am.isSpeakerphoneOn = false
         }
 
-        eglBase = EglBase.create()
+        // Populate GroupCallSession metadata before setting up WebRTC
+        GroupCallSession.roomId    = roomId
+        GroupCallSession.isVideo   = isVideo
+        GroupCallSession.initiator = initiator
+        GroupCallSession.direction = direction
+        GroupCallSession.state     = GroupCallSession.State.ACTIVE
+
+        GroupCallSession.eglBase = EglBase.create()
         if (!pcfInitialized) {
             PeerConnectionFactory.initialize(
                 PeerConnectionFactory.InitializationOptions.builder(ctx).createInitializationOptions()
             )
             pcfInitialized = true
         }
-        factory = PeerConnectionFactory.builder()
-            .setVideoEncoderFactory(DefaultVideoEncoderFactory(eglBase!!.eglBaseContext, true, true))
-            .setVideoDecoderFactory(DefaultVideoDecoderFactory(eglBase!!.eglBaseContext))
+        GroupCallSession.factory = PeerConnectionFactory.builder()
+            .setVideoEncoderFactory(DefaultVideoEncoderFactory(GroupCallSession.eglBase!!.eglBaseContext, true, true))
+            .setVideoDecoderFactory(DefaultVideoDecoderFactory(GroupCallSession.eglBase!!.eglBaseContext))
             .createPeerConnectionFactory()
 
         val audioConstraints = MediaConstraints().apply {
@@ -426,8 +444,8 @@ class GroupCallFragment : Fragment() {
             mandatory.add(MediaConstraints.KeyValuePair("googNoiseSuppression", "true"))
             mandatory.add(MediaConstraints.KeyValuePair("googAutoGainControl", "true"))
         }
-        localAudioSource = factory!!.createAudioSource(audioConstraints)
-        localAudioTrack  = factory!!.createAudioTrack("gcAudio0", localAudioSource).also {
+        GroupCallSession.localAudioSource = GroupCallSession.factory!!.createAudioSource(audioConstraints)
+        GroupCallSession.localAudioTrack  = GroupCallSession.factory!!.createAudioTrack("gcAudio0", GroupCallSession.localAudioSource).also {
             it.setEnabled(true)
         }
 
@@ -436,20 +454,20 @@ class GroupCallFragment : Fragment() {
             val frontCam = enumerator.deviceNames.firstOrNull { enumerator.isFrontFacing(it) }
                 ?: enumerator.deviceNames.firstOrNull()
             if (frontCam != null) {
-                videoCapturer    = enumerator.createCapturer(frontCam, null)
-                localVideoSource = factory!!.createVideoSource(false)
-                val surfaceHelper = SurfaceTextureHelper.create("GCCapture", eglBase!!.eglBaseContext)
-                videoCapturer!!.initialize(surfaceHelper, ctx, localVideoSource!!.capturerObserver)
-                videoCapturer!!.startCapture(640, 480, 24)
-                localVideoTrack = factory!!.createVideoTrack("gcVideo0", localVideoSource)
+                GroupCallSession.videoCapturer    = enumerator.createCapturer(frontCam, null)
+                GroupCallSession.localVideoSource = GroupCallSession.factory!!.createVideoSource(false)
+                val surfaceHelper = SurfaceTextureHelper.create("GCCapture", GroupCallSession.eglBase!!.eglBaseContext)
+                GroupCallSession.videoCapturer!!.initialize(surfaceHelper, ctx, GroupCallSession.localVideoSource!!.capturerObserver)
+                GroupCallSession.videoCapturer!!.startCapture(640, 480, 24)
+                GroupCallSession.localVideoTrack = GroupCallSession.factory!!.createVideoTrack("gcVideo0", GroupCallSession.localVideoSource)
 
                 // Attach local track to the PiP view on main thread
                 withContext(Dispatchers.Main) {
                     val pip = localPip ?: return@withContext
-                    pip.init(eglBase!!.eglBaseContext, null)
+                    pip.init(GroupCallSession.eglBase!!.eglBaseContext, null)
                     pip.setEnableHardwareScaler(true)
                     pip.setMirror(true)
-                    localVideoTrack?.addSink(pip)
+                    GroupCallSession.localVideoTrack?.addSink(pip)
                     pip.visibility = View.VISIBLE
                 }
             }
@@ -464,7 +482,7 @@ class GroupCallFragment : Fragment() {
      */
     private suspend fun initiateOfferToPeer(peerId: String, peerUsername: String) =
         withContext(Dispatchers.Main) {
-            val conn = getOrCreatePeerConn(peerId, peerUsername)
+            val conn = getOrCreatePeerEntry(peerId, peerUsername)
             val pc   = conn.pc
 
             addLocalTracksToPc(pc)
@@ -501,7 +519,7 @@ class GroupCallFragment : Fragment() {
     private suspend fun handleRemoteOffer(
         fromPeerId: String, peerUsername: String, sdpJson: String
     ) = withContext(Dispatchers.Main) {
-        val conn = getOrCreatePeerConn(fromPeerId, peerUsername)
+        val conn = getOrCreatePeerEntry(fromPeerId, peerUsername)
         val pc   = conn.pc
         try {
             val obj = JSONObject(sdpJson)
@@ -549,7 +567,7 @@ class GroupCallFragment : Fragment() {
     }
 
     private fun handleRemoteAnswer(fromPeerId: String, sdpJson: String) {
-        val conn = peers[fromPeerId] ?: return
+        val conn = GroupCallSession.peers[fromPeerId] ?: return
         try {
             val obj = JSONObject(sdpJson)
             val sdp = SessionDescription(
@@ -566,7 +584,7 @@ class GroupCallFragment : Fragment() {
     }
 
     private fun handleRemoteIce(fromPeerId: String, candidateJson: String) {
-        val conn = peers[fromPeerId] ?: return
+        val conn = GroupCallSession.peers[fromPeerId] ?: return
         try {
             val c = JSONObject(candidateJson)
             val candidate = IceCandidate(
@@ -584,7 +602,7 @@ class GroupCallFragment : Fragment() {
         }
     }
 
-    private fun drainCandidates(conn: PeerConn) {
+    private fun drainCandidates(conn: GroupCallSession.PeerEntry) {
         val queued = conn.pendingCandidates.toList()
         conn.pendingCandidates.clear()
         queued.forEach { c ->
@@ -604,28 +622,29 @@ class GroupCallFragment : Fragment() {
      */
     private fun addLocalTracksToPc(pc: PeerConnection) {
         val existingIds = pc.senders.mapNotNull { it.track()?.id() }.toSet()
-        localAudioTrack?.let {
+        GroupCallSession.localAudioTrack?.let {
             if (it.id() !in existingIds) pc.addTrack(it)
         }
         if (isVideo) {
-            localVideoTrack?.let {
+            GroupCallSession.localVideoTrack?.let {
                 if (it.id() !in existingIds) pc.addTrack(it)
             }
         }
     }
 
-    private fun getOrCreatePeerConn(peerId: String, peerUsername: String): PeerConn {
-        peers[peerId]?.let { return it }
+    private fun getOrCreatePeerEntry(peerId: String, peerUsername: String): GroupCallSession.PeerEntry {
+        GroupCallSession.peers[peerId]?.let { return it }
 
         // factory must be initialized before reaching here
-        val f = factory ?: run {
-            Log.e(TAG, "getOrCreatePeerConn: factory not ready yet for $peerId")
+        val f = GroupCallSession.factory ?: run {
+            Log.e(TAG, "getOrCreatePeerEntry: factory not ready yet for $peerId")
             // Create a stub so callers don't crash; will be replaced when initWebRTC completes
-            val stub = PeerConn(
+            val stub = GroupCallSession.PeerEntry(
                 pc = object : PeerConnection(null) { override fun dispose() {} },
-                videoView = null
+                videoView = null,
+                username = peerUsername
             )
-            peers[peerId] = stub
+            GroupCallSession.peers[peerId] = stub
             return stub
         }
 
@@ -643,12 +662,9 @@ class GroupCallFragment : Fragment() {
             continualGatheringPolicy = PeerConnection.ContinualGatheringPolicy.GATHER_CONTINUALLY
         }
 
-        // Create the SurfaceViewRenderer synchronously on the current (main) thread.
-        // Do NOT defer this to mainHandler.post — by the time onTrack fires, the view
-        // must already be fully initialized so we can addSink() without crashing.
         var videoView: SurfaceViewRenderer? = null
         if (isVideo) {
-            val egl = eglBase
+            val egl = GroupCallSession.eglBase
             if (egl != null) {
                 try {
                     videoView = SurfaceViewRenderer(requireContext()).apply {
@@ -662,11 +678,9 @@ class GroupCallFragment : Fragment() {
             }
         }
 
-        // Capture for use in lambdas
         val capturedVideoView = videoView
         val capturedUsername  = peerUsername
 
-        // Create the PeerConnection
         val pc = f.createPeerConnection(rtcConfig, object : PeerConnection.Observer {
             override fun onIceCandidate(candidate: IceCandidate) {
                 wsManager.sendRoomSignal("call_room_ice", JSONObject().apply {
@@ -682,15 +696,9 @@ class GroupCallFragment : Fragment() {
             }
             override fun onTrack(transceiver: RtpTransceiver) {
                 val track = transceiver.receiver.track() ?: return
-                if (track is VideoTrack) {
+                if (track is VideoTrack && capturedVideoView != null) {
                     mainHandler.post {
-                        // Save remote video track reference for bubble preview
-                        peers[peerId]?.let { conn ->
-                            peers[peerId] = conn.copy(remoteVideoTrack = track)
-                        }
-                        if (capturedVideoView != null) {
-                            track.addSink(capturedVideoView)
-                        }
+                        track.addSink(capturedVideoView)
                     }
                 }
             }
@@ -715,19 +723,19 @@ class GroupCallFragment : Fragment() {
         if (pc == null) {
             Log.e(TAG, "createPeerConnection returned null for $peerId")
             capturedVideoView?.release()
-            val dummy = PeerConn(
+            val dummy = GroupCallSession.PeerEntry(
                 pc = object : PeerConnection(null) { override fun dispose() {} },
-                videoView = null
+                videoView = null,
+                username = peerUsername
             )
-            peers[peerId] = dummy
+            GroupCallSession.peers[peerId] = dummy
             return dummy
         }
 
-        val conn = PeerConn(pc = pc, videoView = capturedVideoView, peerUsername = capturedUsername)
-        peers[peerId] = conn
+        val conn = GroupCallSession.PeerEntry(pc = pc, videoView = capturedVideoView, username = capturedUsername)
+        GroupCallSession.peers[peerId] = conn
 
-        // Add the tile to the grid UI — deferred to main thread is fine here
-        // because by the time onTrack fires the view is already init()'d above
+        // Add the tile to the grid UI
         if (capturedVideoView != null) {
             val tileFrame = android.widget.FrameLayout(requireContext()).apply {
                 setBackgroundColor(android.graphics.Color.parseColor("#1A1A2E"))
@@ -756,8 +764,34 @@ class GroupCallFragment : Fragment() {
         return conn
     }
 
+    private fun createTileFrameForEntry(entry: GroupCallSession.PeerEntry): android.widget.FrameLayout {
+        val tileFrame = android.widget.FrameLayout(requireContext()).apply {
+            setBackgroundColor(android.graphics.Color.parseColor("#1A1A2E"))
+        }
+        entry.videoView?.let { vv ->
+            tileFrame.addView(vv, android.widget.FrameLayout.LayoutParams(
+                android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
+                android.widget.FrameLayout.LayoutParams.MATCH_PARENT
+            ))
+        }
+        val label = android.widget.TextView(requireContext()).apply {
+            text = entry.username
+            setTextColor(android.graphics.Color.WHITE)
+            textSize = 11f
+            setPadding(8, 4, 8, 6)
+            setBackgroundColor(android.graphics.Color.parseColor("#AA000000"))
+            gravity = android.view.Gravity.CENTER_HORIZONTAL
+        }
+        tileFrame.addView(label, android.widget.FrameLayout.LayoutParams(
+            android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
+            android.widget.FrameLayout.LayoutParams.WRAP_CONTENT,
+            android.view.Gravity.BOTTOM
+        ))
+        return tileFrame
+    }
+
     private fun removePeer(peerId: String) {
-        val conn = peers.remove(peerId) ?: return
+        val conn = GroupCallSession.peers.remove(peerId) ?: return
         try {
             // Remove video sink before releasing the view
             conn.videoView?.let { view ->
@@ -792,39 +826,39 @@ class GroupCallFragment : Fragment() {
     private fun cleanupAll() {
         stopRingtone()
         mainHandler.removeCallbacks(durationTick)
-        isActive = false
-        for ((_, conn) in peers) {
+        GroupCallSession.isActive = false
+        for ((_, conn) in GroupCallSession.peers) {
             try {
                 conn.videoView?.let { v ->
-                    localVideoTrack?.removeSink(v)
+                    GroupCallSession.localVideoTrack?.removeSink(v)
                 }
                 conn.videoView?.release()
                 conn.pc.close()
             } catch (_: Exception) {}
         }
-        peers.clear()
-        try { videoCapturer?.stopCapture() } catch (_: Exception) {}
-        try { videoCapturer?.dispose() } catch (_: Exception) {}
+        GroupCallSession.peers.clear()
+        try { GroupCallSession.videoCapturer?.stopCapture() } catch (_: Exception) {}
+        try { GroupCallSession.videoCapturer?.dispose() } catch (_: Exception) {}
         // Release local PiP view
         try {
             localPip?.let { pip ->
-                localVideoTrack?.removeSink(pip)
+                GroupCallSession.localVideoTrack?.removeSink(pip)
                 pip.release()
             }
         } catch (_: Exception) {}
-        localVideoTrack?.dispose()
-        localAudioTrack?.dispose()
-        localVideoSource?.dispose()
-        localAudioSource?.dispose()
-        factory?.dispose()
-        eglBase?.release()
-        factory          = null
-        eglBase          = null
-        localAudioSource = null
-        localAudioTrack  = null
-        localVideoSource = null
-        localVideoTrack  = null
-        videoCapturer    = null
+        GroupCallSession.localVideoTrack?.dispose()
+        GroupCallSession.localAudioTrack?.dispose()
+        GroupCallSession.localVideoSource?.dispose()
+        GroupCallSession.localAudioSource?.dispose()
+        GroupCallSession.factory?.dispose()
+        GroupCallSession.eglBase?.release()
+        GroupCallSession.factory          = null
+        GroupCallSession.eglBase          = null
+        GroupCallSession.localAudioSource = null
+        GroupCallSession.localAudioTrack  = null
+        GroupCallSession.localVideoSource = null
+        GroupCallSession.localVideoTrack  = null
+        GroupCallSession.videoCapturer    = null
     }
 
     // ── UI helpers ────────────────────────────────────────────────────────
@@ -836,23 +870,10 @@ class GroupCallFragment : Fragment() {
 
     /**
      * Rebuild the video grid layout using all available space.
-     * Collects all FrameLayout tile views (from direct children or nested rows),
-     * clears the grid, then rebuilds it as a vertical LinearLayout of horizontal rows.
-     *
-     *  1 tile  → 1×1 full screen
-     *  2 tiles → 2 rows (portrait) or 2 columns (landscape handled by orientation change)
-     *  3 tiles → 1 on top (full width), 2 on bottom
-     *  4 tiles → 2×2
-     *  5–6     → 2 rows of 3
-     *  7–9     → 3 rows of 3
      */
     private fun rebuildVideoGrid() {
         val grid = videoGrid ?: return
 
-        // Step 1: Collect ALL FrameLayout tiles from the current grid hierarchy.
-        // Tiles may be:
-        //   - Direct children of grid (first call, before any rebuild)
-        //   - Inside horizontal LinearLayout rows (after first rebuild)
         val tiles = mutableListOf<android.widget.FrameLayout>()
         for (i in 0 until grid.childCount) {
             val child = grid.getChildAt(i)
@@ -867,31 +888,24 @@ class GroupCallFragment : Fragment() {
             }
         }
 
-        // Step 2: Detach every tile from its current parent BEFORE clearing the grid.
-        // This is CRITICAL: grid.removeAllViews() removes the row LinearLayouts but
-        // leaves the tiles as children of those (now-detached) rows. Calling addView()
-        // on a tile that still has a parent throws IllegalStateException.
         tiles.forEach { tile ->
             (tile.parent as? android.view.ViewGroup)?.removeView(tile)
         }
 
-        // Step 3: Clear the grid (now safe — tiles are already detached)
         grid.removeAllViews()
 
         val n = tiles.size
         if (n == 0) return
 
-        // Step 4: Determine layout dimensions
         val (cols, rows) = when {
             n == 1 -> 1 to 1
-            n == 2 -> 1 to 2   // portrait: 2 rows
-            n == 3 -> 2 to 2   // top row 1 tile (full-width), bottom row 2
+            n == 2 -> 1 to 2
+            n == 3 -> 2 to 2
             n == 4 -> 2 to 2
             n <= 6 -> 3 to 2
             else   -> 3 to 3
         }
 
-        // Step 5: Rebuild rows and add tiles
         var idx = 0
         for (row in 0 until rows) {
             if (idx >= n) break
@@ -907,7 +921,6 @@ class GroupCallFragment : Fragment() {
             for (col in 0 until colsThisRow) {
                 if (idx >= n) break
                 val tile = tiles[idx++]
-                // Tile is already detached from any parent — safe to add
                 tile.layoutParams = android.widget.LinearLayout.LayoutParams(0,
                     android.widget.LinearLayout.LayoutParams.MATCH_PARENT
                 ).apply { weight = 1f; setMargins(2, 2, 2, 2) }
