@@ -91,6 +91,7 @@ export default function CallModal({ callService, state, callInfo }: CallModalPro
       if (localVideoRef.current) {
         localVideoRef.current.srcObject = stream;
         localVideoRef.current.muted = true;
+        localVideoRef.current.play().catch(() => {});
       }
     });
     return () => {
@@ -107,6 +108,7 @@ export default function CallModal({ callService, state, callInfo }: CallModalPro
       if (localVideoRef.current && local) {
         localVideoRef.current.srcObject = local;
         localVideoRef.current.muted = true;
+        localVideoRef.current.play().catch(() => {});
       }
       attachRemoteMedia(callService.getRemoteStream());
     }
@@ -117,7 +119,12 @@ export default function CallModal({ callService, state, callInfo }: CallModalPro
     localVideoRef.current = el;
     if (el) {
       const stream = callService.getLocalStream();
-      if (stream) { el.srcObject = stream; el.muted = true; }
+      if (stream) {
+        el.srcObject = stream;
+        el.muted = true;
+        // Force play — needed because autoplay may not fire on programmatic srcObject assignment
+        el.play().catch(() => {});
+      }
     }
   }, [callService]);
 

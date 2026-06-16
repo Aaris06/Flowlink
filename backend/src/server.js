@@ -934,6 +934,7 @@ function handleSessionJoin(ws, message) {
       deviceId,
       payload: {
         sessionId: session.id,
+        code: session.code,
         devices: Array.from(session.devices.values()).map(d => ({
           id: d.id,
           name: d.name,
@@ -1033,6 +1034,7 @@ function handleSessionJoin(ws, message) {
     deviceId,
     payload: {
       sessionId: session.id,
+      code: session.code,
       devices: Array.from(session.devices.values()).map(d => ({
         id: d.id,
         name: d.name,

@@ -1,4 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  Chat message item.
+  The root LinearLayout spans full width; gravity on bubble_container
+  is set in code to Gravity.END (self) or Gravity.START (other).
+
+  Key constraint: bubble_container is 280dp wide so that match_parent
+  children (call_card, file_card) always get a real measured width and
+  never collapse to 0.  Text messages are short so 280dp is fine; they
+  just show with extra trailing space — the bubble background clips it.
+-->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
@@ -17,20 +27,20 @@
         android:paddingBottom="2dp"
         android:visibility="gone" />
 
-    <!-- Bubble container (gravity set in code) -->
+    <!--
+      bubble_container: fixed 280dp so every child that uses
+      match_parent gets a real parent width.  Gravity is set in code.
+    -->
     <FrameLayout
         android:id="@+id/bubble_container"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:maxWidth="300dp">
+        android:layout_width="280dp"
+        android:layout_height="wrap_content">
 
         <LinearLayout
             android:id="@+id/bubble"
-            android:layout_width="wrap_content"
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:orientation="vertical"
-            android:minWidth="160dp"
-            android:maxWidth="300dp">
+            android:orientation="vertical">
 
             <!-- Reply preview strip -->
             <LinearLayout
@@ -41,7 +51,6 @@
                 android:background="#33A78BFA"
                 android:paddingHorizontal="10dp"
                 android:paddingVertical="6dp"
-                android:layout_marginBottom="0dp"
                 android:visibility="gone">
 
                 <View
@@ -61,7 +70,7 @@
                     android:ellipsize="end" />
             </LinearLayout>
 
-            <!-- File attachment card (WhatsApp style) -->
+            <!-- File attachment card (images, docs, voice) -->
             <LinearLayout
                 android:id="@+id/file_card"
                 android:layout_width="match_parent"
@@ -69,7 +78,7 @@
                 android:orientation="vertical"
                 android:visibility="gone">
 
-                <!-- Image preview (for images only) -->
+                <!-- Image preview -->
                 <ImageView
                     android:id="@+id/iv_image_preview"
                     android:layout_width="match_parent"
@@ -77,7 +86,7 @@
                     android:scaleType="centerCrop"
                     android:visibility="gone" />
 
-                <!-- Voice message player row -->
+                <!-- Voice player row -->
                 <LinearLayout
                     android:id="@+id/voice_row"
                     android:layout_width="match_parent"
@@ -88,7 +97,6 @@
                     android:paddingVertical="10dp"
                     android:visibility="gone">
 
-                    <!-- Play/Pause button -->
                     <FrameLayout
                         android:id="@+id/btn_voice_play"
                         android:layout_width="40dp"
@@ -107,7 +115,6 @@
                             android:textSize="16sp" />
                     </FrameLayout>
 
-                    <!-- Waveform placeholder + duration -->
                     <LinearLayout
                         android:layout_width="0dp"
                         android:layout_height="wrap_content"
@@ -139,7 +146,7 @@
                         android:layout_marginStart="8dp" />
                 </LinearLayout>
 
-                <!-- File row (icon + name + download) -->
+                <!-- Generic file row -->
                 <LinearLayout
                     android:id="@+id/file_row"
                     android:layout_width="match_parent"
@@ -149,7 +156,6 @@
                     android:paddingHorizontal="12dp"
                     android:paddingVertical="10dp">
 
-                    <!-- Colored file type icon -->
                     <FrameLayout
                         android:layout_width="42dp"
                         android:layout_height="42dp"
@@ -166,13 +172,12 @@
                             android:layout_width="match_parent"
                             android:layout_height="match_parent"
                             android:gravity="center"
-                            android:text="P"
+                            android:text="F"
                             android:textColor="#FFFFFF"
                             android:textSize="16sp"
                             android:textStyle="bold" />
                     </FrameLayout>
 
-                    <!-- File name + meta -->
                     <LinearLayout
                         android:layout_width="0dp"
                         android:layout_height="wrap_content"
@@ -198,7 +203,6 @@
                             android:layout_marginTop="2dp" />
                     </LinearLayout>
 
-                    <!-- Download circle button -->
                     <FrameLayout
                         android:id="@+id/btn_file_download"
                         android:layout_width="36dp"
@@ -220,7 +224,7 @@
                 </LinearLayout>
             </LinearLayout>
 
-            <!-- Text message -->
+            <!-- Plain text message -->
             <TextView
                 android:id="@+id/tv_message_text"
                 android:layout_width="wrap_content"
@@ -232,39 +236,55 @@
                 android:paddingTop="10dp"
                 android:paddingBottom="4dp" />
 
-            <!-- Call activity card -->
+            <!--
+              Call activity card.
+              Uses match_parent — now works because bubble_container is 280dp.
+            -->
             <LinearLayout
                 android:id="@+id/call_card"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="vertical"
-                android:paddingHorizontal="12dp"
-                android:paddingTop="10dp"
-                android:paddingBottom="6dp"
+                android:paddingHorizontal="14dp"
+                android:paddingTop="12dp"
+                android:paddingBottom="10dp"
                 android:visibility="gone">
 
                 <TextView
                     android:id="@+id/tv_call_title"
-                    android:layout_width="wrap_content"
+                    android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:textColor="#FFFFFF"
                     android:textStyle="bold"
-                    android:textSize="14sp" />
+                    android:textSize="14sp"
+                    android:lineSpacingMultiplier="1.2"
+                    android:maxLines="3"
+                    android:ellipsize="end" />
 
                 <TextView
                     android:id="@+id/tv_call_subtitle"
-                    android:layout_width="wrap_content"
+                    android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="2dp"
-                    android:textColor="#AAFFFFFF"
-                    android:textSize="11sp" />
+                    android:layout_marginTop="4dp"
+                    android:textColor="#CCFFFFFF"
+                    android:textSize="12sp"
+                    android:maxLines="2"
+                    android:ellipsize="end" />
 
+                <!-- Join Call button — styled, visible only when call is joinable -->
                 <Button
                     android:id="@+id/btn_join_call"
                     android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="8dp"
-                    android:text="Join Call" />
+                    android:layout_height="40dp"
+                    android:layout_marginTop="10dp"
+                    android:text="JOIN CALL"
+                    android:textAllCaps="true"
+                    android:textSize="12sp"
+                    android:textColor="#FFFFFF"
+                    android:textStyle="bold"
+                    android:backgroundTint="#6C63FF"
+                    android:paddingHorizontal="18dp"
+                    android:visibility="gone" />
             </LinearLayout>
 
             <!-- Time + ticks row -->

@@ -77,7 +77,10 @@ export default function SessionManager({
       case 'session_joined': {
         const joinedSession: Session = {
           id: message.payload.sessionId,
-          code: sessionCode || '',
+          // Prefer the code returned by the server; fall back to what the user typed.
+          // When joining a session created by the app the user may not have typed a code
+          // (they joined via invitation), so server-provided code is the only source.
+          code: message.payload.code || sessionCode || '',
           createdBy: message.payload.devices[0]?.id || '',
           createdAt: Date.now(),
           expiresAt: Date.now() + 3600000,
@@ -168,7 +171,19 @@ export default function SessionManager({
         {createdSession && (
           <div className="session-created-card" style={{ marginTop: '1rem' }}>
             <div className="session-code-label">Share this code</div>
-            <div className="session-code-display">{createdSession.code}</div>
+            <div
+              className="session-code-display"
+              title="Click to copy"
+              style={{ cursor: 'pointer' }}
+              onClick={() => {
+                navigator.clipboard?.writeText(createdSession.code).catch(() => {});
+              }}
+            >
+              {createdSession.code}
+            </div>
+            <div style={{ fontSize: '0.72rem', color: '#94a3b8', marginBottom: '0.5rem' }}>
+              tap code to copy · or scan QR below
+            </div>
             <div className="session-qr-wrapper">
               <QRCodeSVG value={createdSession.code} size={200} />
             </div>

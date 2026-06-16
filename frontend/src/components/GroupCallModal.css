@@ -250,21 +250,25 @@
   height: 80px;
   border-radius: 10px;
   overflow: hidden;
-  background: #2a2a3e;
-  border: 2px solid rgba(139, 92, 246, 0.7);
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
-  z-index: 10;
+  /* Dark background removed — black gives correct colours for live video */
+  background: #000;
+  border: 2px solid rgba(139, 92, 246, 0.85);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.7);
+  /* Highest z-index in the video area — always above the tile grid */
+  z-index: 100;
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
+  /* Create a new stacking context so nothing inside the grid can bleed over */
+  isolation: isolate;
 }
 
 .gcm-pip-video {
   width: 100%;
   height: 100%;
   object-fit: cover;
-  display: block;
+  display: block;           /* removes inline gap; ensures full-surface rendering */
 }
 
 .gcm-pip-avatar {

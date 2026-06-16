@@ -42,10 +42,11 @@ export default function GroupCallModal({
   const [cameraOff, setCameraOff] = useState(false);
   const [duration, setDuration] = useState(0);
   const [minimized, setMinimized] = useState(false);
-  // When the overflow tile is clicked, expand to show all participants
   const [showAllParticipants, setShowAllParticipants] = useState(false);
+  // Track whether the local video stream has video tracks — drives PiP render
+  const [hasLocalVideo, setHasLocalVideo] = useState(false);
 
-  // Local PiP video
+  // Local PiP video ref
   const localVideoRef = useRef<HTMLVideoElement | null>(null);
 
   // Ringtone
@@ -71,32 +72,57 @@ export default function GroupCallModal({
       setMuted(false);
       setCameraOff(false);
       setMinimized(false);
+      setHasLocalVideo(false);
     }
   }, [state]);
 
   useEffect(() => {
-    if (state === 'idle' || state === 'ended') setMinimized(false);
+    if (state === 'idle' || state === 'ended') {
+      setMinimized(false);
+      setHasLocalVideo(false);
+    }
   }, [state]);
 
-  // Attach local stream to the PiP video
-  const attachLocalVideo = useCallback((el: HTMLVideoElement | null) => {
-    localVideoRef.current = el;
-    if (el) {
-      const stream = groupCallService.getLocalStream();
-      if (stream) { el.srcObject = stream; el.muted = true; el.play().catch(() => {}); }
+  /**
+   * Attach the local stream to the PiP video element.
+   * Called both from the ref callback (element mount) and the useEffect below
+   * (stream becomes available after mount). Both paths are needed because:
+   *   - The element may mount before the stream is ready (ref fires first)
+   *   - The stream may be ready before the element mounts (effect fires first)
+   */
+  const attachLocalStreamToVideo = useCallback((el: HTMLVideoElement | null) => {
+    if (!el) return;
+    const stream = groupCallService.getLocalStream();
+    if (!stream) return;
+    if (el.srcObject !== stream) {
+      el.srcObject = stream;
     }
+    el.muted = true;
+    // Force autoplay — browsers sometimes block it even with the attribute
+    el.play().catch(() => {});
   }, [groupCallService]);
 
+  // Ref callback: fires when <video> mounts or unmounts
+  const attachLocalVideo = useCallback((el: HTMLVideoElement | null) => {
+    localVideoRef.current = el;
+    if (el) attachLocalStreamToVideo(el);
+  }, [attachLocalStreamToVideo]);
+
+  /**
+   * Poll / react to local stream availability.
+   * Runs whenever call state or participant count changes. Checks whether the
+   * service now has a stream with video tracks and updates state + re-attaches.
+   */
   useEffect(() => {
-    if (state === 'active') {
-      const stream = groupCallService.getLocalStream();
-      if (localVideoRef.current && stream) {
-        localVideoRef.current.srcObject = stream;
-        localVideoRef.current.muted = true;
-        localVideoRef.current.play().catch(() => {});
-      }
+    const stream = groupCallService.getLocalStream();
+    const videoTracks = stream?.getVideoTracks() ?? [];
+    const hasVideo = videoTracks.length > 0 && videoTracks[0].readyState !== 'ended';
+    setHasLocalVideo(hasVideo);
+    // Attach even if we already have the element — stream may have been replaced
+    if (localVideoRef.current) {
+      attachLocalStreamToVideo(localVideoRef.current);
     }
-  }, [state, participants, groupCallService]);
+  }, [state, participants, groupCallService, attachLocalStreamToVideo]);
 
   const fmt = (s: number) =>
     `${Math.floor(s / 60).toString().padStart(2, '0')}:${(s % 60).toString().padStart(2, '0')}`;
@@ -198,15 +224,22 @@ export default function GroupCallModal({
 
             {/* Local video: small floating PiP in bottom-right */}
             <div className="gcm-pip">
-              {groupCallService.getLocalStream()?.getVideoTracks().length ? (
-                <video
-                  ref={attachLocalVideo}
-                  className="gcm-pip-video"
-                  autoPlay
-                  playsInline
-                  muted
-                />
-              ) : (
+              {/*
+                Always mount the <video> element during an active video call.
+                Gating on getLocalStream() at render time causes the element to
+                never mount if the stream arrives after the first render.
+                Instead we use the hasLocalVideo state and always provide the
+                video element so the ref callback can attach whenever ready.
+              */}
+              <video
+                ref={attachLocalVideo}
+                className="gcm-pip-video"
+                autoPlay
+                playsInline
+                muted
+                style={{ display: hasLocalVideo ? 'block' : 'none' }}
+              />
+              {!hasLocalVideo && (
                 <div className="gcm-pip-avatar">{(localUsername || 'Y')[0]?.toUpperCase()}</div>
               )}
               <div className="gcm-pip-label">You</div>

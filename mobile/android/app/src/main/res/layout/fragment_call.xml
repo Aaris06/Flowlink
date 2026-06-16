@@ -14,20 +14,6 @@
         android:focusable="true"
         android:visibility="gone" />
 
-    <!-- Local video PiP — bottom-right corner, tap to swap with remote -->
-    <org.webrtc.SurfaceViewRenderer
-        android:id="@+id/local_video"
-        android:layout_width="108dp"
-        android:layout_height="144dp"
-        android:layout_gravity="bottom|end"
-        android:layout_marginEnd="16dp"
-        android:layout_marginBottom="112dp"
-        android:background="@drawable/call_pip_bg"
-        android:elevation="8dp"
-        android:clickable="true"
-        android:focusable="true"
-        android:visibility="gone" />
-
     <!-- Top gradient scrim for name + status -->
     <LinearLayout
         android:layout_width="match_parent"
@@ -176,5 +162,33 @@
         android:paddingHorizontal="14dp"
         android:paddingVertical="8dp"
         android:visibility="gone" />
+
+    <!--
+        Local video PiP — declared LAST so it is drawn on top of all other views.
+        The border is on the wrapping FrameLayout, NOT on the SurfaceViewRenderer —
+        any background on a SurfaceView breaks compositing and hides the video.
+        Tap the PiP to swap local/remote views (handled in CallFragment).
+        Starts GONE — only shown for video calls, controlled in CallFragment.
+    -->
+    <FrameLayout
+        android:id="@+id/local_video_container"
+        android:layout_width="112dp"
+        android:layout_height="148dp"
+        android:layout_gravity="bottom|end"
+        android:layout_marginEnd="16dp"
+        android:layout_marginBottom="112dp"
+        android:background="@drawable/call_pip_border"
+        android:elevation="24dp"
+        android:clickable="true"
+        android:focusable="true"
+        android:visibility="gone">
+
+        <org.webrtc.SurfaceViewRenderer
+            android:id="@+id/local_video"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:visibility="gone" />
+
+    </FrameLayout>
 
 </FrameLayout>

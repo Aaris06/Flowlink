@@ -173,6 +173,37 @@
                 android:layout_height="180dp"
                 android:background="@drawable/glass_card_bg_dark"
                 android:padding="8dp" />
+
+            <!-- Session code shown below QR for easy visual sharing -->
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Session Code"
+                android:textColor="#B8B5D4"
+                android:textSize="11sp"
+                android:layout_marginTop="14dp"
+                android:layout_marginBottom="4dp" />
+
+            <TextView
+                android:id="@+id/tv_session_code_qr"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="------"
+                android:textColor="#6C63FF"
+                android:textSize="32sp"
+                android:textStyle="bold"
+                android:letterSpacing="0.3"
+                android:padding="8dp"
+                android:background="@drawable/glass_card_bg_dark"
+                android:layout_marginBottom="4dp" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Tap QR code to share"
+                android:textColor="#6B6890"
+                android:textSize="11sp" />
+
         </LinearLayout>
 
     </LinearLayout>

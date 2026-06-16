@@ -37,6 +37,7 @@ class SessionDetailsFragment : Fragment() {
 
         val code = sm.getCurrentSessionCode() ?: "------"
         binding.tvSessionCode.text = code
+        binding.tvSessionCodeQr.text = code
         binding.tvUsername.text = sm.getUsername()
         binding.tvDeviceName.text = sm.getDeviceName()
         binding.tvDeviceCount.text = mainActivity.webSocketManager.sessionDevices.value.size.toString()

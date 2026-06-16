@@ -188,7 +188,10 @@ class CallFragment : Fragment() {
         btnCameraOff?.setOnClickListener    { toggleCamera() }
         btnSwitchCamera?.setOnClickListener { switchCamera() }
         btnMinimize?.setOnClickListener     { minimizeCall() }
-        localVideoView?.setOnClickListener  { swapVideoViews() }
+        // Tap-to-swap listener goes on the container FrameLayout, not the SurfaceViewRenderer.
+        // SurfaceView touch events are unreliable when clickable is set on the surface itself.
+        view.findViewById<android.widget.FrameLayout?>(R.id.local_video_container)
+            ?.setOnClickListener { swapVideoViews() }
         remoteVideoView?.setOnClickListener { flashControls() }
 
         // Re-sync mute button alpha
@@ -350,24 +353,36 @@ class CallFragment : Fragment() {
         val rTrack = CallSession.remoteVideoTrack
 
         if (CallSession.isVideo) {
+            // Container starts GONE — make it visible for video calls on restore
+            view?.findViewById<android.widget.FrameLayout>(R.id.local_video_container)
+                ?.visibility = View.VISIBLE
             localVideoView?.apply {
-                // Always release before re-init to avoid EGL surface corruption
-                // when re-attaching to an existing track after fragment recreation.
                 runCatching { release() }
                 init(egl.eglBaseContext, null)
                 setMirror(CallSession.usingFrontCamera)
                 setEnableHardwareScaler(true)
-                if (!CallSession.isSwapped) lTrack?.addSink(this)
-                else rTrack?.addSink(this)
-                visibility = View.VISIBLE
+                setScalingType(org.webrtc.RendererCommon.ScalingType.SCALE_ASPECT_FILL)
+                setZOrderMediaOverlay(true)
+                val capturedLTrack = lTrack
+                val capturedRTrack = rTrack
+                val swapped = CallSession.isSwapped
+                post {
+                    if (swapped) capturedRTrack?.addSink(this) else capturedLTrack?.addSink(this)
+                    visibility = View.VISIBLE
+                }
             }
             remoteVideoView?.apply {
                 runCatching { release() }
                 init(egl.eglBaseContext, null)
                 setEnableHardwareScaler(true)
-                if (!CallSession.isSwapped) rTrack?.addSink(this)
-                else lTrack?.addSink(this)
-                visibility = View.VISIBLE
+                setScalingType(org.webrtc.RendererCommon.ScalingType.SCALE_ASPECT_FILL)
+                val capturedLTrack = lTrack
+                val capturedRTrack = rTrack
+                val swapped = CallSession.isSwapped
+                post {
+                    if (swapped) capturedLTrack?.addSink(this) else capturedRTrack?.addSink(this)
+                    visibility = View.VISIBLE
+                }
             }
         }
     }
@@ -469,7 +484,13 @@ class CallFragment : Fragment() {
         CallSession.cameraEnabled = !CallSession.cameraEnabled
         CallSession.localVideoTrack?.setEnabled(CallSession.cameraEnabled)
         btnCameraOff?.alpha = if (CallSession.cameraEnabled) 1.0f else 0.4f
-        localVideoView?.visibility = if (CallSession.cameraEnabled) View.VISIBLE else View.INVISIBLE
+        // Toggle visibility on the container so the border hides/shows with the video
+        val container = view?.findViewById<android.widget.FrameLayout>(R.id.local_video_container)
+        if (container != null) {
+            container.visibility = if (CallSession.cameraEnabled) View.VISIBLE else View.INVISIBLE
+        } else {
+            localVideoView?.visibility = if (CallSession.cameraEnabled) View.VISIBLE else View.INVISIBLE
+        }
     }
 
     private fun switchCamera() {
@@ -533,10 +554,6 @@ class CallFragment : Fragment() {
                 btnCameraOff?.visibility = if (CallSession.isVideo) View.VISIBLE else View.GONE
                 btnSwitchCamera?.visibility = if (CallSession.isVideo) View.VISIBLE else View.GONE
                 btnMinimize?.visibility = View.VISIBLE
-                if (CallSession.isVideo) {
-                    (view as? ViewGroup)?.getChildAt(2)
-                        ?.animate()?.alpha(0f)?.setDuration(400)?.start()
-                }
             }
             CallSession.State.ENDED, CallSession.State.IDLE -> {
                 btnAccept?.visibility = View.GONE
@@ -673,18 +690,24 @@ class CallFragment : Fragment() {
                 CallSession.surfaceTextureHelper  = stHelper
 
                 if (CallSession.isVideo && videoTrack != null) {
+                    // Make the container visible first — it starts GONE in the layout
+                    view?.findViewById<android.widget.FrameLayout>(R.id.local_video_container)
+                        ?.visibility = View.VISIBLE
                     localVideoView?.apply {
                         runCatching { release() }
                         init(egl.eglBaseContext, null)
                         setMirror(CallSession.usingFrontCamera)
                         setEnableHardwareScaler(true)
-                        videoTrack.addSink(this)
-                        visibility = View.VISIBLE
+                        setScalingType(org.webrtc.RendererCommon.ScalingType.SCALE_ASPECT_FILL)
+                        setZOrderMediaOverlay(true)
+                        val capturedTrack = videoTrack
+                        post { capturedTrack.addSink(this); visibility = View.VISIBLE }
                     }
                     remoteVideoView?.apply {
                         runCatching { release() }
                         init(egl.eglBaseContext, null)
                         setEnableHardwareScaler(true)
+                        setScalingType(org.webrtc.RendererCommon.ScalingType.SCALE_ASPECT_FILL)
                     }
                 }
 
@@ -729,10 +752,18 @@ class CallFragment : Fragment() {
                 CallSession.eglBase = egl; CallSession.peerConnectionFactory = factory
                 CallSession.videoCapturer = capturer; CallSession.surfaceTextureHelper = stHelper
                 CallSession.localVideoTrack = videoTrack
+                // Make the container visible — it starts GONE for audio calls
+                view?.findViewById<android.widget.FrameLayout>(R.id.local_video_container)
+                    ?.visibility = View.VISIBLE
                 localVideoView?.apply {
                     runCatching { release() }
-                    init(egl.eglBaseContext, null); setMirror(CallSession.usingFrontCamera)
-                    setEnableHardwareScaler(true); videoTrack.addSink(this); visibility = View.VISIBLE
+                    init(egl.eglBaseContext, null)
+                    setMirror(CallSession.usingFrontCamera)
+                    setEnableHardwareScaler(true)
+                    setScalingType(org.webrtc.RendererCommon.ScalingType.SCALE_ASPECT_FILL)
+                    setZOrderMediaOverlay(true)
+                    val capturedTrack = videoTrack
+                    post { capturedTrack.addSink(this); visibility = View.VISIBLE }
                 }
             }
         } catch (e: Exception) { Log.w(TAG, "startLocalPreviewOnly: ${e.message}") }

@@ -171,18 +171,8 @@ class GroupCallFragment : Fragment() {
         lifecycleScope.launch { wsManager.callEvents.collect { handleCallEvent(it) } }
 
         if (isRestore) {
-            // Re-attach local video to PiP
-            val pip = localPip
-            val egl = GroupCallSession.eglBase
-            if (pip != null && egl != null && GroupCallSession.localVideoTrack != null) {
-                runCatching {
-                    pip.init(egl.eglBaseContext, null)
-                    pip.setEnableHardwareScaler(true)
-                    pip.setMirror(true)
-                    GroupCallSession.localVideoTrack?.addSink(pip)
-                    pip.visibility = View.VISIBLE
-                }
-            }
+            // Re-attach local video to PiP using the shared helper
+            attachLocalPip()
             // Re-attach remote video sinks + rebuild grid
             for ((_, entry) in GroupCallSession.peers) {
                 if (entry.videoView != null) {
@@ -398,13 +388,14 @@ class GroupCallFragment : Fragment() {
     }
 
     private fun activateActiveState() {
-        if (GroupCallSession.isActive) return
         GroupCallSession.isActive = true
         GroupCallSession.state = GroupCallSession.State.ACTIVE
         btnMute?.visibility    = View.VISIBLE
         btnSpeaker?.visibility = View.VISIBLE
         if (isVideo) btnCameraOff?.visibility = View.VISIBLE
         btnMinimize?.visibility = View.VISIBLE
+        // Only start the timer if it isn't already running
+        mainHandler.removeCallbacks(durationTick)
         mainHandler.post(durationTick)
     }
 
@@ -458,19 +449,57 @@ class GroupCallFragment : Fragment() {
                 GroupCallSession.localVideoSource = GroupCallSession.factory!!.createVideoSource(false)
                 val surfaceHelper = SurfaceTextureHelper.create("GCCapture", GroupCallSession.eglBase!!.eglBaseContext)
                 GroupCallSession.videoCapturer!!.initialize(surfaceHelper, ctx, GroupCallSession.localVideoSource!!.capturerObserver)
-                GroupCallSession.videoCapturer!!.startCapture(640, 480, 24)
+                // Capture at 1280×720/30fps — matches CallFragment quality; 640×480 was too small/blurry
+                GroupCallSession.videoCapturer!!.startCapture(1280, 720, 30)
                 GroupCallSession.localVideoTrack = GroupCallSession.factory!!.createVideoTrack("gcVideo0", GroupCallSession.localVideoSource)
 
-                // Attach local track to the PiP view on main thread
+                // Attach local track to the PiP view on main thread.
+                // Use postDelayed as a safety net: if localPip is not yet laid out
+                // when withContext(Main) runs, we retry after the next layout pass.
                 withContext(Dispatchers.Main) {
-                    val pip = localPip ?: return@withContext
-                    pip.init(GroupCallSession.eglBase!!.eglBaseContext, null)
-                    pip.setEnableHardwareScaler(true)
-                    pip.setMirror(true)
+                    attachLocalPip()
+                }
+            }
+        }
+    }
+
+    /**
+     * Initialise the local-PiP SurfaceViewRenderer and attach the local video track to it.
+     *
+     * Key invariants that must all be satisfied for the video to appear:
+     * 1. release() before init() — avoids EGL surface corruption on re-attach.
+     * 2. setZOrderMediaOverlay(true) — SurfaceView renders BEHIND other views by
+     *    default; this flag promotes it to render in front of sibling Views while
+     *    still compositing behind system UI (status bar, nav bar).
+     * 3. addSink() via post{} — init() creates the EGL context asynchronously.
+     *    Calling addSink() in the same synchronous block means the first frames
+     *    arrive before the GL surface is ready and are silently dropped.
+     *    A single post() defers addSink to after the next layout/draw pass, by
+     *    which time the surface is guaranteed to be available.
+     */
+    private fun attachLocalPip() {
+        val pip = localPip ?: return
+        if (GroupCallSession.localVideoTrack == null) return
+        val egl = GroupCallSession.eglBase ?: return
+        try {
+            runCatching { pip.release() }
+            pip.init(egl.eglBaseContext, null)
+            pip.setEnableHardwareScaler(true)
+            pip.setScalingType(org.webrtc.RendererCommon.ScalingType.SCALE_ASPECT_FILL)
+            pip.setMirror(true)
+            pip.setZOrderMediaOverlay(true)
+            // Show the container wrapper — it starts GONE (hidden for audio calls)
+            view?.findViewById<android.widget.FrameLayout>(R.id.gcf_local_pip_container)
+                ?.visibility = View.VISIBLE
+            // Defer addSink to after the GL surface is created (init is async)
+            pip.post {
+                if (isAdded) {
                     GroupCallSession.localVideoTrack?.addSink(pip)
                     pip.visibility = View.VISIBLE
                 }
             }
+        } catch (e: Exception) {
+            Log.e(TAG, "attachLocalPip failed: ${e.message}")
         }
     }
 
@@ -670,6 +699,7 @@ class GroupCallFragment : Fragment() {
                     videoView = SurfaceViewRenderer(requireContext()).apply {
                         init(egl.eglBaseContext, null)
                         setEnableHardwareScaler(true)
+                        setScalingType(org.webrtc.RendererCommon.ScalingType.SCALE_ASPECT_FILL)
                     }
                 } catch (e: Exception) {
                     Log.e(TAG, "SurfaceViewRenderer init failed for $peerId: ${e.message}")

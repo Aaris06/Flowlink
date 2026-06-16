@@ -37,6 +37,9 @@ interface ChatMessageItem {
   sentAt: number;
   delivered: boolean;
   seen: boolean;
+  replyToId?: string;
+  replyToText?: string;
+  replyToUsername?: string;
 }
 
 interface StudyStoreFile {
@@ -111,6 +114,7 @@ export default function DeviceTiles({
   const [chatMessages, setChatMessages] = useState<ChatMessageItem[]>([]);
   const [chatUnreadCount, setChatUnreadCount] = useState(0);
   const [typingByDevice, setTypingByDevice] = useState<Record<string, boolean>>({});
+  const [replyingTo, setReplyingTo] = useState<ChatMessageItem | null>(null);
   const [transferStatuses, setTransferStatuses] = useState<Record<string, FileTransferStatus | null>>({});
   const [isStudyOpen, setIsStudyOpen] = useState(false);
   const [activeStudyTab, setActiveStudyTab] = useState<'store' | 'room'>('store');
@@ -784,6 +788,9 @@ export default function DeviceTiles({
           sentAt: chat.sentAt || Date.now(),
           delivered: true,
           seen: isChatOpen,
+          replyToId: chat.replyToId || undefined,
+          replyToText: chat.replyToText || undefined,
+          replyToUsername: chat.replyToUsername || undefined,
         }));
         if (!isChatOpen) {
           setChatUnreadCount((prev) => prev + 1);
@@ -1549,8 +1556,13 @@ export default function DeviceTiles({
       sentAt,
       delivered: false,
       seen: false,
+      replyToId: replyingTo?.messageId,
+      replyToText: replyingTo?.text,
+      replyToUsername: replyingTo?.username,
     }));
     setChatInput('');
+    const replySnapshot = replyingTo;
+    setReplyingTo(null);
     setTypingByDevice((prev) => ({ ...prev, [deviceId]: false }));
     wsRef.current.send(JSON.stringify({
       type: 'chat_message',
@@ -1564,6 +1576,11 @@ export default function DeviceTiles({
           username,
           sentAt,
           format: 'plain',
+          ...(replySnapshot && {
+            replyToId: replySnapshot.messageId,
+            replyToText: replySnapshot.text,
+            replyToUsername: replySnapshot.username,
+          }),
         },
       },
       timestamp: Date.now(),
@@ -1938,6 +1955,13 @@ export default function DeviceTiles({
                   const own = item.sourceDevice === deviceId;
                   return (
                     <div key={item.messageId} className={`chat-bubble ${own ? 'own' : 'other'}`}>
+                      {/* Reply quote strip */}
+                      {item.replyToId && item.replyToText && (
+                        <div className="chat-reply-quote">
+                          <span className="chat-reply-author">{item.replyToUsername || 'User'}</span>
+                          <span className="chat-reply-text">{item.replyToText.length > 60 ? item.replyToText.slice(0, 60) + '…' : item.replyToText}</span>
+                        </div>
+                      )}
                       <div className="chat-meta">
                         <span>{own ? 'You' : item.username}</span>
                         <span>{new Date(item.sentAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
@@ -1948,6 +1972,12 @@ export default function DeviceTiles({
                           {item.seen ? '✓✓' : item.delivered ? '✓✓' : '✓'}
                         </div>
                       )}
+                      {/* Tap-to-reply button */}
+                      <button
+                        className="chat-reply-btn"
+                        title="Reply"
+                        onClick={() => setReplyingTo(item)}
+                      >↩</button>
                     </div>
                   );
                 })}
@@ -1958,10 +1988,19 @@ export default function DeviceTiles({
                   </div>
                 )}
               </div>
+              {/* Reply preview bar — shown above input when replying */}
+              {replyingTo && (
+                <div className="chat-reply-bar">
+                  <span className="chat-reply-bar-label">↩ {replyingTo.username}: </span>
+                  <span className="chat-reply-bar-text">{replyingTo.text.length > 50 ? replyingTo.text.slice(0, 50) + '…' : replyingTo.text}</span>
+                  <button className="chat-reply-bar-close" onClick={() => setReplyingTo(null)}>×</button>
+                </div>
+              )}
               <div className="chat-input-row">
                 <textarea
                   value={chatInput}
                   onChange={(e) => setChatInput(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChatMessage(); } }}
                   placeholder="Type message, code, or link..."
                 />
                 <button onClick={sendChatMessage}>Send</button>

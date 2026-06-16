@@ -1692,18 +1692,23 @@ class MainActivity : AppCompatActivity(), UsernameDialogFragment.UsernameDialogL
                 com.flowlink.app.service.CallSession.currentDurationSec() % 60)
         else "Calling…"
 
-        // Show local video preview inside bubble for video calls
+        // Show REMOTE video preview inside bubble for video calls.
+        // The bubble represents the connected user, so we show their stream, not ours.
         if (com.flowlink.app.service.CallSession.isVideo) {
-            val egl    = com.flowlink.app.service.CallSession.eglBase
-            val vTrack = com.flowlink.app.service.CallSession.localVideoTrack
+            val egl      = com.flowlink.app.service.CallSession.eglBase
+            val vTrack   = com.flowlink.app.service.CallSession.remoteVideoTrack
             if (egl != null && vTrack != null && videoSv != null) {
                 runCatching {
                     videoSv.init(egl.eglBaseContext, null)
-                    videoSv.setMirror(com.flowlink.app.service.CallSession.usingFrontCamera)
+                    videoSv.setMirror(false)          // remote stream — no mirror
                     videoSv.setEnableHardwareScaler(true)
-                    vTrack.addSink(videoSv)
-                    videoSv.visibility = android.view.View.VISIBLE
-                    audioBg?.visibility = android.view.View.GONE
+                    videoSv.setScalingType(org.webrtc.RendererCommon.ScalingType.SCALE_ASPECT_FILL)
+                    videoSv.setZOrderMediaOverlay(true)
+                    videoSv.post {
+                        vTrack.addSink(videoSv)
+                        videoSv.visibility = android.view.View.VISIBLE
+                        audioBg?.visibility = android.view.View.GONE
+                    }
                 }
             }
         }
@@ -1798,11 +1803,11 @@ class MainActivity : AppCompatActivity(), UsernameDialogFragment.UsernameDialogL
     fun hideBubbleAndRestoreIfNeeded() {
         val bubble = callBubbleView ?: return
         callBubbleView = null
-        // Release bubble video sink
+        // Release bubble video sink — remove from remoteVideoTrack (what the bubble now shows)
         runCatching {
             val sv = bubble.findViewById<org.webrtc.SurfaceViewRenderer?>(R.id.bubble_video)
             if (sv?.visibility == android.view.View.VISIBLE) {
-                com.flowlink.app.service.CallSession.localVideoTrack?.removeSink(sv)
+                com.flowlink.app.service.CallSession.remoteVideoTrack?.removeSink(sv)
                 sv.release()
             }
         }

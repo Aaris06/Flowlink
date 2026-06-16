@@ -187,11 +187,12 @@
   width: 100px;
   height: 140px;
   object-fit: cover;
+  display: block;           /* removes inline baseline gap that causes blurriness */
   border-radius: 12px;
-  border: 2px solid rgba(255, 255, 255, 0.3);
-  z-index: 2;
-  background: #1e1b4b;
-  /* Show even when not in full video mode */
+  border: 2px solid rgba(255, 255, 255, 0.5);
+  z-index: 20;
+  background: transparent;  /* transparent — black bg shows before stream loads */
+  isolation: isolate;
 }
 
 /* In non-video-mode, local preview sits above the info area */
@@ -203,6 +204,8 @@
   height: 120px;
   margin: 0 auto;
   border-radius: 10px;
+  background: transparent;
+  display: block;
 }
 
 .call-icon {

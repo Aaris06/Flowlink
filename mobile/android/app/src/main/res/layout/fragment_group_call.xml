@@ -149,16 +149,27 @@
 
     </LinearLayout>
 
-    <!-- Local video PiP: floating overlay in bottom-right of the video area -->
-    <org.webrtc.SurfaceViewRenderer
-        android:id="@+id/gcf_local_pip"
-        android:layout_width="110dp"
-        android:layout_height="80dp"
+    <!-- Local video PiP: floating overlay in bottom-right, above controls and grid.
+         The SurfaceViewRenderer must NOT have android:background set on it.
+         The border is provided by the wrapping FrameLayout.
+         Starts GONE — only shown for video calls, controlled in GroupCallFragment. -->
+    <FrameLayout
+        android:id="@+id/gcf_local_pip_container"
+        android:layout_width="114dp"
+        android:layout_height="84dp"
         android:layout_gravity="bottom|end"
         android:layout_marginEnd="12dp"
-        android:layout_marginBottom="80dp"
-        android:background="@drawable/call_pip_bg"
-        android:elevation="8dp"
-        android:visibility="gone"/>
+        android:layout_marginBottom="100dp"
+        android:background="@drawable/call_pip_border"
+        android:elevation="24dp"
+        android:visibility="gone">
+
+        <org.webrtc.SurfaceViewRenderer
+            android:id="@+id/gcf_local_pip"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:visibility="gone"/>
+
+    </FrameLayout>
 
 </FrameLayout>
