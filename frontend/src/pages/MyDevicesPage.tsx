@@ -222,7 +222,12 @@ export default function MyDevicesPage({ ctx }: Props) {
     const progress = total > 0 ? Math.min(100, Math.round((transferred / total) * 100)) : (payload.progress || 0);
     setTransfers(p => {
       const cur = p[src];
-      return { ...p, [src]: { fileName: cur?.fileName || payload.fileName || 'File', direction: 'sending', progress, totalBytes: total || cur?.totalBytes || 0, transferredBytes: transferred || cur?.transferredBytes || 0, speedBytesPerSec: cur?.speedBytesPerSec || 0, etaSeconds: payload.completed ? 0 : (cur?.etaSeconds || 0), startedAt: cur?.startedAt || Date.now(), completed: Boolean(payload.completed) || progress >= 100 } };
+      const startedAt = cur?.startedAt || Date.now();
+      const elapsedSec = Math.max(0.001, (Date.now() - startedAt) / 1000);
+      const speedBytesPerSec = transferred > 0 ? Math.round(transferred / elapsedSec) : 0;
+      const remaining = total - transferred;
+      const etaSeconds = speedBytesPerSec > 0 && remaining > 0 ? Math.ceil(remaining / speedBytesPerSec) : 0;
+      return { ...p, [src]: { fileName: cur?.fileName || payload.fileName || 'File', direction: 'sending', progress, totalBytes: total || cur?.totalBytes || 0, transferredBytes: transferred, speedBytesPerSec, etaSeconds: payload.completed ? 0 : etaSeconds, startedAt, completed: Boolean(payload.completed) || progress >= 100 } };
     });
     if (Boolean(payload.completed) || progress >= 100) {
       setTimeout(() => setTransfers(p => { const n = { ...p }; delete n[src]; return n; }), 2000);
@@ -262,16 +267,17 @@ export default function MyDevicesPage({ ctx }: Props) {
     if (intent.intent_type === 'file_handoff' && intent.payload.file) {
       const f = intent.payload.file as any;
       const file: File = f.localRef instanceof File ? f.localRef : new File([new Uint8Array(f.data || [])], f.name, { type: f.type });
+      // Seed the UI immediately; ack-driven updates will take over from here.
       setTransfers(p => ({ ...p, [targetId]: { fileName: file.name, direction: 'sending', progress: 0, totalBytes: file.size, transferredBytes: 0, speedBytesPerSec: 0, etaSeconds: 0, startedAt: Date.now(), completed: false } }));
-      await fileBridgeRef.current.sendFile(file, targetId, (stats) => setTransfers(p => ({ ...p, [targetId]: stats })));
+      await fileBridgeRef.current.sendFile(file, targetId);
     }
     if (intent.intent_type === 'batch_file_handoff' && intent.payload.files) {
       const files = (intent.payload.files as any).files.map((f: any) => f.localRef instanceof File ? f.localRef : new File([new Uint8Array(f.data || [])], f.name, { type: f.type })).filter(Boolean);
       const total = files.reduce((s: number, f: File) => s + f.size, 0);
-      let sent = 0;
+      // Seed batch UI; acks drive incremental updates.
+      setTransfers(p => ({ ...p, [targetId]: { fileName: `${files.length} files`, direction: 'sending', progress: 0, totalBytes: total, transferredBytes: 0, speedBytesPerSec: 0, etaSeconds: 0, startedAt: Date.now(), completed: false } }));
       for (const file of files) {
-        await fileBridgeRef.current.sendFile(file, targetId, (stats) => setTransfers(p => ({ ...p, [targetId]: { ...stats, fileName: `${files.length} files`, totalBytes: total, transferredBytes: sent + stats.transferredBytes, progress: Math.round(((sent + stats.transferredBytes) / total) * 100) } })));
-        sent += file.size;
+        await fileBridgeRef.current.sendFile(file, targetId);
       }
       setTransfers(p => {
         const current = p[targetId];

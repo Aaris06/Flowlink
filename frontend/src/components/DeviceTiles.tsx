@@ -341,7 +341,20 @@ export default function DeviceTiles({
     if (intent.intent_type === 'file_handoff' && intent.payload.file) {
       const file = toFile(intent.payload.file);
       if (!file) throw new Error('Invalid file payload');
-      await fileBridgeRef.current.sendFile(file, deviceId, (stats) => applyTransferStats(deviceId, stats));
+      // Seed the transfer status tile so the UI shows "Starting..." before the first
+      // ack arrives. From then on, incoming file_transfer_ack messages drive the UI.
+      applyTransferStats(deviceId, {
+        fileName: file.name,
+        direction: 'sending',
+        progress: 0,
+        totalBytes: file.size,
+        transferredBytes: 0,
+        speedBytesPerSec: 0,
+        etaSeconds: 0,
+        startedAt: Date.now(),
+        completed: false,
+      });
+      await fileBridgeRef.current.sendFile(file, deviceId);
       return;
     }
 
@@ -350,32 +363,30 @@ export default function DeviceTiles({
       if (!files.length) throw new Error('Invalid batch file payload');
 
       const totalBytes = files.reduce((sum, f) => sum + f.size, 0);
-      let transferredBytes = 0;
       const startedAt = Date.now();
+      const batchLabel = intent.payload.files?.batchId ? `${intent.payload.files.totalFiles} files` : `${files.length} files`;
+
+      // Seed the tile so the user sees "Sending X files" immediately.
+      // Acks from the receiver will update transferredBytes/speed/progress
+      // as each chunk is confirmed — no more oscillation.
+      applyTransferStats(deviceId, {
+        fileName: batchLabel,
+        direction: 'sending',
+        progress: 0,
+        totalBytes,
+        transferredBytes: 0,
+        speedBytesPerSec: 0,
+        etaSeconds: 0,
+        startedAt,
+        completed: false,
+      });
 
       for (const file of files) {
-        await fileBridgeRef.current.sendFile(file, deviceId, (stats) => {
-          const elapsed = Math.max(0.001, (Date.now() - startedAt) / 1000);
-          const combinedTransferred = transferredBytes + stats.transferredBytes;
-          const speedBytesPerSec = combinedTransferred / elapsed;
-          const etaSeconds = Math.max(0, Math.ceil((totalBytes - combinedTransferred) / Math.max(1, speedBytesPerSec)));
-          applyTransferStats(deviceId, {
-            fileName: intent.payload.files?.batchId ? `${intent.payload.files.totalFiles} files` : file.name,
-            direction: 'sending',
-            progress: Math.min(99, Math.round((combinedTransferred / totalBytes) * 100)),
-            totalBytes,
-            transferredBytes: combinedTransferred,
-            speedBytesPerSec,
-            etaSeconds,
-            startedAt,
-            completed: false,
-          });
-        });
-        transferredBytes += file.size;
+        await fileBridgeRef.current.sendFile(file, deviceId);
       }
 
       applyTransferStats(deviceId, {
-        fileName: intent.payload.files.batchId ? `${intent.payload.files.totalFiles} files` : 'Files',
+        fileName: batchLabel,
         direction: 'sending',
         progress: 100,
         totalBytes,
@@ -700,15 +711,24 @@ export default function DeviceTiles({
         const transferredBytes = payload.transferredBytes || 0;
         const progress = totalBytes > 0 ? Math.min(100, Math.round((transferredBytes / totalBytes) * 100)) : (payload.progress || 0);
         const current = transferStatuses[source];
+        // Compute speed from the elapsed time since the transfer started.
+        // This gives a stable, monotonically-increasing progress display because
+        // the ack reflects bytes the *receiver* has confirmed — no more
+        // oscillation caused by the sender racing ahead of the receiver.
+        const startedAt = current?.startedAt || Date.now();
+        const elapsedSec = Math.max(0.001, (Date.now() - startedAt) / 1000);
+        const speedBytesPerSec = transferredBytes > 0 ? Math.round(transferredBytes / elapsedSec) : 0;
+        const remaining = totalBytes - transferredBytes;
+        const etaSeconds = speedBytesPerSec > 0 && remaining > 0 ? Math.ceil(remaining / speedBytesPerSec) : 0;
         applyTransferStats(source, {
           fileName: current?.fileName || payload.fileName || 'File',
           direction: 'sending',
           progress,
           totalBytes: totalBytes || current?.totalBytes || 0,
-          transferredBytes: transferredBytes || current?.transferredBytes || 0,
-          speedBytesPerSec: current?.speedBytesPerSec || 0,
-          etaSeconds: payload.completed ? 0 : (current?.etaSeconds || 0),
-          startedAt: current?.startedAt || Date.now(),
+          transferredBytes,
+          speedBytesPerSec,
+          etaSeconds: payload.completed ? 0 : etaSeconds,
+          startedAt,
           completed: Boolean(payload.completed) || progress >= 100,
         });
         break;

@@ -28,12 +28,15 @@ export default class FileBridge {
   }
 
   /**
-   * Send file to target device
+   * Send file to target device.
+   * Progress is reported to the caller via incoming file_transfer_ack messages
+   * (handled in DeviceTiles / MyDevicesPage), not by this method directly.
+   * This avoids the "oscillating progress" bug where sender-queued bytes and
+   * receiver-confirmed bytes would overwrite each other in the UI.
    */
   async sendFile(
     file: File,
-    targetDeviceId: string,
-    onProgress?: (stats: TransferStats) => void
+    targetDeviceId: string
   ): Promise<void> {
     const transferId = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
     
@@ -44,7 +47,6 @@ export default class FileBridge {
       totalSize: file.size,
       transferred: 0,
       acknowledged: 0,
-      onProgress,
       cancelled: false,
       startedAt: Date.now(),
     };
@@ -98,21 +100,13 @@ export default class FileBridge {
           await this.sendChunk(transfer.id, chunkIndex, chunkBase64, transfer.targetDeviceId, transfer.file.name, transfer.file.type, transfer.totalSize);
           
           transfer.transferred += chunk.byteLength;
-          const elapsedSeconds = Math.max(0.001, (Date.now() - transfer.startedAt) / 1000);
-          const speedBytesPerSec = transfer.transferred / elapsedSeconds;
-          const etaSeconds = Math.max(0, Math.ceil((transfer.totalSize - transfer.transferred) / Math.max(1, speedBytesPerSec)));
-          transfer.onProgress?.({
-            fileName: transfer.file.name,
-            // Keep sender below 100 until receiver confirms completion.
-            progress: Math.min(99, Math.round((transfer.transferred / transfer.totalSize) * 100)),
-            totalBytes: transfer.totalSize,
-            transferredBytes: transfer.transferred,
-            speedBytesPerSec,
-            etaSeconds,
-            direction: 'sending',
-            startedAt: transfer.startedAt,
-            completed: false,
-          });
+          // NOTE: We deliberately do NOT emit per-chunk progress here.
+          // The sender's UI is driven entirely by incoming file_transfer_ack messages
+          // (DeviceTiles case 'file_transfer_ack'), which reflect bytes the *receiver*
+          // has actually confirmed.  Emitting from here too caused the "jumping progress"
+          // bug: chunks pushed into the WS buffer raced ahead of receiver acks, so the
+          // display would oscillate (e.g. 8 MB → 5 MB → 8 MB) as the two sources
+          // alternated overwriting each other.
 
           offset += chunk.byteLength;
           chunkIndex++;
@@ -122,19 +116,9 @@ export default class FileBridge {
             const nextChunk = file.slice(offset, offset + this.CHUNK_SIZE);
             reader.readAsArrayBuffer(nextChunk);
           } else {
-            // Transfer complete
+            // Transfer complete — the final file_transfer_complete message triggers
+            // a 100% ack from the receiver which will update the UI on the sender side.
             await this.sendTransferComplete(transfer.id, transfer.targetDeviceId, transfer.file.name);
-            transfer.onProgress?.({
-              fileName: transfer.file.name,
-              progress: 99,
-              totalBytes: transfer.totalSize,
-              transferredBytes: transfer.totalSize,
-              speedBytesPerSec: transfer.totalSize / Math.max(0.001, (Date.now() - transfer.startedAt) / 1000),
-              etaSeconds: 0,
-              direction: 'sending',
-              startedAt: transfer.startedAt,
-              completed: false,
-            });
             this.activeTransfers.delete(transfer.id);
             resolve();
           }
@@ -293,7 +277,6 @@ interface FileTransfer {
   totalSize: number;
   transferred: number;
   acknowledged: number;
-  onProgress?: (stats: TransferStats) => void;
   cancelled: boolean;
   startedAt: number;
 }
