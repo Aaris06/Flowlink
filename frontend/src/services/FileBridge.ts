@@ -14,7 +14,14 @@ export default class FileBridge {
   private webrtcManager: WebRTCManager;
   private activeTransfers: Map<string, FileTransfer> = new Map();
   private readonly CHUNK_SIZE = 64 * 1024; // 64KB chunks
-  private readonly MAX_UNACKED_BYTES = 1024 * 1024; // 1MB in-flight window
+  // Allow up to 4 MB unacked — the WS backpressure in WebRTCManager already
+  // caps the actual network queue. The old 1 MB window was too tight and would
+  // permanently stall when acks were delayed by even a few hundred ms on slower
+  // connections (laptop → mobile / laptop → laptop).
+  private readonly MAX_UNACKED_BYTES = 4 * 1024 * 1024; // 4MB in-flight window
+  // If no ack arrives within this many milliseconds, stop waiting and continue
+  // regardless. This prevents a permanent stall if an ack is lost in transit.
+  private readonly ACK_TIMEOUT_MS = 10_000; // 10 seconds
 
   constructor(webrtcManager: WebRTCManager) {
     this.webrtcManager = webrtcManager;
@@ -148,11 +155,26 @@ export default class FileBridge {
   }
 
   private async waitForAckWindow(transfer: FileTransfer): Promise<void> {
-    while (!transfer.cancelled && (transfer.transferred - transfer.acknowledged) > this.MAX_UNACKED_BYTES) {
+    if ((transfer.transferred - transfer.acknowledged) <= this.MAX_UNACKED_BYTES) return;
+
+    // Wait for receiver acks, but never stall forever — if no ack arrives within
+    // ACK_TIMEOUT_MS we continue anyway. This handles cases where the ack path is
+    // lossy (e.g., laptop → mobile over a flaky WiFi connection).
+    const deadline = Date.now() + this.ACK_TIMEOUT_MS;
+    while (
+      !transfer.cancelled &&
+      (transfer.transferred - transfer.acknowledged) > this.MAX_UNACKED_BYTES &&
+      Date.now() < deadline
+    ) {
       await new Promise((resolve) => window.setTimeout(resolve, 12));
     }
     if (transfer.cancelled) {
       throw new Error('Transfer cancelled');
+    }
+    // If we timed out, reset acknowledged to current transferred so the window
+    // re-opens and the transfer can continue rather than freezing indefinitely.
+    if ((transfer.transferred - transfer.acknowledged) > this.MAX_UNACKED_BYTES) {
+      transfer.acknowledged = transfer.transferred;
     }
   }
 

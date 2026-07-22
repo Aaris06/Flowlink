@@ -206,7 +206,8 @@ class DeviceTilesFragment : Fragment() {
                                     "remote_browse" to false
                                 ),
                                 joinedAt = System.currentTimeMillis(),
-                                lastSeen = System.currentTimeMillis()
+                                lastSeen = System.currentTimeMillis(),
+                                username = info.username
                             )
                         }
                     }

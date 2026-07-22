@@ -54,6 +54,12 @@ class WebSocketManager(private val mainActivity: MainActivity) {
     private val transferStartedAt = mutableMapOf<String, Long>()
     private val fileTransferLastUiUpdateAt = mutableMapOf<String, Long>()
     private val fileTransferLastAckBytes = mutableMapOf<String, Long>()
+
+    // Tracks the last time a "device connected" notification was shown per device ID.
+    // Prevents duplicate notifications when the backend re-broadcasts device_connected
+    // due to WS reconnects (e.g. every time the app is foregrounded while in-session).
+    private val deviceConnectedNotifLastShownAt = mutableMapOf<String, Long>()
+    private val DEVICE_CONNECTED_NOTIF_COOLDOWN_MS = 30_000L // 30 seconds
     private val PROGRESS_UPDATE_INTERVAL_MS = 250L
     private val ACK_INTERVAL_BYTES = 512L * 1024L
     // Keep the outbound WS queue below 1 MB so OkHttp's write buffer never
@@ -1083,13 +1089,17 @@ class WebSocketManager(private val mainActivity: MainActivity) {
 
                     // Only notify and emit if it's not the current device
                     if (deviceInfo.id.isNotBlank() && deviceInfo.id != sessionManager.getDeviceId()) {
-                        // Only show the system notification when the app is NOT in the foreground.
-                        // When the user is on the Share/DeviceTiles page they can already see
-                        // the device tile appear — a notification on top of that is redundant
-                        // and causes the "continuous notifications" symptom.
-                        if (!mainActivity.isAppInForeground) {
+                        // Show the system notification only when:
+                        //  1. The app is NOT in the foreground (user can't see the tile appear), AND
+                        //  2. The same device hasn't triggered a notification within the cooldown
+                        //     window (prevents a flood of notifications on WS reconnects).
+                        val now = System.currentTimeMillis()
+                        val lastShown = deviceConnectedNotifLastShownAt[deviceInfo.id] ?: 0L
+                        val cooldownOk = (now - lastShown) >= DEVICE_CONNECTED_NOTIF_COOLDOWN_MS
+                        if (!mainActivity.isAppInForeground && cooldownOk) {
                             try {
                                 mainActivity.notificationService.showDeviceConnected(deviceInfo.name, deviceInfo.type)
+                                deviceConnectedNotifLastShownAt[deviceInfo.id] = now
                             } catch (e: Exception) {
                                 Log.e("FlowLink", "Failed to show device connected notification", e)
                             }
@@ -1119,6 +1129,9 @@ class WebSocketManager(private val mainActivity: MainActivity) {
                     
                     // Clear stale device_connected so the QR screen doesn't immediately navigate
                     resetDeviceConnectedEvent()
+                    // Also reset the notification dedup map so devices connecting to the
+                    // new session are always announced (at most once per cooldown window).
+                    deviceConnectedNotifLastShownAt.clear()
 
                     // CRITICAL FIX: Update SessionManager with backend's sessionId immediately
                     // This ensures all future intent_send messages use the correct sessionId

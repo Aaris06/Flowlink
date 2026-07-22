@@ -107,7 +107,7 @@ class ShareFragment : Fragment() {
                     connectedDevices[info.id] = Device(
                         id = info.id, name = info.name, type = info.type, online = true,
                         permissions = emptyMap(), joinedAt = System.currentTimeMillis(),
-                        lastSeen = System.currentTimeMillis()
+                        lastSeen = System.currentTimeMillis(), username = info.username
                     )
                 }
                 deviceAdapter?.updateData(connectedDevices.values.toList(), transferStatuses)

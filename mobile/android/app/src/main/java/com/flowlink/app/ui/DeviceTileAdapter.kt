@@ -49,7 +49,11 @@ class DeviceTileAdapter(
     override fun onBindViewHolder(holder: DeviceViewHolder, position: Int) {
         val device = devices[position]
         holder.deviceName.text = device.name
-        holder.deviceType.text = device.type
+        // Show the signed-in username if available; fall back to a capitalised
+        // device-type label so the tile always has meaningful secondary text.
+        holder.deviceType.text = device.username.ifEmpty {
+            device.type.replaceFirstChar { it.uppercaseChar() }
+        }
 
         val isOnline = device.online
         holder.deviceStatus.text = if (isOnline) "Online" else "Offline"

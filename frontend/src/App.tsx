@@ -445,6 +445,12 @@ function Shell() {
             fileType: message.payload?.fileType || 'application/octet-stream',
             totalBytes: message.payload?.totalBytes || 0,
             chunks: [] as Uint8Array[],
+            // Track bytes received and last-acked position so we can unblock the sender's
+            // ack-window (FileBridge.waitForAckWindow). Without these acks the sender stalls
+            // at its MAX_UNACKED_BYTES limit and the transfer freezes.
+            transferredBytes: 0,
+            lastAckBytes: 0,
+            sourceDevice: (message.payload?.sourceDevice as string) || '',
           };
         }
         break;
@@ -457,6 +463,28 @@ function Shell() {
             const bytes = new Uint8Array(bin.length);
             for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
             buf.chunks.push(bytes);
+            buf.transferredBytes = (buf.transferredBytes || 0) + bytes.length;
+            // Resolve sourceDevice from the buffer (set on start) or the message payload
+            const srcDevice: string = buf.sourceDevice || (message.payload?.sourceDevice as string) || '';
+            // Send ack every 512 KB so FileBridge on the sender can slide its window forward
+            const ACK_INTERVAL = 512 * 1024;
+            if (srcDevice && wsRef.current?.readyState === WebSocket.OPEN &&
+                buf.transferredBytes - (buf.lastAckBytes || 0) >= ACK_INTERVAL) {
+              buf.lastAckBytes = buf.transferredBytes;
+              wsRef.current.send(JSON.stringify({
+                type: 'file_transfer_ack',
+                sessionId: session?.id || '',
+                deviceId,
+                payload: {
+                  transferId: message.payload.transferId,
+                  targetDevice: srcDevice,
+                  transferredBytes: buf.transferredBytes,
+                  totalBytes: buf.totalBytes,
+                  progress: buf.totalBytes > 0 ? Math.min(99, Math.round((buf.transferredBytes / buf.totalBytes) * 100)) : 0,
+                },
+                timestamp: Date.now(),
+              }));
+            }
           } catch { /* ignore bad chunk */ }
         }
         break;
@@ -479,6 +507,24 @@ function Shell() {
               });
             }
             addNotification('File Received', buf.fileName, 'success');
+            // Send final ack so the sender's FileBridge resolves the transfer at 100 %
+            const srcDevice: string = buf.sourceDevice || (message.payload?.sourceDevice as string) || '';
+            if (srcDevice && wsRef.current?.readyState === WebSocket.OPEN) {
+              wsRef.current.send(JSON.stringify({
+                type: 'file_transfer_ack',
+                sessionId: session?.id || '',
+                deviceId,
+                payload: {
+                  transferId: message.payload.transferId,
+                  targetDevice: srcDevice,
+                  transferredBytes: buf.totalBytes,
+                  totalBytes: buf.totalBytes,
+                  progress: 100,
+                  completed: true,
+                },
+                timestamp: Date.now(),
+              }));
+            }
           } catch { /* ignore */ }
           delete (window as any)._ftBuffers[message.payload?.transferId];
         }

@@ -13,7 +13,11 @@ export default class WebRTCManager {
   private peers: Map<string, RTCPeerConnection> = new Map();
   private dataChannels: Map<string, RTCDataChannel> = new Map();
   private readonly DEFAULT_MAX_BUFFERED = 4 * 1024 * 1024;
-  private readonly FILE_CHUNK_MAX_BUFFERED = 512 * 1024;
+  // Allow up to 2 MB buffered for file chunks before applying WS backpressure.
+  // The previous 512 KB limit was too conservative — it introduced artificial
+  // pauses that compounded with the ack-window delay and caused stalls on
+  // laptop → mobile / laptop → laptop transfers.
+  private readonly FILE_CHUNK_MAX_BUFFERED = 2 * 1024 * 1024;
 
   constructor(ws: WebSocket, deviceId: string, sessionId: string) {
     this.deviceId = deviceId;
