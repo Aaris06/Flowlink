@@ -281,18 +281,6 @@ interface FileTransfer {
   startedAt: number;
 }
 
-interface TransferStats {
-  fileName: string;
-  direction: 'sending' | 'receiving';
-  progress: number;
-  totalBytes: number;
-  transferredBytes: number;
-  speedBytesPerSec: number;
-  etaSeconds: number;
-  startedAt: number;
-  completed: boolean;
-}
-
 interface FileSystemEntry {
   name: string;
   path: string;
