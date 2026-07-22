@@ -56,7 +56,11 @@ class WebSocketManager(private val mainActivity: MainActivity) {
     private val fileTransferLastAckBytes = mutableMapOf<String, Long>()
     private val PROGRESS_UPDATE_INTERVAL_MS = 250L
     private val ACK_INTERVAL_BYTES = 512L * 1024L
-    private val MAX_WS_QUEUE_BYTES = 4L * 1024L * 1024L
+    // Keep the outbound WS queue below 1 MB so OkHttp's write buffer never
+    // fills up and stalls the sender.  Previously this was 4 MB, which let
+    // ~7 back-to-back 128 KB chunks pile up before pausing — exactly the
+    // point (~1.1 MB) where transfers were freezing.
+    private val MAX_WS_QUEUE_BYTES = 512L * 1024L
 
     private val _sessionCreated = MutableStateFlow<SessionCreatedEvent?>(null)
     val sessionCreated: StateFlow<SessionCreatedEvent?> = _sessionCreated
@@ -607,7 +611,11 @@ class WebSocketManager(private val mainActivity: MainActivity) {
                 val startAt = SystemClock.elapsedRealtime()
                 val initialSessionId = sessionManager.getCurrentSessionId()
                 var sentBytes = 0L
-                val buffer = ByteArray(128 * 1024)
+                // 64 KB raw → ~85 KB base64-encoded frame. Keeping frames small
+                // prevents the WebSocket send buffer from backing up (the old 128 KB
+                // buffer caused ~7 queued frames ≈ 1.1 MB before the drain pause
+                // which is exactly where transfers were stalling).
+                val buffer = ByteArray(64 * 1024)
                 mainActivity.contentResolver.openInputStream(uri)?.use { stream ->
                     var read = stream.read(buffer)
                     var chunkIndex = 0
@@ -1073,14 +1081,19 @@ class WebSocketManager(private val mainActivity: MainActivity) {
                     Log.d("FlowLink", "  Current device ID: ${sessionManager.getDeviceId()}")
                     Log.d("FlowLink", "  Is self: ${deviceInfo.id == sessionManager.getDeviceId()}")
 
-                    try {
-                        mainActivity.notificationService.showDeviceConnected(deviceInfo.name, deviceInfo.type)
-                    } catch (e: Exception) {
-                        Log.e("FlowLink", "Failed to show device connected notification", e)
-                    }
-                    
-                    // Only emit if it's not the current device
+                    // Only notify and emit if it's not the current device
                     if (deviceInfo.id.isNotBlank() && deviceInfo.id != sessionManager.getDeviceId()) {
+                        // Only show the system notification when the app is NOT in the foreground.
+                        // When the user is on the Share/DeviceTiles page they can already see
+                        // the device tile appear — a notification on top of that is redundant
+                        // and causes the "continuous notifications" symptom.
+                        if (!mainActivity.isAppInForeground) {
+                            try {
+                                mainActivity.notificationService.showDeviceConnected(deviceInfo.name, deviceInfo.type)
+                            } catch (e: Exception) {
+                                Log.e("FlowLink", "Failed to show device connected notification", e)
+                            }
+                        }
                         upsertSessionDevice(deviceInfo)
                         _deviceConnected.value = deviceInfo
                         _deviceConnectedEvents.tryEmit(deviceInfo)
@@ -1241,22 +1254,6 @@ class WebSocketManager(private val mainActivity: MainActivity) {
                             replyToUsername = chat.optString("replyToUsername").ifEmpty { null }
                         )
                     )
-                }
-                "device_connected" -> {
-                    val payload = json.optJSONObject("payload") ?: return
-                    val deviceJson = payload.optJSONObject("device") ?: payload
-                    val info = buildDeviceInfo(deviceJson)
-                    if (info.id.isNotBlank() && info.id != sessionManager.getDeviceId()) {
-                        upsertSessionDevice(info)
-                        _deviceConnected.value = info
-                        _deviceConnectedEvents.tryEmit(info)
-                    }
-                }
-                "device_disconnected" -> {
-                    val payload = json.optJSONObject("payload") ?: return
-                    val deviceId = payload.optJSONObject("device")?.optString("id")
-                        ?: payload.optString("deviceId", "")
-                    removeSessionDevice(deviceId)
                 }
                 "clipboard_sync" -> {
                     val clipboardJson = json.getJSONObject("payload").optJSONObject("clipboard")

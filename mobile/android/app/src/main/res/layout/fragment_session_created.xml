@@ -11,8 +11,53 @@
         android:orientation="vertical"
         android:gravity="center_horizontal"
         android:paddingHorizontal="28dp"
-        android:paddingTop="72dp"
+        android:paddingTop="56dp"
         android:paddingBottom="48dp">
+
+        <!--
+          Notify friends only toggle — top-right.
+          Floated to the right of the screen header row.
+        -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:layout_marginBottom="16dp"
+            android:background="@drawable/glass_card_bg_dark"
+            android:padding="12dp">
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:orientation="vertical">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Notify Friends Only"
+                    android:textColor="#FFFFFF"
+                    android:textSize="13sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/tv_notify_friends_desc"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Notify all active users"
+                    android:textColor="#B8B5D4"
+                    android:textSize="11sp"
+                    android:layout_marginTop="1dp" />
+            </LinearLayout>
+
+            <androidx.appcompat.widget.SwitchCompat
+                android:id="@+id/switch_notify_friends_only"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:checked="false" />
+
+        </LinearLayout>
 
         <!-- QR Code Card -->
         <LinearLayout

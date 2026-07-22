@@ -62,8 +62,9 @@ class MainActivity : AppCompatActivity(), UsernameDialogFragment.UsernameDialogL
     lateinit var webSocketManager: WebSocketManager
     lateinit var notificationService: NotificationService
 
-    /** True while MainActivity is in the foreground — used to skip call notifications */
-    private var isAppInForeground = false
+    /** True while MainActivity is in the foreground — used to skip call/device notifications */
+    var isAppInForeground = false
+        private set
     private var clipboardSyncEnabled = false
     private var pendingScreenShareViewerDeviceId: String? = null
     
@@ -569,6 +570,17 @@ class MainActivity : AppCompatActivity(), UsernameDialogFragment.UsernameDialogL
                     // Wait a bit for connection to establish
                     kotlinx.coroutines.delay(500)
                 }
+
+                // Read notify-friends-only preference
+                val notifyFriendsOnly = com.flowlink.app.ui.SettingsFragment.getNotifyFriendsOnly(this@MainActivity)
+                // Build friend-username list (only needed when notifyFriendsOnly = true)
+                val friendUsernames = if (notifyFriendsOnly) {
+                    com.flowlink.app.ui.FriendsFragment.loadFriends(this@MainActivity)
+                        .filter { it.status == "accepted" }
+                        .map { it.username }
+                } else {
+                    emptyList()
+                }
                 
                 // Send session_create message to backend
                 webSocketManager.sendMessage(org.json.JSONObject().apply {
@@ -578,13 +590,13 @@ class MainActivity : AppCompatActivity(), UsernameDialogFragment.UsernameDialogL
                         put("deviceName", sessionManager.getDeviceName())
                         put("deviceType", sessionManager.getDeviceType())
                         put("username", sessionManager.getUsername())
+                        put("notifyFriendsOnly", notifyFriendsOnly)
+                        put("friendUsernames", org.json.JSONArray(friendUsernames))
                     })
                     put("timestamp", System.currentTimeMillis())
                 }.toString())
                 
-                android.util.Log.d("FlowLink", "Sent session_create request")
-                // Wait for session_created response (handled in WebSocketManager)
-                // The response will trigger showing the QR code fragment
+                android.util.Log.d("FlowLink", "Sent session_create request (notifyFriendsOnly=$notifyFriendsOnly, friends=${friendUsernames.size})")
             } catch (e: Exception) {
                 android.util.Log.e("FlowLink", "Failed to create session", e)
                 Toast.makeText(this@MainActivity, "Failed to create session: ${e.message}", Toast.LENGTH_LONG).show()
@@ -823,6 +835,14 @@ class MainActivity : AppCompatActivity(), UsernameDialogFragment.UsernameDialogL
     }
 
     private fun showSessionTab(tabId: Int) {
+        // Auto-minimize any active 1-on-1 call when the user navigates to another tab.
+        // This prevents the call fragment from being replaced and becoming unreachable.
+        if (com.flowlink.app.service.CallSession.isActive && callBubbleView == null) {
+            // A call is active and not yet minimized — minimize it before switching tabs
+            hideBubbleAndRestoreIfNeeded()
+            showCallBubble()
+        }
+
         val fragment = when (tabId) {
             R.id.nav_home -> HomeFragment.newInstance()
             R.id.nav_chat -> ChatFragment.newInstance()

@@ -50,6 +50,17 @@ class InvitationDialogFragment : DialogFragment() {
         dialog.setCanceledOnTouchOutside(true)
         return dialog
     }
+
+    override fun onStart() {
+        super.onStart()
+        // Make the dialog fill ~92% of screen width so content never collapses
+        dialog?.window?.setLayout(
+            (resources.displayMetrics.widthPixels * 0.92f).toInt(),
+            android.view.ViewGroup.LayoutParams.WRAP_CONTENT
+        )
+        // Transparent window background so our dialog_background drawable shows properly
+        dialog?.window?.setBackgroundDrawableResource(android.R.color.transparent)
+    }
     
     override fun onCreateView(
         inflater: LayoutInflater,

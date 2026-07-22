@@ -324,7 +324,12 @@ const server = createServer(async (req, res) => {
   }
 });
 
-const wss = new WebSocketServer({ server });
+// Each file-transfer chunk is 64 KB raw → ~85 KB base64 → ~100 KB JSON frame.
+// Set maxPayload to 50 MB so the server never closes the connection mid-transfer
+// regardless of file size.  Without this the ws library defaults to 100 MB but
+// some hosting proxies (Railway, Render, etc.) enforce their own lower limit,
+// causing transfers to stall around 1–2 MB.
+const wss = new WebSocketServer({ server, maxPayload: 50 * 1024 * 1024 });
 
 function sendError(ws, errorMessage) {
   if (!ws || ws.readyState !== ws.OPEN) {
@@ -872,7 +877,13 @@ function handleSessionCreate(ws, message) {
   console.log(`Session created: ${sessionId} (code: ${code}) by device ${deviceId}`);
   
   // Auto-broadcast to nearby devices
-  broadcastNearbySession(sessionId);
+  // Pass notifyFriendsOnly and friendUsernames from the creator's payload so
+  // the broadcast can be filtered to friends-only or sent globally.
+  const notifyFriendsOnly = !!(message.payload.notifyFriendsOnly);
+  const friendUsernames = Array.isArray(message.payload.friendUsernames)
+    ? message.payload.friendUsernames
+    : [];
+  broadcastNearbySession(sessionId, notifyFriendsOnly, friendUsernames);
 }
 
 /**
@@ -2861,12 +2872,15 @@ function findSessionByDeviceId(deviceId) {
 /**
  * Auto-broadcast nearby sessions when a session is created
  */
-function broadcastNearbySession(sessionId) {
+function broadcastNearbySession(sessionId, notifyFriendsOnly = false, friendUsernames = []) {
   const session = sessions.get(sessionId);
   if (!session) return;
 
   const creatorDevice = session.devices.get(session.createdBy);
   if (!creatorDevice) return;
+
+  // Normalise friend usernames to lower-case for case-insensitive matching
+  const friendSet = new Set(friendUsernames.map(u => u.toLowerCase()));
 
   // Auto-broadcast to nearby devices after a short delay
   setTimeout(() => {
@@ -2876,6 +2890,18 @@ function broadcastNearbySession(sessionId) {
     for (const [devId, deviceEntry] of globalDevices) {
       // Only send to online devices that are not the creator and not in this session
       if (devId !== session.createdBy && deviceEntry.device.online && !session.devices.has(devId)) {
+
+        // ── Friends-only filter ──────────────────────────────────────────────
+        // When notifyFriendsOnly is true, only notify devices whose username
+        // is in the creator's friends list.  Otherwise notify everyone.
+        if (notifyFriendsOnly && friendSet.size > 0) {
+          const recipientUsername = (deviceEntry.device.username || '').toLowerCase();
+          if (!friendSet.has(recipientUsername)) {
+            continue; // skip — not a friend
+          }
+        }
+        // ─────────────────────────────────────────────────────────────────────
+
         // Try to send to any available connection for this device
         let messageSent = false;
         
@@ -2915,6 +2941,6 @@ function broadcastNearbySession(sessionId) {
         }
       }
     }
-    console.log(`Auto-broadcast nearby session ${sessionId} to ${notificationsSent} devices`);
+    console.log(`Auto-broadcast nearby session ${sessionId} to ${notificationsSent} devices (friendsOnly=${notifyFriendsOnly})`);
   }, 1000); // 1 second delay for faster notifications
 }

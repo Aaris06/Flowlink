@@ -9,6 +9,7 @@ import android.view.ViewGroup
 import android.widget.Button
 import android.widget.ImageView
 import android.widget.TextView
+import androidx.appcompat.widget.SwitchCompat
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
 import com.flowlink.app.MainActivity
@@ -51,6 +52,17 @@ class SessionCreatedFragment : Fragment() {
         val tvCode = view.findViewById<TextView>(R.id.session_code)
         val ivQrCode = view.findViewById<ImageView>(R.id.qr_code_image)
         val btnDone = view.findViewById<Button>(R.id.done_button)
+        val switchNotify = view.findViewById<SwitchCompat>(R.id.switch_notify_friends_only)
+        val tvNotifyDesc = view.findViewById<TextView>(R.id.tv_notify_friends_desc)
+
+        // ── Notify friends only toggle ─────────────────────────────────────
+        val prefs = requireContext().getSharedPreferences("flowlink_settings", android.content.Context.MODE_PRIVATE)
+        switchNotify.isChecked = prefs.getBoolean("notify_friends_only", false)
+        tvNotifyDesc.text = if (switchNotify.isChecked) "Notify friends only" else "Notify all active users"
+        switchNotify.setOnCheckedChangeListener { _, checked ->
+            prefs.edit().putBoolean("notify_friends_only", checked).apply()
+            tvNotifyDesc.text = if (checked) "Notify friends only" else "Notify all active users"
+        }
 
         sessionCode?.let { code ->
             tvCode.text = code

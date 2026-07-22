@@ -1,69 +1,79 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  Invitation Dialog.
+  Width is set to 92% of screen width in InvitationDialogFragment.onStart().
+  fillViewport ensures the ScrollView fills available height even when content is short.
+-->
 <ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
-    android:layout_height="wrap_content">
+    android:layout_height="wrap_content"
+    android:fillViewport="true"
+    android:scrollbars="none">
 
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="vertical"
-        android:padding="24dp"
+        android:padding="20dp"
         android:background="@drawable/dialog_background">
 
-        <!-- Header -->
+        <!-- ── Header ─────────────────────────────────────────────────── -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="horizontal"
             android:gravity="center_vertical"
-            android:layout_marginBottom="24dp">
+            android:layout_marginBottom="20dp">
 
             <TextView
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
                 android:text="Invite Others to Join"
-                android:textSize="20sp"
+                android:textSize="18sp"
                 android:textStyle="bold"
                 android:textColor="@color/text_primary" />
 
             <Button
                 android:id="@+id/close_button"
-                android:layout_width="32dp"
-                android:layout_height="32dp"
+                android:layout_width="36dp"
+                android:layout_height="36dp"
                 android:text="×"
-                android:textSize="18sp"
-                android:background="@android:color/transparent"
-                android:textColor="@color/text_secondary" />
+                android:textSize="20sp"
+                android:textColor="@color/text_secondary"
+                android:background="@drawable/glass_card_bg_dark"
+                android:padding="0dp"
+                android:minWidth="0dp"
+                android:minHeight="0dp" />
 
         </LinearLayout>
 
-        <!-- Direct Invitation Section -->
+        <!-- ── Direct Invitation ─────────────────────────────────────── -->
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:text="Send Direct Invitation"
-            android:textSize="16sp"
+            android:textSize="15sp"
             android:textStyle="bold"
             android:textColor="@color/text_primary"
-            android:layout_marginBottom="8dp" />
+            android:layout_marginBottom="4dp" />
 
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Invite a specific user by their username or device ID"
-            android:textSize="14sp"
+            android:text="Invite a specific user by their username"
+            android:textSize="12sp"
             android:textColor="@color/text_secondary"
-            android:layout_marginBottom="16dp" />
+            android:layout_marginBottom="12dp" />
 
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:text="Username or Device ID"
-            android:textSize="14sp"
+            android:textSize="13sp"
             android:textStyle="bold"
             android:textColor="@color/text_primary"
-            android:layout_marginBottom="8dp" />
+            android:layout_marginBottom="6dp" />
 
         <EditText
             android:id="@+id/target_user_input"
@@ -72,116 +82,133 @@
             android:background="@drawable/input_background"
             android:padding="12dp"
             android:hint="Enter username or device ID"
-            android:textSize="16sp"
+            android:textSize="15sp"
             android:textColor="@color/text_primary"
             android:textColorHint="@color/text_hint"
             android:singleLine="true"
-            android:layout_marginBottom="16dp" />
+            android:inputType="text"
+            android:layout_marginBottom="12dp" />
 
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:text="Message (Optional)"
-            android:textSize="14sp"
+            android:textSize="13sp"
             android:textStyle="bold"
             android:textColor="@color/text_primary"
-            android:layout_marginBottom="8dp" />
+            android:layout_marginBottom="6dp" />
 
         <EditText
             android:id="@+id/message_input"
             android:layout_width="match_parent"
-            android:layout_height="80dp"
+            android:layout_height="72dp"
             android:background="@drawable/input_background"
             android:padding="12dp"
             android:hint="Add a personal message..."
-            android:textSize="16sp"
+            android:textSize="14sp"
             android:textColor="@color/text_primary"
             android:textColorHint="@color/text_hint"
-            android:gravity="top"
+            android:gravity="top|start"
             android:maxLines="3"
-            android:layout_marginBottom="16dp" />
+            android:inputType="textMultiLine"
+            android:layout_marginBottom="12dp" />
 
         <Button
             android:id="@+id/send_invitation_button"
             android:layout_width="match_parent"
             android:layout_height="48dp"
             android:text="Send Invitation"
-            android:textSize="16sp"
+            android:textSize="15sp"
             android:textStyle="bold"
             android:textColor="@color/white"
             android:background="@drawable/button_primary"
-            android:layout_marginBottom="24dp" />
+            android:textAllCaps="false"
+            android:layout_marginBottom="20dp" />
 
-        <!-- Divider -->
-        <View
-            android:layout_width="match_parent"
-            android:layout_height="1dp"
-            android:background="@color/border"
-            android:layout_marginBottom="16dp" />
-
-        <TextView
+        <!-- ── Divider ─────────────────────────────────────────────── -->
+        <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="OR"
-            android:textSize="14sp"
-            android:textStyle="bold"
-            android:textColor="@color/text_secondary"
-            android:gravity="center"
-            android:layout_marginBottom="16dp" />
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:layout_marginBottom="20dp">
 
-        <!-- Nearby Broadcast Section -->
+            <View
+                android:layout_width="0dp"
+                android:layout_height="1dp"
+                android:layout_weight="1"
+                android:background="@color/border" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="  OR  "
+                android:textSize="12sp"
+                android:textStyle="bold"
+                android:textColor="@color/text_secondary" />
+
+            <View
+                android:layout_width="0dp"
+                android:layout_height="1dp"
+                android:layout_weight="1"
+                android:background="@color/border" />
+
+        </LinearLayout>
+
+        <!-- ── Nearby Broadcast ─────────────────────────────────────── -->
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:text="Notify Nearby Devices"
-            android:textSize="16sp"
+            android:textSize="15sp"
             android:textStyle="bold"
             android:textColor="@color/text_primary"
-            android:layout_marginBottom="8dp" />
+            android:layout_marginBottom="4dp" />
 
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:text="Let nearby FlowLink users know about your session"
-            android:textSize="14sp"
+            android:textSize="12sp"
             android:textColor="@color/text_secondary"
-            android:layout_marginBottom="16dp" />
+            android:layout_marginBottom="12dp" />
 
         <Button
             android:id="@+id/broadcast_button"
             android:layout_width="match_parent"
             android:layout_height="48dp"
             android:text="Notify Nearby Devices"
-            android:textSize="16sp"
+            android:textSize="15sp"
             android:textStyle="bold"
             android:textColor="@color/white"
             android:background="@drawable/button_success"
-            android:layout_marginBottom="24dp" />
+            android:textAllCaps="false"
+            android:layout_marginBottom="20dp" />
 
-        <!-- Session Code Section -->
+        <!-- ── Session Code ─────────────────────────────────────────── -->
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:text="Session Code"
-            android:textSize="16sp"
+            android:textSize="15sp"
             android:textStyle="bold"
             android:textColor="@color/text_primary"
-            android:layout_marginBottom="8dp" />
+            android:layout_marginBottom="4dp" />
 
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:text="Others can join using this 6-digit code"
-            android:textSize="14sp"
+            android:textSize="12sp"
             android:textColor="@color/text_secondary"
-            android:layout_marginBottom="16dp" />
+            android:layout_marginBottom="12dp" />
 
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="horizontal"
             android:background="@drawable/info_background"
-            android:padding="16dp"
+            android:padding="14dp"
             android:gravity="center_vertical">
 
             <TextView
@@ -189,23 +216,24 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:text="123456"
-                android:textSize="24sp"
+                android:text="------"
+                android:textSize="26sp"
                 android:textStyle="bold"
                 android:textColor="@color/text_primary"
                 android:fontFamily="monospace"
-                android:letterSpacing="0.2" />
+                android:letterSpacing="0.25" />
 
             <Button
                 android:id="@+id/copy_code_button"
                 android:layout_width="wrap_content"
                 android:layout_height="36dp"
                 android:text="Copy"
-                android:textSize="14sp"
+                android:textSize="13sp"
                 android:textStyle="bold"
                 android:textColor="@color/white"
                 android:background="@drawable/button_primary"
-                android:paddingHorizontal="16dp" />
+                android:textAllCaps="false"
+                android:paddingHorizontal="14dp" />
 
         </LinearLayout>
 

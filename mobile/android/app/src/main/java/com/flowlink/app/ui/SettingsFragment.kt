@@ -76,6 +76,12 @@ class SettingsFragment : Fragment() {
             return prefs.getInt(PREF_RINGTONE_VOLUME, (maxVol * 0.8f).toInt())
         }
 
+        /** Returns true if the user wants session notifications sent to friends only */
+        fun getNotifyFriendsOnly(context: Context): Boolean {
+            return context.getSharedPreferences("flowlink_settings", Context.MODE_PRIVATE)
+                .getBoolean("notify_friends_only", false)
+        }
+
         /** Play ringtone for an incoming call, returns the Ringtone object so caller can stop it */
         fun playRingtone(context: Context): Ringtone? {
             val uri = getRingtoneUri(context) ?: return null

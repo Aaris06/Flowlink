@@ -27,6 +27,10 @@ export default function SessionManager({
   const [error, setError] = useState<string | null>(null);
   const [isCreating, setIsCreating] = useState(false);
   const [isJoining, setIsJoining] = useState(false);
+  // Notify-friends-only toggle — persisted in localStorage
+  const [notifyFriendsOnly, setNotifyFriendsOnly] = useState<boolean>(() => {
+    try { return localStorage.getItem('flowlink_notify_friends_only') === 'true'; } catch { return false; }
+  });
   const wsRef = useRef<WebSocket | null>(null);
 
   const joinSessionWithCode = async (code: string) => {
@@ -120,18 +124,53 @@ export default function SessionManager({
       setIsCreating(true);
       const ws = (window as any).appWebSocket;
       if (!ws || ws.readyState !== WebSocket.OPEN) { setError('Not connected to server'); setIsCreating(false); return; }
-      ws.send(JSON.stringify({ type: 'session_create', payload: { deviceId, deviceName, deviceType, username }, timestamp: Date.now() }));
+      // Build friends list when notifyFriendsOnly is on
+      let friendUsernames: string[] = [];
+      if (notifyFriendsOnly) {
+        try {
+          const stored = localStorage.getItem(`flowlink_friends_${username.toLowerCase()}`);
+          if (stored) {
+            const parsed: { username: string; status: string }[] = JSON.parse(stored);
+            friendUsernames = parsed.filter(f => f.status === 'accepted').map(f => f.username);
+          }
+        } catch { /* ignore, send empty list */ }
+      }
+      ws.send(JSON.stringify({
+        type: 'session_create',
+        payload: { deviceId, deviceName, deviceType, username, notifyFriendsOnly, friendUsernames },
+        timestamp: Date.now(),
+      }));
     } catch { setError('Failed to create session'); setIsCreating(false); }
   };
 
   return (
     <div className="session-manager">
       <div className="session-manager-inner">
-        {/* Brand */}
-        <div className="session-brand">
-          <img src="/logo.png" alt="FlowLink" className="session-brand-logo" />
-          <h2>FlowLink</h2>
-          <p>Cross-Device Continuity</p>
+        {/* Brand + notify toggle row */}
+        <div className="session-page-header">
+          <div className="session-brand">
+            <img src="/logo.png" alt="FlowLink" className="session-brand-logo" />
+            <h2>FlowLink</h2>
+            <p>Cross-Device Continuity</p>
+          </div>
+          {/* Notify friends only — top-right compact toggle */}
+          <div className="session-notify-corner">
+            <label className="session-toggle-switch" title={notifyFriendsOnly ? 'Notify friends only — click to notify everyone' : 'Notify everyone — click to notify friends only'}>
+              <input
+                type="checkbox"
+                checked={notifyFriendsOnly}
+                onChange={(e) => {
+                  const v = e.target.checked;
+                  setNotifyFriendsOnly(v);
+                  try { localStorage.setItem('flowlink_notify_friends_only', v ? 'true' : 'false'); } catch {}
+                }}
+              />
+              <span className="session-toggle-slider" />
+            </label>
+            <span className="session-notify-corner-label">
+              {notifyFriendsOnly ? '👥 Friends only' : '🌐 All users'}
+            </span>
+          </div>
         </div>
 
         {/* Actions card */}
