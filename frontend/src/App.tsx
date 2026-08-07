@@ -367,6 +367,63 @@ function Shell() {
           });
         }
         break;
+      // ── Intent received (from mobile or any device) ───────────────────────
+      // Handled globally so link_open / clipboard_sync work on every page,
+      // not just when DeviceTiles is mounted.
+      case 'intent_received': {
+        const intent = message.payload?.intent;
+        if (!intent) break;
+        const intentType: string = intent.intent_type || intent.intentType || '';
+
+        if (intentType === 'link_open') {
+          try {
+            const rawLink = intent.payload?.link;
+            const linkObj = typeof rawLink === 'string' ? JSON.parse(rawLink) : rawLink;
+            const url = linkObj?.url;
+            if (url) {
+              // Show a toast with an Open button — window.open from a WS handler
+              // may be blocked as a popup in some browsers without a user gesture.
+              if (invitationServiceRef.current) {
+                invitationServiceRef.current.notificationService.showToast({
+                  type: 'info',
+                  title: '🔗 Open link?',
+                  message: url.length > 60 ? url.slice(0, 60) + '…' : url,
+                  duration: 15000,
+                  actions: [
+                    { id: 'open', label: 'Open', action: 'accept' as const },
+                    { id: 'dismiss', label: 'Dismiss', action: 'dismiss' as const },
+                  ],
+                  onAction: (id: string) => { if (id === 'open') window.open(url, '_blank', 'noopener,noreferrer'); },
+                });
+              } else {
+                window.open(url, '_blank', 'noopener,noreferrer');
+              }
+            }
+          } catch { /* ignore parse errors */ }
+        } else if (intentType === 'clipboard_sync') {
+          try {
+            const rawClip = intent.payload?.clipboard;
+            const clipObj = typeof rawClip === 'string' ? JSON.parse(rawClip) : rawClip;
+            const txt = clipObj?.text || clipObj?.url;
+            if (txt) {
+              navigator.clipboard.writeText(txt).catch(() => {});
+              if (invitationServiceRef.current) {
+                const preview = txt.length > 60 ? txt.slice(0, 60) + '…' : txt;
+                invitationServiceRef.current.notificationService.showToast({
+                  type: 'success',
+                  title: '📋 Copied to clipboard',
+                  message: preview,
+                  duration: 3000,
+                });
+              }
+            }
+          } catch { /* ignore parse errors */ }
+        }
+        // All other intent types (file_handoff, media_continuation, etc.) are
+        // handled by DeviceTiles when it is mounted. They require session context
+        // that only DeviceTiles has, so we leave those alone here.
+        break;
+      }
       case 'clipboard_sync': {
         const txt = message.payload?.clipboard?.text || message.payload?.clipboard?.url;
         if (txt) {

@@ -403,3 +403,71 @@
 .dt-call-btn:active {
   transform: scale(0.95);
 }
+
+/* ── Send Tab / Send Window row ── */
+.device-tab-actions {
+  margin-top: 0.75rem;
+  display: flex;
+  gap: 0.5rem;
+}
+
+.device-tab-btn {
+  flex: 1;
+  padding: 0.5rem 0.6rem;
+  border-radius: 8px;
+  border: 2px solid #6366f1;
+  background: rgba(99, 102, 241, 0.08);
+  color: #4f46e5;
+  font-size: 0.82rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.18s;
+  white-space: nowrap;
+  text-align: center;
+}
+
+.device-tab-btn:hover {
+  background: #6366f1;
+  color: #fff;
+  transform: translateY(-1px);
+  box-shadow: 0 3px 10px rgba(99, 102, 241, 0.38);
+}
+
+.device-tab-btn:active {
+  transform: translateY(0);
+  box-shadow: none;
+}
+
+.device-tab-btn--window {
+  border-color: #a78bfa;
+  color: #7c3aed;
+  background: rgba(167, 139, 250, 0.08);
+}
+
+.device-tab-btn--window:hover {
+  background: #a78bfa;
+  color: #fff;
+  box-shadow: 0 3px 10px rgba(167, 139, 250, 0.38);
+}
+
+[data-theme='dark'] .device-tab-btn {
+  background: rgba(99, 102, 241, 0.15);
+  color: #a5b4fc;
+  border-color: #6366f1;
+}
+
+[data-theme='dark'] .device-tab-btn:hover {
+  background: #6366f1;
+  color: #fff;
+}
+
+[data-theme='dark'] .device-tab-btn--window {
+  background: rgba(167, 139, 250, 0.15);
+  color: #c4b5fd;
+  border-color: #a78bfa;
+}
+
+[data-theme='dark'] .device-tab-btn--window:hover {
+  background: #a78bfa;
+  color: #fff;
+}

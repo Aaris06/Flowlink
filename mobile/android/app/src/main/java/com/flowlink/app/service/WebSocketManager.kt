@@ -341,6 +341,8 @@ class WebSocketManager(private val mainActivity: MainActivity) {
         sendMessage(message)
     }
 
+
+
     fun sendChatMessage(targetDeviceId: String, messageId: String, text: String,
                         replyToId: String? = null, replyToText: String? = null, replyToUsername: String? = null) {
         val currentSessionId = sessionManager.getCurrentSessionId()

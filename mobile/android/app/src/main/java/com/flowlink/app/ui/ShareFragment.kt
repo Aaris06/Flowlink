@@ -157,22 +157,49 @@ class ShareFragment : Fragment() {
             val clipboard = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
             val text = clipboard.primaryClip?.getItemAt(0)?.coerceToText(ctx)?.toString()?.trim() ?: ""
             if (text.isNotEmpty()) {
+                val normalized = normalizeUrl(text) ?: text
+                val intentType = when {
+                    isHttpUrl(normalized) -> "link_open"
+                    else -> "clipboard_sync"
+                }
+                val payload = when (intentType) {
+                    "link_open" -> mapOf("link" to JSONObject().apply { put("url", normalized) }.toString())
+                    else -> mapOf("clipboard" to JSONObject().apply { put("text", text) }.toString())
+                }
                 val intent = FlowIntent(
-                    intentType = "clipboard_sync",
-                    payload = mapOf("clipboard" to JSONObject().apply { put("text", text) }.toString()),
+                    intentType = intentType,
+                    payload = payload,
                     targetDevice = device.id,
                     sourceDevice = sessionManager?.getDeviceId() ?: "",
                     autoOpen = true,
                     timestamp = System.currentTimeMillis()
                 )
                 mainActivity.webSocketManager.sendIntent(intent, device.id)
-                Toast.makeText(ctx, "Sent clipboard to ${device.name}", Toast.LENGTH_SHORT).show()
+                val preview = if (text.length > 40) text.take(40) + "…" else text
+                Toast.makeText(ctx, "Sent to ${device.name}: $preview", Toast.LENGTH_SHORT).show()
             } else {
                 Toast.makeText(ctx, "Clipboard empty. Use Select Files.", Toast.LENGTH_SHORT).show()
             }
         } catch (e: Exception) {
             Toast.makeText(ctx, "Failed: ${e.message}", Toast.LENGTH_SHORT).show()
         }
+    }
+
+    private fun isHttpUrl(text: String): Boolean {
+        return try {
+            val uri = android.net.Uri.parse(text)
+            val scheme = uri.scheme?.lowercase()
+            scheme == "http" || scheme == "https"
+        } catch (e: Exception) { false }
+    }
+
+    private fun normalizeUrl(text: String): String? {
+        if (text.isBlank()) return null
+        val trimmed = text.trim()
+        val hasScheme = Regex("^[a-zA-Z][a-zA-Z\\d+\\-.]*://").containsMatchIn(trimmed)
+        if (hasScheme) return trimmed
+        val domainLike = Regex("^(www\\.)?[a-z0-9.-]+\\.[a-z]{2,}([/?].*)?$", RegexOption.IGNORE_CASE)
+        return if (domainLike.matches(trimmed)) "https://$trimmed" else null
     }
 
     override fun onDestroyView() {

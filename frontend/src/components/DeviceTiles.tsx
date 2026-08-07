@@ -1560,6 +1560,74 @@ export default function DeviceTiles({
     // Could show toast notification
   };
 
+  /** Send the currently active browser tab to a specific device via tab_handoff. */
+  const sendTabHandoff = (device: Device) => {
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      alert('Not connected. Please reconnect first.');
+      return;
+    }
+    // Use the current page as the "active tab" — works from the web app itself.
+    // In a real extension context this would be the active browser tab.
+    const url = window.location.href;
+    const title = document.title;
+    ws.send(JSON.stringify({
+      type: 'tab_handoff',
+      sessionId: session.id,
+      deviceId,
+      payload: {
+        tabs: [{ url, title, favIconUrl: '', scrollX: 0, scrollY: 0, scrollProgress: 0, capturedAt: Date.now() }],
+        activeIndex: 0,
+        collectionTitle: title || url,
+        sentAt: Date.now(),
+        sourceUsername: username,
+        sourceDeviceName: deviceName,
+      },
+      timestamp: Date.now(),
+    }));
+    console.log(`📤 Sent tab handoff to ${device.name}: ${url}`);
+  };
+
+  /** Collect all open tabs from the browser via the Page Visibility API and send them.
+   *  Since we can't enumerate other tabs from a regular web page, we offer the
+   *  user a prompt to paste their URLs, or fall back to the current page. */
+  const sendWindowHandoff = (device: Device) => {
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      alert('Not connected. Please reconnect first.');
+      return;
+    }
+    // Prompt user to paste URLs (one per line) — mirrors the mobile "Send Window" UX.
+    const input = window.prompt(
+      `Send multiple tabs to ${device.name}\n\nPaste URLs (one per line):`,
+      window.location.href
+    );
+    if (!input) return;
+    const lines = input.split('\n').map((l) => l.trim()).filter(Boolean);
+    const tabs = lines
+      .filter((l) => /^https?:\/\//i.test(l))
+      .map((url) => ({ url, title: url, favIconUrl: '', scrollX: 0, scrollY: 0, scrollProgress: 0, capturedAt: Date.now() }));
+    if (!tabs.length) {
+      alert('No valid URLs found. Please enter at least one http/https URL.');
+      return;
+    }
+    ws.send(JSON.stringify({
+      type: 'tab_handoff',
+      sessionId: session.id,
+      deviceId,
+      payload: {
+        tabs,
+        activeIndex: 0,
+        collectionTitle: `${tabs.length} tab${tabs.length > 1 ? 's' : ''} from ${deviceName}`,
+        sentAt: Date.now(),
+        sourceUsername: username,
+        sourceDeviceName: deviceName,
+      },
+      timestamp: Date.now(),
+    }));
+    console.log(`📤 Sent window handoff to ${device.name}: ${tabs.length} tabs`);
+  };
+
   const sendChatMessage = () => {
     const text = chatInput.trim();
     if (!text || !wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
@@ -2373,6 +2441,8 @@ export default function DeviceTiles({
                         alert('Failed to send: ' + error);
                       }
                     }}
+                    onSendTab={sendTabHandoff}
+                    onSendWindow={sendWindowHandoff}
                   />
                 ))}
               </div>
@@ -2590,6 +2660,8 @@ export default function DeviceTiles({
                   }}
                   onCallAudio={callService ? (d) => callService.startCall(d.username || d.name, d.id, false) : undefined}
                   onCallVideo={callService ? (d) => callService.startCall(d.username || d.name, d.id, true) : undefined}
+                  onSendTab={sendTabHandoff}
+                  onSendWindow={sendWindowHandoff}
                 />
               ))}
             </div>

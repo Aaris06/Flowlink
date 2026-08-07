@@ -16,6 +16,8 @@ interface DeviceTileProps {
   sessionId?: string;
   onCallAudio?: (device: Device) => void;
   onCallVideo?: (device: Device) => void;
+  onSendTab?: (device: Device) => void;
+  onSendWindow?: (device: Device) => void;
 }
 
 function DeviceTileComponent({
@@ -27,6 +29,8 @@ function DeviceTileComponent({
   sessionId,
   onCallAudio,
   onCallVideo,
+  onSendTab,
+  onSendWindow,
 }: DeviceTileProps) {
   const [isDragOver, setIsDragOver] = useState(false);
   const [clipboardText, setClipboardText] = useState('');
@@ -599,6 +603,30 @@ function DeviceTileComponent({
         </button>
       </div>
 
+      {/* Send Tab / Send Window row */}
+      {(onSendTab || onSendWindow) && device.online && (
+        <div className="device-tab-actions">
+          {onSendTab && (
+            <button
+              className="device-tab-btn"
+              title="Send current browser tab to this device"
+              onClick={(e) => { e.stopPropagation(); onSendTab(device); }}
+            >
+              🔗 Send Tab
+            </button>
+          )}
+          {onSendWindow && (
+            <button
+              className="device-tab-btn device-tab-btn--window"
+              title="Send all open tabs to this device"
+              onClick={(e) => { e.stopPropagation(); onSendWindow(device); }}
+            >
+              📋 Send Window
+            </button>
+          )}
+        </div>
+      )}
+
       {isDragOver && (
         <div className="drop-indicator">
           <div className="drop-message">Drop here to send</div>
@@ -627,6 +655,8 @@ export default React.memo(DeviceTileComponent, (prev, next) => {
     prev.device.name === next.device.name &&
     prev.device.username === next.device.username &&
     JSON.stringify(prev.device.permissions) === JSON.stringify(next.device.permissions) &&
+    prev.onSendTab === next.onSendTab &&
+    prev.onSendWindow === next.onSendWindow &&
     transferEqual
   );
 });
