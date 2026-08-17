@@ -28,12 +28,12 @@
 
                 <ImageButton
                     android:id="@+id/btn_hamburger"
-                    android:layout_width="40dp"
-                    android:layout_height="40dp"
-                    android:background="@drawable/glass_card_bg_dark"
+                    android:layout_width="42dp"
+                    android:layout_height="42dp"
+                    android:background="@drawable/input_glass_bg"
                     android:src="@android:drawable/ic_menu_sort_by_size"
                     android:tint="#FFFFFF"
-                    android:padding="8dp"
+                    android:padding="9dp"
                     android:contentDescription="Menu" />
 
                 <LinearLayout
@@ -55,20 +55,20 @@
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:text="Collaborate and connect seamlessly"
-                        android:textColor="#B8B5D4"
+                        android:textColor="@color/text_hint"
                         android:textSize="12sp" />
                 </LinearLayout>
 
                 <Button
                     android:id="@+id/btn_invite_others"
                     android:layout_width="wrap_content"
-                    android:layout_height="36dp"
+                    android:layout_height="38dp"
                     android:text="Invite Others"
                     android:textSize="12sp"
                     android:textColor="#FFFFFF"
                     android:textAllCaps="false"
-                    android:background="@drawable/btn_primary_bg"
-                    android:paddingHorizontal="14dp" />
+                    android:background="@drawable/button_primary"
+                    android:paddingHorizontal="16dp" />
             </LinearLayout>
 
             <!-- Session Code Card -->
@@ -77,9 +77,9 @@
                 android:layout_height="wrap_content"
                 android:orientation="horizontal"
                 android:background="@drawable/glass_card_bg"
-                android:padding="16dp"
+                android:padding="18dp"
                 android:gravity="center_vertical"
-                android:layout_marginBottom="16dp">
+                android:layout_marginBottom="18dp">
 
                 <LinearLayout
                     android:layout_width="0dp"
@@ -91,7 +91,7 @@
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:text="Session Code"
-                        android:textColor="#B8B5D4"
+                        android:textColor="@color/text_hint"
                         android:textSize="12sp" />
 
                     <TextView
@@ -99,7 +99,7 @@
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:text="------"
-                        android:textColor="#6C63FF"
+                        android:textColor="@color/brand_purple"
                         android:textSize="26sp"
                         android:textStyle="bold"
                         android:letterSpacing="0.2" />
@@ -117,7 +117,7 @@
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:text="● Connected"
-                        android:textColor="#22C55E"
+                        android:textColor="#10B981"
                         android:textSize="12sp"
                         android:textStyle="bold"
                         android:layout_marginBottom="4dp" />
@@ -125,13 +125,13 @@
                     <Button
                         android:id="@+id/btn_reconnect"
                         android:layout_width="wrap_content"
-                        android:layout_height="28dp"
+                        android:layout_height="30dp"
                         android:text="↺ Reconnect"
                         android:textSize="11sp"
                         android:textColor="#FFFFFF"
                         android:textAllCaps="false"
                         android:background="@drawable/btn_ghost_bg"
-                        android:paddingHorizontal="10dp"
+                        android:paddingHorizontal="12dp"
                         android:visibility="gone" />
                 </LinearLayout>
             </LinearLayout>
@@ -148,7 +148,7 @@
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
                     android:orientation="vertical"
-                    android:background="@drawable/glass_card_bg_dark"
+                    android:background="@drawable/input_glass_bg"
                     android:padding="12dp"
                     android:gravity="center"
                     android:layout_marginEnd="6dp">
@@ -158,7 +158,7 @@
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:text="0"
-                        android:textColor="#22C55E"
+                        android:textColor="#10B981"
                         android:textSize="22sp"
                         android:textStyle="bold" />
 
@@ -166,7 +166,7 @@
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:text="Active"
-                        android:textColor="#B8B5D4"
+                        android:textColor="@color/text_hint"
                         android:textSize="11sp" />
                 </LinearLayout>
 
@@ -175,7 +175,7 @@
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
                     android:orientation="vertical"
-                    android:background="@drawable/glass_card_bg_dark"
+                    android:background="@drawable/input_glass_bg"
                     android:padding="12dp"
                     android:gravity="center"
                     android:layout_marginHorizontal="3dp">
@@ -193,7 +193,7 @@
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:text="Files"
-                        android:textColor="#B8B5D4"
+                        android:textColor="@color/text_hint"
                         android:textSize="11sp" />
                 </LinearLayout>
 
@@ -202,7 +202,7 @@
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
                     android:orientation="vertical"
-                    android:background="@drawable/glass_card_bg_dark"
+                    android:background="@drawable/input_glass_bg"
                     android:padding="12dp"
                     android:gravity="center"
                     android:layout_marginHorizontal="3dp">
@@ -220,7 +220,7 @@
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:text="Messages"
-                        android:textColor="#B8B5D4"
+                        android:textColor="@color/text_hint"
                         android:textSize="11sp" />
                 </LinearLayout>
 
@@ -229,7 +229,7 @@
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
                     android:orientation="vertical"
-                    android:background="@drawable/glass_card_bg_dark"
+                    android:background="@drawable/input_glass_bg"
                     android:padding="12dp"
                     android:gravity="center"
                     android:layout_marginStart="6dp">
@@ -247,7 +247,7 @@
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:text="Online"
-                        android:textColor="#B8B5D4"
+                        android:textColor="@color/text_hint"
                         android:textSize="11sp" />
                 </LinearLayout>
             </LinearLayout>
@@ -291,7 +291,7 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:text="0 files"
-                    android:textColor="#B8B5D4"
+                    android:textColor="@color/text_hint"
                     android:textSize="12sp" />
             </LinearLayout>
 
@@ -307,11 +307,11 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:text="No files in store yet. Go to Files tab to upload."
-                android:textColor="#6B6890"
+                android:textColor="@color/text_hint"
                 android:textSize="13sp"
                 android:gravity="center"
                 android:paddingVertical="16dp"
-                android:background="@drawable/glass_card_bg_dark"
+                android:background="@drawable/input_glass_bg"
                 android:visibility="visible" />
 
         </LinearLayout>
@@ -331,7 +331,7 @@
         android:layout_width="280dp"
         android:layout_height="match_parent"
         android:orientation="vertical"
-        android:background="#1E1A3E"
+        android:background="#131028"
         android:translationX="-280dp"
         android:elevation="16dp"
         android:paddingTop="56dp"
@@ -344,7 +344,7 @@
             android:layout_height="wrap_content"
             android:orientation="horizontal"
             android:gravity="center_vertical"
-            android:background="@drawable/glass_card_bg_dark"
+            android:background="@drawable/glass_card_bg"
             android:padding="16dp"
             android:layout_marginBottom="24dp">
 
@@ -356,7 +356,7 @@
                 <View
                     android:layout_width="48dp"
                     android:layout_height="48dp"
-                    android:background="@drawable/share_fab_bg" />
+                    android:background="@drawable/button_primary" />
 
                 <TextView
                     android:id="@+id/tv_avatar_initial"
@@ -388,7 +388,7 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:text="● Online"
-                    android:textColor="#22C55E"
+                    android:textColor="#10B981"
                     android:textSize="12sp" />
             </LinearLayout>
         </LinearLayout>
@@ -402,8 +402,8 @@
             android:textColor="#FFFFFF"
             android:textSize="15sp"
             android:gravity="center_vertical"
-            android:paddingHorizontal="12dp"
-            android:background="@drawable/glass_card_bg_dark"
+            android:paddingHorizontal="14dp"
+            android:background="@drawable/input_glass_bg"
             android:layout_marginBottom="8dp" />
 
         <TextView
@@ -414,8 +414,8 @@
             android:textColor="#FFFFFF"
             android:textSize="15sp"
             android:gravity="center_vertical"
-            android:paddingHorizontal="12dp"
-            android:background="@drawable/glass_card_bg_dark"
+            android:paddingHorizontal="14dp"
+            android:background="@drawable/input_glass_bg"
             android:layout_marginBottom="8dp" />
 
         <TextView
@@ -426,8 +426,8 @@
             android:textColor="#FFFFFF"
             android:textSize="15sp"
             android:gravity="center_vertical"
-            android:paddingHorizontal="12dp"
-            android:background="@drawable/glass_card_bg_dark"
+            android:paddingHorizontal="14dp"
+            android:background="@drawable/input_glass_bg"
             android:layout_marginBottom="8dp" />
 
         <TextView
@@ -438,14 +438,14 @@
             android:textColor="#FFFFFF"
             android:textSize="15sp"
             android:gravity="center_vertical"
-            android:paddingHorizontal="12dp"
-            android:background="@drawable/glass_card_bg_dark"
+            android:paddingHorizontal="14dp"
+            android:background="@drawable/input_glass_bg"
             android:layout_marginBottom="8dp" />
 
         <View
             android:layout_width="match_parent"
             android:layout_height="1dp"
-            android:background="#33FFFFFF"
+            android:background="#20FFFFFF"
             android:layout_marginVertical="12dp" />
 
         <TextView
@@ -456,7 +456,7 @@
             android:textColor="#EF4444"
             android:textSize="15sp"
             android:gravity="center_vertical"
-            android:paddingHorizontal="12dp"
+            android:paddingHorizontal="14dp"
             android:background="@drawable/btn_danger_bg" />
 
     </LinearLayout>

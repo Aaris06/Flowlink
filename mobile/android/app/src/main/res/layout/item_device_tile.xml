@@ -5,7 +5,7 @@
     android:orientation="vertical"
     android:background="@drawable/glass_card_bg"
     android:padding="16dp"
-    android:layout_marginBottom="10dp">
+    android:layout_marginBottom="12dp">
 
     <!-- Top Row: Name + Status -->
     <LinearLayout
@@ -43,7 +43,7 @@
                 android:layout_height="wrap_content"
                 android:text="Device Type"
                 android:textSize="12sp"
-                android:textColor="#B8B5D4" />
+                android:textColor="@color/text_hint" />
         </LinearLayout>
 
         <TextView
@@ -52,7 +52,7 @@
             android:layout_height="wrap_content"
             android:text="Online"
             android:textSize="12sp"
-            android:textColor="#22C55E"
+            android:textColor="#10B981"
             android:textStyle="bold" />
     </LinearLayout>
 
@@ -63,7 +63,7 @@
         android:layout_height="wrap_content"
         android:text="No permissions"
         android:textSize="11sp"
-        android:textColor="#6B6890"
+        android:textColor="@color/text_hint"
         android:layout_marginBottom="10dp" />
 
     <!-- Transfer Progress -->
@@ -72,8 +72,8 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="vertical"
-        android:background="@drawable/glass_card_bg_dark"
-        android:padding="10dp"
+        android:background="@drawable/input_glass_bg"
+        android:padding="12dp"
         android:layout_marginBottom="10dp"
         android:visibility="gone">
 
@@ -100,7 +100,7 @@
                 android:layout_height="wrap_content"
                 android:text="0%"
                 android:textSize="13sp"
-                android:textColor="#A78BFA"
+                android:textColor="@color/brand_purple_light"
                 android:textStyle="bold" />
         </LinearLayout>
 
@@ -120,7 +120,7 @@
             android:layout_marginTop="6dp"
             android:text="0 B / 0 B · ETA 00:00"
             android:textSize="10sp"
-            android:textColor="#6B6890" />
+            android:textColor="@color/text_hint" />
     </LinearLayout>
 
     <!-- Action Buttons -->
@@ -128,53 +128,53 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="horizontal"
-        android:gravity="end">
+        android:gravity="center_vertical">
 
         <!-- Add Friend -->
         <ImageButton
             android:id="@+id/btn_add_friend"
-            android:layout_width="36dp"
-            android:layout_height="36dp"
-            android:background="@drawable/glass_card_bg_dark"
+            android:layout_width="38dp"
+            android:layout_height="38dp"
+            android:background="@drawable/input_glass_bg"
             android:src="@android:drawable/ic_menu_add"
-            android:tint="#22C55E"
-            android:padding="6dp"
+            android:tint="#10B981"
+            android:padding="8dp"
             android:contentDescription="Add friend"
             android:layout_marginEnd="6dp" />
 
         <!-- Audio call -->
         <ImageButton
             android:id="@+id/btn_call"
-            android:layout_width="36dp"
-            android:layout_height="36dp"
-            android:background="@drawable/glass_card_bg_dark"
+            android:layout_width="38dp"
+            android:layout_height="38dp"
+            android:background="@drawable/input_glass_bg"
             android:src="@android:drawable/ic_menu_call"
             android:tint="#6366F1"
-            android:padding="6dp"
+            android:padding="8dp"
             android:contentDescription="Audio call"
             android:layout_marginEnd="6dp" />
 
         <!-- Video call -->
         <ImageButton
             android:id="@+id/btn_video_call"
-            android:layout_width="36dp"
-            android:layout_height="36dp"
-            android:background="@drawable/glass_card_bg_dark"
+            android:layout_width="38dp"
+            android:layout_height="38dp"
+            android:background="@drawable/input_glass_bg"
             android:src="@drawable/ic_camera"
-            android:tint="#22C55E"
-            android:padding="6dp"
+            android:tint="#10B981"
+            android:padding="8dp"
             android:contentDescription="Video call"
             android:layout_marginEnd="6dp" />
 
         <Button
             android:id="@+id/btn_browse_files"
             android:layout_width="wrap_content"
-            android:layout_height="36dp"
+            android:layout_height="38dp"
             android:text="Select Files"
             android:textSize="12sp"
             android:paddingHorizontal="14dp"
             android:background="@drawable/button_browse_files"
-            android:textColor="#A78BFA"
+            android:textColor="@color/text_accent"
             android:textAllCaps="false"
             android:layout_marginEnd="8dp" />
 
@@ -185,7 +185,7 @@
             android:layout_weight="1"
             android:text="Tap to send clipboard"
             android:textSize="11sp"
-            android:textColor="#6B6890"
+            android:textColor="@color/text_hint"
             android:gravity="center_vertical" />
     </LinearLayout>
 

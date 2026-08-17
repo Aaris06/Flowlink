@@ -63,7 +63,6 @@ export default function StudyRoomPage({ ctx }: Props) {
     const ws = (window as any).appWebSocket as WebSocket | null;
     wsRef.current = ws;
 
-    // Request file list
     ws?.send(JSON.stringify({ type: 'study_store_list', sessionId: session.id, deviceId, payload: {}, timestamp: Date.now() }));
 
     const handler = (e: MessageEvent) => {
@@ -91,11 +90,17 @@ export default function StudyRoomPage({ ctx }: Props) {
           const { mode, value, state } = msg.payload || {};
           if (state) { applyState(state); break; }
           const now = Date.now();
-          const isRecentLocal = now - localInteractionRef.current < 500; // Ignore remote updates for 500ms after local action
+          const isRecentLocal = now - localInteractionRef.current < 500;
           
-          if (mode === 'open_pdf' && typeof value === 'string') {
-            setSelectedFileId(value);
-            sessionStorage.setItem('studyFileId', value);
+          if (mode === 'open_pdf') {
+            const targetId = typeof value === 'string' ? value : value?.fileId || value?.id;
+            if (!targetId || targetId === 'close') {
+              setSelectedFileId('');
+              sessionStorage.removeItem('studyFileId');
+            } else if (targetId) {
+              setSelectedFileId(targetId);
+              sessionStorage.setItem('studyFileId', targetId);
+            }
           }
           if (mode === 'page' && typeof value === 'number' && !isRecentLocal) {
             setPage(Math.max(1, value));
@@ -131,12 +136,36 @@ export default function StudyRoomPage({ ctx }: Props) {
     return () => URL.revokeObjectURL(url);
   }, [selectedFile?.id]);
 
-  // Render PDF pages
+  // Helper to append a single anchor marker directly to the DOM page wrapper without wiping PDF canvas
+  const renderAnchorToDOM = (anchor: HighlightAnchor) => {
+    const wrapper = pageRefs.current.get(anchor.page);
+    if (!wrapper) return;
+    const existing = wrapper.querySelector(`[data-anchor-id="${anchor.id}"]`);
+    if (existing) return;
+
+    const marker = document.createElement('div');
+    marker.className = 'srp-anchor';
+    marker.dataset.anchorId = anchor.id;
+    marker.style.left = `${anchor.xPercent}%`;
+    marker.style.top = `${anchor.yPercent}%`;
+    marker.style.width = `${anchor.widthPercent}%`;
+    marker.style.height = `${anchor.heightPercent}%`;
+    marker.title = anchor.text;
+    wrapper.appendChild(marker);
+  };
+
+  // Update anchor DOM markers when anchors change
+  useEffect(() => {
+    anchors.forEach(renderAnchorToDOM);
+  }, [anchors]);
+
+  // Render PDF pages (DEPENDS ONLY ON pdfDataUrl AND zoom to prevent rollback on highlight/notes)
   useEffect(() => {
     if (!pdfDataUrl) return;
     const container = scrollRef.current;
     if (!container) return;
     let cancelled = false;
+    const currentScrollBeforeRender = container.scrollTop;
 
     const render = async () => {
       container.innerHTML = '';
@@ -166,65 +195,61 @@ export default function StudyRoomPage({ ctx }: Props) {
         textLayer.style.width = canvas.width + 'px';
         textLayer.style.height = canvas.height + 'px';
 
-        // Click to add anchor
-        canvas.addEventListener('mouseup', (evt) => {
+        // Mouseup & dblclick to add anchor
+        const addAnchor = (evt: MouseEvent) => {
+          localInteractionRef.current = Date.now();
           const sel = window.getSelection()?.toString().trim();
           const rect = canvas.getBoundingClientRect();
           const xPct = Math.max(0, Math.min(100, ((evt.clientX - rect.left) / rect.width) * 100));
           const yPct = Math.max(0, Math.min(100, ((evt.clientY - rect.top) / rect.height) * 100));
-          const anchor: HighlightAnchor = {
+          const newAnchor: HighlightAnchor = {
             id: `a-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-            page: p, xPercent: xPct, yPercent: yPct,
-            widthPercent: 12, heightPercent: 2.5,
-            text: sel || highlight || 'Highlight',
+            page: p,
+            xPercent: xPct,
+            yPercent: yPct,
+            widthPercent: 14,
+            heightPercent: 3,
+            text: sel || highlight || `Page ${p} Note`,
             sourceDevice: deviceId,
           };
-          setAnchors(prev => [...prev, anchor].slice(-200));
-          sendSync('highlight_anchor', anchor);
-        });
+          setAnchors(prev => [...prev, newAnchor].slice(-200));
+          sendSync('highlight_anchor', newAnchor);
+        };
 
-        // Render existing anchors for this page
-        anchors.filter(a => a.page === p).forEach(a => {
-          const marker = document.createElement('div');
-          marker.className = 'srp-anchor';
-          marker.style.left = `${a.xPercent}%`;
-          marker.style.top = `${a.yPercent}%`;
-          marker.style.width = `${a.widthPercent}%`;
-          marker.style.height = `${a.heightPercent}%`;
-          marker.title = a.text;
-          wrapper.appendChild(marker);
-        });
+        canvas.addEventListener('mouseup', addAnchor);
+        canvas.addEventListener('dblclick', addAnchor);
 
         wrapper.appendChild(canvas);
         wrapper.appendChild(textLayer);
         container.appendChild(wrapper);
         pageRefs.current.set(p, wrapper);
       }
+
+      // Restore scroll position after render
+      if (currentScrollBeforeRender > 0) {
+        container.scrollTop = currentScrollBeforeRender;
+      }
     };
 
     void render();
     return () => { cancelled = true; if (container) container.innerHTML = ''; pageRefs.current.clear(); };
-  }, [pdfDataUrl, zoom, anchors, sendSync, highlight, deviceId]);
+  }, [pdfDataUrl, zoom]);
 
-  // CRITICAL FIX #3: Improved scroll sync with debounce to prevent rollback
+  // Scroll sync with debounce
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
     let scrollTimer: number | null = null;
     const onScroll = () => {
       if (suppressScrollRef.current) return;
-      
-      // Don't sync scroll if we just did a local interaction (zoom, highlight, etc.)
       const timeSinceLocal = Date.now() - localInteractionRef.current;
-      if (timeSinceLocal < 800) return; // Ignore scroll events for 800ms after local actions
+      if (timeSinceLocal < 800) return;
       
-      // Debounce scroll sync
       if (scrollTimer) clearTimeout(scrollTimer);
       scrollTimer = window.setTimeout(() => {
         const px = Math.round(el.scrollTop);
         sendSync('scroll_px', px);
         
-        // Detect current page based on scroll position
         let closest = 1, minDist = Infinity;
         pageRefs.current.forEach((node, pg) => {
           const dist = Math.abs(node.offsetTop - el.scrollTop);
@@ -234,7 +259,7 @@ export default function StudyRoomPage({ ctx }: Props) {
           setPage(closest); 
           sendSync('page', closest); 
         }
-      }, 500); // 500ms debounce
+      }, 400);
     };
     el.addEventListener('scroll', onScroll, { passive: true });
     return () => {
@@ -243,12 +268,12 @@ export default function StudyRoomPage({ ctx }: Props) {
     };
   }, [page, sendSync]);
 
-  // Text selection sync - mark as local interaction
+  // Text selection sync
   useEffect(() => {
     const onSelectionChange = () => {
       const sel = window.getSelection()?.toString().trim();
       if (sel && sel !== highlight) {
-        localInteractionRef.current = Date.now(); // Mark as local interaction
+        localInteractionRef.current = Date.now();
         setHighlight(sel);
         sendSync('highlight', sel);
       }
@@ -268,20 +293,32 @@ export default function StudyRoomPage({ ctx }: Props) {
     sendSync('page', p);
   };
 
-  // CRITICAL FIX #3: Mark local interaction and prevent remote updates during zoom
   const changeZoom = (z: number) => {
     const clamped = Math.max(0.5, Math.min(3, z));
-    localInteractionRef.current = Date.now(); // Mark as local interaction
+    localInteractionRef.current = Date.now();
     setZoom(clamped);
-    // Delay sync to allow local render to complete first
     setTimeout(() => sendSync('zoom', clamped), 100);
+  };
+
+  const openFileAndSync = (f: StudyStoreFile) => {
+    localInteractionRef.current = Date.now();
+    setSelectedFileId(f.id);
+    sessionStorage.setItem('studyFileId', f.id);
+    sendSync('open_pdf', { fileId: f.id, file: f });
+  };
+
+  const closeFileAndSync = () => {
+    sendSync('open_pdf', 'close');
+    setSelectedFileId('');
+    sessionStorage.removeItem('studyFileId');
+    navigate('/study');
   };
 
   return (
     <div className="study-room-page">
       {/* Toolbar */}
       <div className="srp-toolbar">
-        <button className="srp-back-btn" onClick={() => navigate('/study')}>← Back to Store</button>
+        <button className="srp-back-btn" onClick={closeFileAndSync}>← Back to Store</button>
         <div className="srp-file-name">{selectedFile?.name || 'No file selected'}</div>
         <div className="srp-toolbar-controls">
           <button className="srp-ctrl-btn" onClick={() => goToPage(Math.max(1, page - 1))} disabled={page <= 1}>‹</button>
@@ -314,11 +351,7 @@ export default function StudyRoomPage({ ctx }: Props) {
               <div
                 key={f.id}
                 className={`srp-sidebar-file${f.id === selectedFileId ? ' active' : ''}`}
-                onClick={() => {
-                  setSelectedFileId(f.id);
-                  sessionStorage.setItem('studyFileId', f.id);
-                  sendSync('open_pdf', f.id);
-                }}
+                onClick={() => openFileAndSync(f)}
               >
                 <span className="srp-sf-icon">{f.type === 'application/pdf' ? '📄' : '📎'}</span>
                 <div className="srp-sf-info">
@@ -342,13 +375,17 @@ export default function StudyRoomPage({ ctx }: Props) {
               </>
             )}
 
-            {/* Highlight input */}
+            {/* Shared Notes Input */}
             <div className="srp-sidebar-title" style={{ marginTop: '1rem' }}>Shared Note</div>
             <textarea
               className="srp-note-input"
               value={highlight}
               placeholder="Type a shared note or highlight…"
-              onChange={e => { setHighlight(e.target.value); sendSync('highlight', e.target.value); }}
+              onChange={e => {
+                localInteractionRef.current = Date.now();
+                setHighlight(e.target.value);
+                sendSync('highlight', e.target.value);
+              }}
             />
           </div>
         )}
@@ -357,14 +394,14 @@ export default function StudyRoomPage({ ctx }: Props) {
         <div className="srp-viewer">
           {!session && (
             <div className="srp-no-session">
-            <div className="empty-icon empty-icon-lock" />
+              <div className="empty-icon empty-icon-lock" />
               <div>No active session. Go back and create one.</div>
               <button className="btn-primary" onClick={() => navigate('/')}>Go to Overview</button>
             </div>
           )}
           {session && !selectedFile && (
             <div className="srp-no-file">
-            <div className="empty-icon empty-icon-folder" />
+              <div className="empty-icon empty-icon-folder" />
               <div>Select a document from the sidebar to open it here.</div>
               <div className="srp-nf-sub">Opening a file will sync it to all connected participants.</div>
             </div>

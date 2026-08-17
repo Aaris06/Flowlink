@@ -6,9 +6,10 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(0, 0, 0, 0.72);
-  backdrop-filter: blur(6px);
-  animation: callFadeIn 0.2s ease;
+  background: rgba(9, 7, 20, 0.76);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  animation: callFadeIn 0.22s ease;
 }
 
 @keyframes callFadeIn {
@@ -18,45 +19,44 @@
 
 .call-modal {
   position: relative;
-  width: min(380px, 94vw);
-  background: linear-gradient(145deg, #1e1b4b, #312e81);
-  border-radius: 24px;
-  padding: 2rem 1.5rem 1.5rem;
+  width: min(400px, 94vw);
+  background: rgba(23, 19, 53, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: var(--radius);
+  padding: 2.25rem 1.75rem 1.75rem;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 1.25rem;
-  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.6);
+  gap: 1.35rem;
+  box-shadow: 0 32px 80px rgba(0, 0, 0, 0.7), inset 0 1px 1px rgba(255, 255, 255, 0.2);
   overflow: hidden;
+  backdrop-filter: blur(28px);
 }
 
-/* Video call: modal stretches to fill more of the screen */
 .call-modal-video-mode .call-modal {
-  width: min(640px, 96vw);
-  height: min(520px, 90vh);
+  width: min(660px, 96vw);
+  height: min(540px, 90vh);
   padding: 0;
-  border-radius: 20px;
+  border-radius: var(--radius);
 }
 
-/* Remote video - fills the card */
 .call-video-remote {
   position: absolute;
   inset: 0;
   width: 100%;
   height: 100%;
   object-fit: cover;
-  border-radius: 20px;
-  background: #0f0c29;
+  border-radius: var(--radius);
+  background: #090714;
 }
 
-/* ── Avatar / info ── */
 .call-modal-info {
   position: relative;
   z-index: 2;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 0.5rem;
+  gap: 0.6rem;
   pointer-events: none;
   padding: 1.5rem 1rem 0;
 }
@@ -66,50 +66,53 @@
   top: 0;
   left: 0;
   right: 0;
-  padding: 1rem;
-  background: linear-gradient(to bottom, rgba(0,0,0,0.55), transparent);
-  border-radius: 20px 20px 0 0;
+  padding: 1.25rem;
+  background: linear-gradient(to bottom, rgba(9, 7, 20, 0.8), transparent);
+  border-radius: var(--radius) var(--radius) 0 0;
 }
 
 .call-avatar {
-  width: 72px;
-  height: 72px;
+  width: 78px;
+  height: 78px;
   border-radius: 50%;
-  background: linear-gradient(135deg, #6366f1, #8b5cf6);
+  background: linear-gradient(135deg, var(--brand), var(--brand-violet));
   color: #fff;
-  font-size: 2rem;
-  font-weight: 700;
+  font-size: 2.2rem;
+  font-weight: 800;
   display: grid;
   place-items: center;
-  box-shadow: 0 0 0 4px rgba(99, 102, 241, 0.3);
+  box-shadow: 0 0 0 5px rgba(99, 102, 241, 0.35);
   animation: callPulse 1.8s ease-in-out infinite;
 }
 
 @keyframes callPulse {
-  0%, 100% { box-shadow: 0 0 0 4px rgba(99, 102, 241, 0.3); }
-  50%       { box-shadow: 0 0 0 10px rgba(99, 102, 241, 0.1); }
+  0%, 100% { box-shadow: 0 0 0 5px rgba(99, 102, 241, 0.35); }
+  50%       { box-shadow: 0 0 0 14px rgba(99, 102, 241, 0.1); }
 }
 
 .call-username {
-  font-size: 1.2rem;
-  font-weight: 700;
+  font-size: 1.25rem;
+  font-weight: 800;
   color: #fff;
+  letter-spacing: -0.01em;
 }
 
 .call-status {
-  font-size: 0.85rem;
-  color: rgba(255, 255, 255, 0.7);
+  font-size: 0.88rem;
+  color: rgba(255, 255, 255, 0.75);
   display: flex;
   align-items: center;
-  gap: 0.4rem;
+  gap: 0.45rem;
+  font-weight: 600;
 }
 
 .call-status-dot {
-  width: 8px;
-  height: 8px;
+  width: 9px;
+  height: 9px;
   border-radius: 50%;
-  background: #22c55e;
+  background: #10b981;
   display: inline-block;
+  box-shadow: 0 0 8px rgba(16, 185, 129, 0.6);
 }
 
 .call-status-dot.ringing {
@@ -121,15 +124,14 @@
   to   { opacity: 0.2; }
 }
 
-/* ── Controls ── */
 .call-controls {
   position: relative;
   z-index: 3;
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 1.25rem;
-  padding: 0.5rem 1rem 0.75rem;
+  gap: 1.35rem;
+  padding: 0.6rem 1rem 0.85rem;
   width: 100%;
 }
 
@@ -138,73 +140,72 @@
   bottom: 0;
   left: 0;
   right: 0;
-  background: linear-gradient(to top, rgba(0,0,0,0.6), transparent);
-  border-radius: 0 0 20px 20px;
-  padding: 1rem 1.5rem;
+  background: linear-gradient(to top, rgba(9, 7, 20, 0.8), transparent);
+  border-radius: 0 0 var(--radius) var(--radius);
+  padding: 1.25rem 1.5rem;
 }
 
 .call-btn {
-  width: 56px;
-  height: 56px;
+  width: 58px;
+  height: 58px;
   border-radius: 50%;
-  border: none;
+  border: 1px solid rgba(255, 255, 255, 0.2);
   cursor: pointer;
   display: grid;
   place-items: center;
-  font-size: 1.4rem;
-  transition: transform 0.15s, opacity 0.15s;
+  font-size: 1.45rem;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
   background: rgba(255, 255, 255, 0.15);
+  backdrop-filter: blur(12px);
   color: #fff;
 }
 
-.call-btn:hover { transform: scale(1.08); }
-.call-btn:active { transform: scale(0.95); }
+.call-btn:hover { transform: scale(1.1); background: rgba(255, 255, 255, 0.25); }
+.call-btn:active { transform: scale(0.94); }
 
 .call-btn-accept {
-  background: #22c55e;
-  box-shadow: 0 4px 16px rgba(34, 197, 94, 0.45);
+  background: linear-gradient(135deg, #10b981, #059669);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  box-shadow: 0 6px 20px rgba(16, 185, 129, 0.5);
 }
 
 .call-btn-end {
-  background: #ef4444;
-  box-shadow: 0 4px 16px rgba(239, 68, 68, 0.45);
+  background: linear-gradient(135deg, #ef4444, #dc2626);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  box-shadow: 0 6px 20px rgba(239, 68, 68, 0.5);
 }
 
 .call-btn-mute.active,
 .call-btn-camera.active {
-  background: rgba(255, 255, 255, 0.35);
+  background: rgba(255, 255, 255, 0.38);
 }
 
 .call-btn-switch {
-  background: rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.15);
 }
 
-/* Local preview shown even during ringing_out/connecting */
 .call-video-local {
   position: absolute;
-  bottom: 5rem;
-  right: 1rem;
-  width: 100px;
-  height: 140px;
+  bottom: 5.5rem;
+  right: 1.25rem;
+  width: 105px;
+  height: 145px;
   object-fit: cover;
-  display: block;           /* removes inline baseline gap that causes blurriness */
-  border-radius: 12px;
+  display: block;
+  border-radius: var(--radius-sm);
   border: 2px solid rgba(255, 255, 255, 0.5);
   z-index: 20;
-  background: transparent;  /* transparent — black bg shows before stream loads */
-  isolation: isolate;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
 }
 
-/* In non-video-mode, local preview sits above the info area */
 .call-modal:not(.call-modal-video-mode) .call-video-local {
   position: relative;
   bottom: auto;
   right: auto;
-  width: 90px;
-  height: 120px;
+  width: 96px;
+  height: 126px;
   margin: 0 auto;
-  border-radius: 10px;
-  background: transparent;
+  border-radius: var(--radius-sm);
   display: block;
 }
 
@@ -213,41 +214,37 @@
   user-select: none;
 }
 
-/* ── Minimize button ── */
 .call-btn-minimize {
   position: absolute;
-  top: 0.75rem;
-  right: 0.75rem;
+  top: 0.85rem;
+  right: 0.85rem;
   z-index: 10;
-  width: 32px;
-  height: 32px;
+  width: 34px;
+  height: 34px;
   border-radius: 50%;
-  border: none;
+  border: 1px solid rgba(255, 255, 255, 0.2);
   cursor: pointer;
   background: rgba(255, 255, 255, 0.18);
   color: #fff;
-  font-size: 1rem;
+  font-size: 1.05rem;
   display: grid;
   place-items: center;
-  transition: background 0.15s, transform 0.15s;
-  backdrop-filter: blur(4px);
+  transition: all 0.2s ease;
+  backdrop-filter: blur(8px);
 }
-.call-btn-minimize:hover { background: rgba(255,255,255,0.3); transform: scale(1.08); }
-.call-btn-minimize:active { transform: scale(0.93); }
+.call-btn-minimize:hover { background: rgba(255, 255, 255, 0.35); transform: scale(1.1); }
+.call-btn-minimize:active { transform: scale(0.92); }
 
-/* ── Minimized floating bubble ── */
 .call-bubble {
   position: fixed;
   bottom: 90px;
   right: 20px;
-  /* Slightly larger than the circle so the ✕ button fits without clipping */
   width: 100px;
   height: 100px;
   cursor: grab;
   z-index: 99999;
-  animation: bubbleIn 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  animation: bubbleIn 0.3s cubic-bezier(0.16, 1, 0.3, 1);
   user-select: none;
-  /* NO overflow:hidden here — that would clip the end button */
 }
 .call-bubble:active { cursor: grabbing; }
 
@@ -256,7 +253,6 @@
   to   { transform: scale(1); opacity: 1; }
 }
 
-/* The actual visible circle — this is what clips content */
 .call-bubble-circle {
   position: absolute;
   top: 6px;
@@ -265,24 +261,24 @@
   height: 88px;
   border-radius: 50%;
   background: linear-gradient(145deg, #1e1b4b, #312e81);
-  box-shadow: 0 8px 32px rgba(0,0,0,0.55), 0 0 0 2px rgba(99,102,241,0.4);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6), 0 0 0 2px rgba(99, 102, 241, 0.45);
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  overflow: hidden; /* clips video/avatar to circle shape */
+  overflow: hidden;
 }
 
-/* Pulse ring — on the circle, not the outer div */
 .call-bubble-circle::before {
   content: '';
   position: absolute;
   inset: -5px;
   border-radius: 50%;
-  border: 2px solid rgba(99,102,241,0.5);
+  border: 2px solid rgba(99, 102, 241, 0.6);
   animation: bubblePulse 1.8s ease-in-out infinite;
   pointer-events: none;
 }
+
 @keyframes bubblePulse {
   0%, 100% { transform: scale(1); opacity: 0.6; }
   50%       { transform: scale(1.12); opacity: 0; }
@@ -300,10 +296,10 @@
   width: 44px;
   height: 44px;
   border-radius: 50%;
-  background: linear-gradient(135deg, #6366f1, #8b5cf6);
+  background: linear-gradient(135deg, var(--brand), var(--brand-violet));
   color: #fff;
-  font-size: 1.25rem;
-  font-weight: 700;
+  font-size: 1.3rem;
+  font-weight: 800;
   display: grid;
   place-items: center;
   flex-shrink: 0;
@@ -318,7 +314,7 @@
   flex-direction: column;
   align-items: center;
   z-index: 2;
-  background: linear-gradient(to top, rgba(0,0,0,0.6), transparent);
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.7), transparent);
   padding-top: 10px;
   padding-bottom: 4px;
 }
@@ -326,7 +322,7 @@
 .call-bubble-name {
   font-size: 8px;
   color: #fff;
-  font-weight: 600;
+  font-weight: 700;
   max-width: 72px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -336,12 +332,10 @@
 
 .call-bubble-timer {
   font-size: 9px;
-  color: rgba(255,255,255,0.85);
-  font-weight: 600;
-  letter-spacing: 0.3px;
+  color: rgba(255, 255, 255, 0.9);
+  font-weight: 700;
 }
 
-/* End call button — top-right of the OUTER div, fully visible */
 .call-bubble-end {
   position: absolute;
   top: 0;
@@ -353,13 +347,13 @@
   background: #ef4444;
   color: #fff;
   font-size: 11px;
-  font-weight: 700;
+  font-weight: 800;
   cursor: pointer;
   z-index: 10;
   display: grid;
   place-items: center;
-  box-shadow: 0 2px 8px rgba(239,68,68,0.6);
-  transition: transform 0.15s, background 0.15s;
+  box-shadow: 0 2px 8px rgba(239, 68, 68, 0.6);
+  transition: transform 0.15s ease;
   line-height: 1;
 }
 .call-bubble-end:hover { background: #dc2626; transform: scale(1.15); }

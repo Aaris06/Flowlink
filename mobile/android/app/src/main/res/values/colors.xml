@@ -1,59 +1,68 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- FlowLink Brand Colors -->
-    <color name="brand_purple">#6C63FF</color>
-    <color name="brand_purple_dark">#4A42CC</color>
-    <color name="brand_purple_light">#8B85FF</color>
-    <color name="brand_indigo">#4F46E5</color>
-    <color name="brand_violet">#7C3AED</color>
+    <!-- FlowLink Cosmic Brand Colors (Reflecting Reference Image) -->
+    <color name="brand_purple">#8B5CF6</color>
+    <color name="brand_purple_dark">#6D28D9</color>
+    <color name="brand_purple_light">#C4B5FD</color>
+    <color name="brand_indigo">#4338CA</color>
+    <color name="brand_violet">#9333EA</color>
+    <color name="brand_glow">#A855F7</color>
 
-    <!-- Background Gradient Colors -->
-    <color name="bg_dark">#0D0B1E</color>
-    <color name="bg_mid">#1A1535</color>
-    <color name="bg_surface">#231E45</color>
+    <!-- Deep Cosmic Gradient Colors -->
+    <color name="bg_dark">#0A0618</color>
+    <color name="bg_mid">#1C0D42</color>
+    <color name="bg_surface">#2D135A</color>
 
-    <!-- Glass Card Colors -->
-    <color name="glass_bg">#26FFFFFF</color>
-    <color name="glass_border">#40FFFFFF</color>
-    <color name="glass_bg_dark">#1AFFFFFF</color>
+    <!-- Liquid Glass Card Colors & Reflective Highlights -->
+    <color name="glass_bg">#22FFFFFF</color>
+    <color name="glass_card_fill">#25184D</color>
+    <color name="glass_border">#48FFFFFF</color>
+    <color name="glass_border_light">#70FFFFFF</color>
+    <color name="glass_border_subtle">#20FFFFFF</color>
+    <color name="glass_bg_dark">#1E123B</color>
+    <color name="glass_glow">#35A855F7</color>
 
     <!-- Text Colors -->
     <color name="text_primary">#FFFFFF</color>
-    <color name="text_secondary">#B8B5D4</color>
-    <color name="text_hint">#6B6890</color>
-    <color name="text_accent">#A78BFA</color>
+    <color name="text_secondary">#CBD5E1</color>
+    <color name="text_hint">#94A3B8</color>
+    <color name="text_accent">#C4B5FD</color>
 
     <!-- Status Colors -->
     <color name="online_green">#22C55E</color>
-    <color name="offline_gray">#6B7280</color>
+    <color name="offline_gray">#64748B</color>
     <color name="error">#EF4444</color>
     <color name="warning">#F59E0B</color>
-    <color name="success">#10B981</color>
+    <color name="success">#22C55E</color>
     <color name="info">#3B82F6</color>
 
+    <!-- Call Buttons -->
+    <color name="call_accept_green">#22C55E</color>
+    <color name="call_decline_red">#EF4444</color>
+
     <!-- Bottom Nav -->
-    <color name="nav_bg">#1E1A3E</color>
-    <color name="nav_selected">#6C63FF</color>
-    <color name="nav_unselected">#6B6890</color>
+    <color name="nav_bg">#140B30</color>
+    <color name="nav_selected">#A855F7</color>
+    <color name="nav_unselected">#64748B</color>
 
     <!-- Input -->
-    <color name="input_bg">#1AFFFFFF</color>
-    <color name="input_border">#33FFFFFF</color>
+    <color name="input_bg">#25FFFFFF</color>
+    <color name="input_border">#40FFFFFF</color>
 
     <!-- Legacy aliases (keep for existing code) -->
-    <color name="primary">#6C63FF</color>
-    <color name="primary_dark">#4A42CC</color>
+    <color name="primary">#8B5CF6</color>
+    <color name="primary_dark">#6D28D9</color>
     <color name="white">#FFFFFF</color>
     <color name="black">#000000</color>
-    <color name="border">#33FFFFFF</color>
-    <color name="input_background">#1AFFFFFF</color>
-    <color name="info_background">#1AFFFFFF</color>
+    <color name="border">#40FFFFFF</color>
+    <color name="input_background">#25FFFFFF</color>
+    <color name="info_background">#25FFFFFF</color>
     <color name="purple_200">#FFBB86FC</color>
     <color name="purple_500">#FF6200EE</color>
     <color name="purple_700">#FF3700B3</color>
     <color name="teal_200">#FF03DAC5</color>
     <color name="teal_700">#FF018786</color>
-    <color name="colorPrimary">#6C63FF</color>
-    <color name="colorPrimaryDark">#4A42CC</color>
-    <color name="colorAccent">#A78BFA</color>
+    <color name="colorPrimary">#8B5CF6</color>
+    <color name="colorPrimaryDark">#6D28D9</color>
+    <color name="colorAccent">#C4B5FD</color>
 </resources>

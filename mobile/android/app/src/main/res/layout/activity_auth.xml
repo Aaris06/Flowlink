@@ -2,7 +2,7 @@
 <ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="#0F0C29"
+    android:background="@drawable/bg_gradient"
     android:fillViewport="true">
 
     <LinearLayout
@@ -47,12 +47,12 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:text="Cross-Device Continuity"
-                    android:textColor="#6B6890"
+                    android:textColor="@color/text_hint"
                     android:textSize="12sp" />
             </LinearLayout>
         </LinearLayout>
 
-        <!-- Card -->
+        <!-- Glass Card Container -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -65,7 +65,8 @@
                 android:layout_width="match_parent"
                 android:layout_height="48dp"
                 android:orientation="horizontal"
-                android:background="@drawable/glass_card_bg_dark"
+                android:background="@drawable/input_glass_bg"
+                android:padding="3dp"
                 android:layout_marginBottom="24dp">
 
                 <TextView
@@ -78,7 +79,7 @@
                     android:textColor="#FFFFFF"
                     android:textSize="14sp"
                     android:textStyle="bold"
-                    android:background="@drawable/share_fab_bg" />
+                    android:background="@drawable/button_primary" />
 
                 <TextView
                     android:id="@+id/tab_signup"
@@ -87,7 +88,7 @@
                     android:layout_weight="1"
                     android:text="Sign Up"
                     android:gravity="center"
-                    android:textColor="#6B6890"
+                    android:textColor="@color/text_hint"
                     android:textSize="14sp"
                     android:textStyle="bold" />
             </LinearLayout>
@@ -97,7 +98,7 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:text="USERNAME"
-                android:textColor="#6B6890"
+                android:textColor="@color/text_hint"
                 android:textSize="11sp"
                 android:textStyle="bold"
                 android:letterSpacing="0.1"
@@ -107,11 +108,11 @@
                 android:id="@+id/et_auth_username"
                 android:layout_width="match_parent"
                 android:layout_height="52dp"
-                android:background="@drawable/glass_card_bg_dark"
+                android:background="@drawable/input_glass_bg"
                 android:textColor="#FFFFFF"
-                android:textColorHint="#44FFFFFF"
+                android:textColorHint="#55FFFFFF"
                 android:hint="e.g. Aaris (letters, numbers only)"
-                android:paddingHorizontal="14dp"
+                android:paddingHorizontal="16dp"
                 android:inputType="text"
                 android:layout_marginBottom="16dp" />
 
@@ -121,7 +122,7 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:text="EMAIL"
-                android:textColor="#6B6890"
+                android:textColor="@color/text_hint"
                 android:textSize="11sp"
                 android:textStyle="bold"
                 android:letterSpacing="0.1"
@@ -132,11 +133,11 @@
                 android:id="@+id/et_auth_email"
                 android:layout_width="match_parent"
                 android:layout_height="52dp"
-                android:background="@drawable/glass_card_bg_dark"
+                android:background="@drawable/input_glass_bg"
                 android:textColor="#FFFFFF"
-                android:textColorHint="#44FFFFFF"
+                android:textColorHint="#55FFFFFF"
                 android:hint="your@email.com"
-                android:paddingHorizontal="14dp"
+                android:paddingHorizontal="16dp"
                 android:inputType="textEmailAddress"
                 android:layout_marginBottom="16dp"
                 android:visibility="gone" />
@@ -146,7 +147,7 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:text="PASSWORD"
-                android:textColor="#6B6890"
+                android:textColor="@color/text_hint"
                 android:textSize="11sp"
                 android:textStyle="bold"
                 android:letterSpacing="0.1"
@@ -156,11 +157,11 @@
                 android:id="@+id/et_auth_password"
                 android:layout_width="match_parent"
                 android:layout_height="52dp"
-                android:background="@drawable/glass_card_bg_dark"
+                android:background="@drawable/input_glass_bg"
                 android:textColor="#FFFFFF"
-                android:textColorHint="#44FFFFFF"
+                android:textColorHint="#55FFFFFF"
                 android:hint="Enter your password"
-                android:paddingHorizontal="14dp"
+                android:paddingHorizontal="16dp"
                 android:inputType="textPassword"
                 android:layout_marginBottom="16dp" />
 
@@ -170,7 +171,7 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:text="CONFIRM PASSWORD"
-                android:textColor="#6B6890"
+                android:textColor="@color/text_hint"
                 android:textSize="11sp"
                 android:textStyle="bold"
                 android:letterSpacing="0.1"
@@ -181,11 +182,11 @@
                 android:id="@+id/et_auth_confirm"
                 android:layout_width="match_parent"
                 android:layout_height="52dp"
-                android:background="@drawable/glass_card_bg_dark"
+                android:background="@drawable/input_glass_bg"
                 android:textColor="#FFFFFF"
-                android:textColorHint="#44FFFFFF"
+                android:textColorHint="#55FFFFFF"
                 android:hint="Confirm your password"
-                android:paddingHorizontal="14dp"
+                android:paddingHorizontal="16dp"
                 android:inputType="textPassword"
                 android:layout_marginBottom="16dp"
                 android:visibility="gone" />
@@ -197,8 +198,8 @@
                 android:layout_height="wrap_content"
                 android:textColor="#FCA5A5"
                 android:textSize="13sp"
-                android:background="@drawable/glass_card_bg_dark"
-                android:padding="10dp"
+                android:background="@drawable/input_glass_bg"
+                android:padding="12dp"
                 android:layout_marginBottom="12dp"
                 android:visibility="gone" />
 
@@ -220,7 +221,7 @@
                 android:textColor="#FFFFFF"
                 android:textSize="15sp"
                 android:textStyle="bold"
-                android:background="@drawable/share_fab_bg"
+                android:background="@drawable/button_primary"
                 android:layout_marginTop="4dp" />
 
             <!-- Switch mode -->
@@ -229,7 +230,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:text="New to FlowLink? Sign up"
-                android:textColor="#A78BFA"
+                android:textColor="@color/text_accent"
                 android:textSize="13sp"
                 android:gravity="center"
                 android:paddingTop="16dp"

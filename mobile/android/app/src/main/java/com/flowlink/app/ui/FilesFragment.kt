@@ -84,7 +84,8 @@ class FilesFragment : Fragment() {
             files = mutableListOf(),
             isHost = isHost,
             onOpen = { file ->
-                if (isHost && syncEnabled) mainActivity.webSocketManager.sendStudySync("open_pdf", file.id)
+                // Broadcast open_pdf to all connected laptops & mobile devices if sync is ON
+                if (syncEnabled) mainActivity.webSocketManager.sendStudySync("open_pdf", file.id)
                 openFileViewer(file, mainActivity)
             },
             onDownload = { file -> downloadFile(file) },
@@ -128,6 +129,7 @@ class FilesFragment : Fragment() {
 
         viewLifecycleOwner.lifecycleScope.launch {
             mainActivity.webSocketManager.studySyncEvents.collect { event ->
+                if (!syncEnabled) return@collect
                 when (event.mode) {
                     "page" -> {
                         val page = when (val v = event.value) {
@@ -139,10 +141,18 @@ class FilesFragment : Fragment() {
                         updateStudyStatus()
                     }
                     "open_pdf" -> {
-                        // Non-host: host opened a file, open it here too
-                        val fileId = event.value?.toString() ?: return@collect
-                        val file = studyFiles.firstOrNull { it.id == fileId } ?: return@collect
-                        openFileViewer(file, mainActivity)
+                        val rawVal = event.value?.toString() ?: ""
+                        if (rawVal.isBlank() || rawVal == "close") {
+                            // Close file if open
+                            val currentFrag = parentFragmentManager.findFragmentById(R.id.fragment_container)
+                            if (currentFrag is FileViewerFragment) {
+                                parentFragmentManager.popBackStack()
+                            }
+                        } else {
+                            val fileId = rawVal
+                            val file = studyFiles.firstOrNull { it.id == fileId } ?: return@collect
+                            openFileViewer(file, mainActivity)
+                        }
                     }
                 }
             }
@@ -239,7 +249,6 @@ class StudyFilesAdapter(
         }
         holder.btnDownload.setOnClickListener { onDownload(file) }
         holder.btnOpen.setOnClickListener { onOpen(file) }
-        // Open on row tap too
         holder.itemView.setOnClickListener { onOpen(file) }
         holder.btnDelete.visibility = if (isHost) View.VISIBLE else View.GONE
         holder.btnDelete.setOnClickListener { onDelete(file) }

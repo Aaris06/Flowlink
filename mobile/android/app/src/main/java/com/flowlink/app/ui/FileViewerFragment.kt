@@ -28,6 +28,7 @@ import com.flowlink.app.service.WebSocketManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import org.json.JSONObject
 import java.io.File
 
 class FileViewerFragment : Fragment() {
@@ -81,13 +82,16 @@ class FileViewerFragment : Fragment() {
         val mainActivity = activity as? MainActivity ?: return
 
         binding.tvFileTitle.text = fileName
-        binding.btnBack.setOnClickListener { parentFragmentManager.popBackStack() }
+        binding.btnBack.setOnClickListener {
+            // Broadcast close event to all connected devices if sync is ON
+            if (syncEnabled) mainActivity.webSocketManager.sendStudySync("open_pdf", "close")
+            parentFragmentManager.popBackStack()
+        }
         binding.btnDownload.setOnClickListener { downloadFile() }
 
         // Sync toggle
         updateSyncToggleUI()
         binding.btnHighlight.setOnClickListener {
-            // Repurpose highlight button as sync toggle
             syncEnabled = !syncEnabled
             updateSyncToggleUI()
             Toast.makeText(requireContext(),
@@ -100,20 +104,20 @@ class FileViewerFragment : Fragment() {
             if (currentPage > 1) {
                 currentPage--
                 renderCurrentPage()
-                if (isHost && syncEnabled) mainActivity.webSocketManager.sendStudySync("page", currentPage)
+                if (syncEnabled) mainActivity.webSocketManager.sendStudySync("page", currentPage)
             }
         }
         binding.btnNextPage.setOnClickListener {
             if (currentPage < totalPages) {
                 currentPage++
                 renderCurrentPage()
-                if (isHost && syncEnabled) mainActivity.webSocketManager.sendStudySync("page", currentPage)
+                if (syncEnabled) mainActivity.webSocketManager.sendStudySync("page", currentPage)
             }
         }
 
-        // Debounced scroll sync — only fire 400ms after user stops scrolling
+        // Debounced scroll sync
         binding.scrollContent.viewTreeObserver.addOnScrollChangedListener {
-            if (!isHost || !syncEnabled || suppressScrollSync) return@addOnScrollChangedListener
+            if (!syncEnabled || suppressScrollSync) return@addOnScrollChangedListener
             scrollSyncTimer?.let { binding.root.removeCallbacks(it) }
             val r = Runnable {
                 mainActivity.webSocketManager.sendStudySync("scroll_px", binding.scrollContent.scrollY)
@@ -122,12 +126,12 @@ class FileViewerFragment : Fragment() {
             binding.root.postDelayed(r, 400)
         }
 
-        // WebView JS bridge for text selection sync
+        // WebView JS bridge
         binding.wvContent.settings.javaScriptEnabled = true
         binding.wvContent.addJavascriptInterface(object : Any() {
             @JavascriptInterface
             fun onTextSelected(text: String) {
-                if (isHost && syncEnabled && text.isNotBlank()) {
+                if (syncEnabled && text.isNotBlank()) {
                     activity?.runOnUiThread {
                         mainActivity.webSocketManager.sendStudySync("highlight", text.take(200))
                     }
@@ -138,7 +142,26 @@ class FileViewerFragment : Fragment() {
         // Observe sync events from other devices
         viewLifecycleOwner.lifecycleScope.launch {
             mainActivity.webSocketManager.studySyncEvents.collect { event ->
+                // STRICT CHECK: IF SYNC IS TURNED OFF ON MOBILE, IGNORE ALL REMOTE EVENTS
+                if (!syncEnabled) return@collect
+
                 when (event.mode) {
+                    "open_pdf" -> {
+                        val valObj = event.value
+                        var newId = ""
+                        if (valObj is String) {
+                            newId = valObj
+                        } else if (valObj is JSONObject) {
+                            newId = valObj.optString("fileId", valObj.optString("id", ""))
+                        }
+                        if (newId.isBlank() || newId == "close") {
+                            // File closed on remote — close viewer
+                            parentFragmentManager.popBackStack()
+                        } else if (newId != fileId) {
+                            fileId = newId
+                            binding.tvFileTitle.text = "Syncing Document…"
+                        }
+                    }
                     "page" -> {
                         val page = when (val v = event.value) {
                             is Number -> v.toInt()
@@ -156,8 +179,7 @@ class FileViewerFragment : Fragment() {
                     }
                     "highlight" -> {
                         val text = event.value?.toString() ?: ""
-                        binding.tvHighlightInfo.text = "📌 \"${text.take(50)}\""
-                        // Highlight in WebView if visible
+                        binding.tvHighlightInfo.text = "📌 Note: \"${text.take(50)}\""
                         if (binding.wvContent.visibility == View.VISIBLE) {
                             highlightTextInWebView(text)
                         }
@@ -166,17 +188,20 @@ class FileViewerFragment : Fragment() {
             }
         }
 
-        // Notify others this file is open (host only)
-        if (isHost && syncEnabled) mainActivity.webSocketManager.sendStudySync("open_pdf", fileId)
+        // Notify others this file is open if sync is ON
+        if (syncEnabled) mainActivity.webSocketManager.sendStudySync("open_pdf", fileId)
 
         viewLifecycleOwner.lifecycleScope.launch { renderContent() }
     }
 
     private fun updateSyncToggleUI() {
         val color = if (syncEnabled) "#22C55E" else "#6B6890"
+        binding.btnHighlight.text = if (syncEnabled) "Sync ON" else "Sync OFF"
         binding.btnHighlight.setBackgroundColor(android.graphics.Color.parseColor(
             if (syncEnabled) "#1A22C55E" else "#1A6B6890"
         ))
+        binding.tvSyncBadge.text = if (syncEnabled) "● Synced" else "○ Sync OFF"
+        binding.tvSyncBadge.setTextColor(android.graphics.Color.parseColor(color))
         binding.tvHighlightInfo.text = if (syncEnabled) "● Syncing with session" else "○ Sync OFF"
         binding.tvHighlightInfo.setTextColor(android.graphics.Color.parseColor(color))
     }
