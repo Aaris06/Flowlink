@@ -47,6 +47,7 @@ class FileViewerFragment : Fragment() {
     private var pdfFile: File? = null
     private var scrollSyncTimer: Runnable? = null
     private var suppressScrollSync = false
+    private var scrollChangedListener: android.view.ViewTreeObserver.OnScrollChangedListener? = null
 
     companion object {
         fun newInstance(file: WebSocketManager.StudyFile, isHost: Boolean): FileViewerFragment {
@@ -116,15 +117,17 @@ class FileViewerFragment : Fragment() {
         }
 
         // Debounced scroll sync
-        binding.scrollContent.viewTreeObserver.addOnScrollChangedListener {
-            if (!syncEnabled || suppressScrollSync) return@addOnScrollChangedListener
-            scrollSyncTimer?.let { binding.root.removeCallbacks(it) }
+        scrollChangedListener = android.view.ViewTreeObserver.OnScrollChangedListener {
+            val b = _binding ?: return@OnScrollChangedListener
+            if (!syncEnabled || suppressScrollSync) return@OnScrollChangedListener
+            scrollSyncTimer?.let { b.root.removeCallbacks(it) }
             val r = Runnable {
-                mainActivity.webSocketManager.sendStudySync("scroll_px", binding.scrollContent.scrollY)
+                _binding?.let { bd -> mainActivity.webSocketManager.sendStudySync("scroll_px", bd.scrollContent.scrollY) }
             }
             scrollSyncTimer = r
-            binding.root.postDelayed(r, 400)
+            b.root.postDelayed(r, 400)
         }
+        binding.scrollContent.viewTreeObserver.addOnScrollChangedListener(scrollChangedListener)
 
         // WebView JS bridge
         binding.wvContent.settings.javaScriptEnabled = true
@@ -335,6 +338,12 @@ class FileViewerFragment : Fragment() {
     }
 
     override fun onDestroyView() {
+        scrollChangedListener?.let { listener ->
+            try { _binding?.scrollContent?.viewTreeObserver?.removeOnScrollChangedListener(listener) } catch (_: Exception) {}
+        }
+        scrollSyncTimer?.let { runnable ->
+            try { _binding?.root?.removeCallbacks(runnable) } catch (_: Exception) {}
+        }
         pdfRenderer?.close()
         pdfFile?.delete()
         super.onDestroyView()

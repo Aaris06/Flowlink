@@ -28,4 +28,18 @@ Server runs on `ws://localhost:8080` by default.
 ## Environment Variables
 
 - `PORT`: WebSocket server port (default: 8080)
+- `DATABASE_URL`: Postgres/Supabase connection string
+- `SUPABASE_KEEPALIVE_TOKEN`: optional shared secret guarding `GET /health/supabase`.
+  When set, the endpoint requires `Authorization: Bearer <token>`,
+  an `x-keepalive-token` header, or a `?token=<token>` query param.
+  When unset, the endpoint stays public (read-only single-row query).
+
+## Health endpoints
+
+- `GET /health` (or `/ping`): service status, no DB touch — used by the
+  Railway `healthcheckPath`. Keep public and fast.
+- `GET /db-ping`: raw `SELECT 1` connectivity check.
+- `GET /health/supabase`: Supabase keep-alive — runs
+  `SELECT id FROM users LIMIT 1` (one indexed row) to generate real database
+  activity. Point an UptimeRobot HTTP(s) monitor at it every 5 minutes.
 

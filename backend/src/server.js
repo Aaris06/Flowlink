@@ -1,6 +1,7 @@
 import { WebSocketServer } from 'ws';
 import { v4 as uuidv4 } from 'uuid';
 import { createServer } from 'http';
+import crypto from 'crypto';
 import { config } from 'dotenv';
 config();
 import pool, { initDb } from './db.js';
@@ -84,6 +85,13 @@ const feedbackStore = [];
 // In-memory announcement store
 const announcementStore = [];
 
+// ── Supabase keep-alive endpoint guard (module scope) ─────────────────────
+// Sliding-window timestamps of recent hits; caps abuse on the keep-alive
+// endpoint only. Does not affect any other route.
+const supabaseHealthHits = [];
+const SUPABASE_HEALTH_WINDOW_MS = 60 * 1000;
+const SUPABASE_HEALTH_MAX_PER_WINDOW = 30;
+
 // Cleanup old clipboard dedupe entries periodically
 setInterval(() => {
   const now = Date.now();
@@ -104,6 +112,8 @@ const server = createServer(async (req, res) => {
   if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
 
   // Strip query string from URL for clean route matching
+  // (keep the raw URL: /health/supabase accepts an optional ?token= param)
+  const rawUrl = req.url || '/';
   req.url = req.url?.split('?')[0] || '/';
 
   // Auth routes (no token required)
@@ -287,6 +297,67 @@ const server = createServer(async (req, res) => {
     } catch (err) {
       res.writeHead(503, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ status: 'error', db: 'disconnected', error: err.message }));
+    }
+
+  } else if (req.url === '/health/supabase') {
+    // Lightweight Supabase keep-alive: one indexed single-row read against
+    // the existing `users` table. Produces real database activity so an idle
+    // Supabase project stays warm, without touching app functionality.
+    if (req.method !== 'GET') {
+      res.writeHead(405, { 'Content-Type': 'application/json', 'Allow': 'GET' });
+      res.end(JSON.stringify({ error: 'Method not allowed, use GET' }));
+      return;
+    }
+
+    // Optional shared-secret auth: enforced only when the env var is set,
+    // so existing deployments keep working until it is configured.
+    // Accepts: `Authorization: Bearer <token>`, `x-keepalive-token` header,
+    // or `?token=<token>` query param (UptimeRobot free tier compatible).
+    const expectedToken = process.env.SUPABASE_KEEPALIVE_TOKEN || '';
+    if (expectedToken) {
+      const authHeader = req.headers['authorization'] || '';
+      const bearer = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : '';
+      const rawHeaderToken = req.headers['x-keepalive-token'] || '';
+      const headerToken = Array.isArray(rawHeaderToken) ? rawHeaderToken[0] : rawHeaderToken;
+      let queryToken = '';
+      try {
+        const qs = (rawUrl.split('?')[1] || '');
+        const m = qs.match(/(?:^|&)token=([^&]*)/);
+        queryToken = m ? decodeURIComponent(m[1]) : '';
+      } catch (_) { queryToken = ''; }
+      const provided = bearer || headerToken || queryToken;
+      let authorized = false;
+      try {
+        const a = Buffer.from(provided);
+        const b = Buffer.from(expectedToken);
+        authorized = a.length === b.length && crypto.timingSafeEqual(a, b);
+      } catch (_) { authorized = false; }
+      if (!authorized) {
+        res.writeHead(401, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Unauthorized' }));
+        return;
+      }
+    }
+
+    // Minimal abuse protection for this endpoint only (30 req/min max).
+    const nowTs = Date.now();
+    while (supabaseHealthHits.length && nowTs - supabaseHealthHits[0] > SUPABASE_HEALTH_WINDOW_MS) supabaseHealthHits.shift();
+    if (supabaseHealthHits.length >= SUPABASE_HEALTH_MAX_PER_WINDOW) {
+      res.writeHead(429, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ status: 'error', error: 'Rate limited, try again shortly' }));
+      return;
+    }
+    supabaseHealthHits.push(nowTs);
+
+    try {
+      const start = Date.now();
+      await pool.query('SELECT id FROM users LIMIT 1');
+      const ms = Date.now() - start;
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ status: 'ok', supabase: 'connected', latencyMs: ms, timestamp: new Date().toISOString() }));
+    } catch (err) {
+      res.writeHead(503, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ status: 'error', supabase: 'disconnected', error: err.message }));
     }
 
   } else if (req.url === '/debug') {
