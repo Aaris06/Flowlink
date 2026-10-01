@@ -303,11 +303,20 @@ const server = createServer(async (req, res) => {
     // Lightweight Supabase keep-alive: one indexed single-row read against
     // the existing `users` table. Produces real database activity so an idle
     // Supabase project stays warm, without touching app functionality.
-    if (req.method !== 'GET') {
-      res.writeHead(405, { 'Content-Type': 'application/json', 'Allow': 'GET' });
-      res.end(JSON.stringify({ error: 'Method not allowed, use GET' }));
+    // Accepts GET (JSON body) and HEAD (status + headers only, no body —
+    // UptimeRobot's free plan monitors via HEAD). The keep-alive query runs
+    // for both methods.
+    const isHead = req.method === 'HEAD';
+    if (req.method !== 'GET' && !isHead) {
+      res.writeHead(405, { 'Content-Type': 'application/json', 'Allow': 'GET, HEAD' });
+      res.end(JSON.stringify({ error: 'Method not allowed, use GET or HEAD' }));
       return;
     }
+    // HEAD responses carry status + headers only (no body), per HTTP spec.
+    const sendKeepalive = (status, obj) => {
+      res.writeHead(status, { 'Content-Type': 'application/json' });
+      res.end(isHead ? undefined : JSON.stringify(obj));
+    };
 
     // Optional shared-secret auth: enforced only when the env var is set,
     // so existing deployments keep working until it is configured.
@@ -333,8 +342,7 @@ const server = createServer(async (req, res) => {
         authorized = a.length === b.length && crypto.timingSafeEqual(a, b);
       } catch (_) { authorized = false; }
       if (!authorized) {
-        res.writeHead(401, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: 'Unauthorized' }));
+        sendKeepalive(401, { error: 'Unauthorized' });
         return;
       }
     }
@@ -343,8 +351,7 @@ const server = createServer(async (req, res) => {
     const nowTs = Date.now();
     while (supabaseHealthHits.length && nowTs - supabaseHealthHits[0] > SUPABASE_HEALTH_WINDOW_MS) supabaseHealthHits.shift();
     if (supabaseHealthHits.length >= SUPABASE_HEALTH_MAX_PER_WINDOW) {
-      res.writeHead(429, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ status: 'error', error: 'Rate limited, try again shortly' }));
+      sendKeepalive(429, { status: 'error', error: 'Rate limited, try again shortly' });
       return;
     }
     supabaseHealthHits.push(nowTs);
@@ -353,11 +360,9 @@ const server = createServer(async (req, res) => {
       const start = Date.now();
       await pool.query('SELECT id FROM users LIMIT 1');
       const ms = Date.now() - start;
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ status: 'ok', supabase: 'connected', latencyMs: ms, timestamp: new Date().toISOString() }));
+      sendKeepalive(200, { status: 'ok', supabase: 'connected', latencyMs: ms, timestamp: new Date().toISOString() });
     } catch (err) {
-      res.writeHead(503, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ status: 'error', supabase: 'disconnected', error: err.message }));
+      sendKeepalive(503, { status: 'error', supabase: 'disconnected', error: err.message });
     }
 
   } else if (req.url === '/debug') {

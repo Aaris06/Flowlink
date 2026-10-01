@@ -39,7 +39,9 @@ Server runs on `ws://localhost:8080` by default.
 - `GET /health` (or `/ping`): service status, no DB touch — used by the
   Railway `healthcheckPath`. Keep public and fast.
 - `GET /db-ping`: raw `SELECT 1` connectivity check.
-- `GET /health/supabase`: Supabase keep-alive — runs
+- `GET` or `HEAD /health/supabase`: Supabase keep-alive — runs
   `SELECT id FROM users LIMIT 1` (one indexed row) to generate real database
-  activity. Point an UptimeRobot HTTP(s) monitor at it every 5 minutes.
+  activity. Point an UptimeRobot HTTP(s) monitor at it every 5 minutes
+  (UptimeRobot free plan uses HEAD: status + headers only, no body —
+  the keep-alive query still runs, and up/down is decided by status code).
 
